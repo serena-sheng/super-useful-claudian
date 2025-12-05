@@ -1,15 +1,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { spawn } from 'child_process';
+import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
 import type ClaudeAgentPlugin from './main';
 import { StreamChunk } from './types';
 
 export class ClaudeAgentService {
   private plugin: ClaudeAgentPlugin;
   private abortController: AbortController | null = null;
+  private sessionId: string | null = null;
   private resolvedClaudePath: string | null = null;
-  private hasActiveSession = false;
 
   constructor(plugin: ClaudeAgentPlugin) {
     this.plugin = plugin;
@@ -19,21 +19,11 @@ export class ClaudeAgentService {
    * Find the claude CLI binary by checking common installation locations
    */
   private findClaudeCLI(): string | null {
-    const configuredPath = this.plugin.settings.claudePath;
-
-    // If user configured a full path, use it
-    if (configuredPath && configuredPath.includes('/')) {
-      if (fs.existsSync(configuredPath)) {
-        return configuredPath;
-      }
-      return null;
-    }
-
     // Common installation locations
     const homeDir = os.homedir();
     const commonPaths = [
-      path.join(homeDir, '.local', 'bin', 'claude'),
       path.join(homeDir, '.claude', 'local', 'claude'),
+      path.join(homeDir, '.local', 'bin', 'claude'),
       '/usr/local/bin/claude',
       '/opt/homebrew/bin/claude',
       path.join(homeDir, 'bin', 'claude'),
@@ -64,9 +54,8 @@ export class ClaudeAgentService {
       this.resolvedClaudePath = this.findClaudeCLI();
     }
 
-    const cliPath = this.resolvedClaudePath;
-    if (!cliPath) {
-      yield { type: 'error', content: 'Claude CLI not found. Please install Claude Code CLI or set the full path in settings.' };
+    if (!this.resolvedClaudePath) {
+      yield { type: 'error', content: 'Claude CLI not found. Please install Claude Code CLI.' };
       return;
     }
 
@@ -74,7 +63,7 @@ export class ClaudeAgentService {
     this.abortController = new AbortController();
 
     try {
-      yield* this.queryViaCLI(prompt, vaultPath, cliPath);
+      yield* this.queryViaSDK(prompt, vaultPath);
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Unknown error';
       yield { type: 'error', content: msg };
@@ -83,172 +72,66 @@ export class ClaudeAgentService {
     }
   }
 
-  private async *queryViaCLI(prompt: string, cwd: string, cliPath: string): AsyncGenerator<StreamChunk> {
-    const args = [
-      '--output-format', 'stream-json',
-      '--verbose',  // required for stream-json with -p
-      '--dangerously-skip-permissions',
-      '--model', 'claude-haiku-4-5',
-    ];
+  private async *queryViaSDK(prompt: string, cwd: string): AsyncGenerator<StreamChunk> {
+    const options: Options = {
+      cwd,
+      permissionMode: 'bypassPermissions',
+      allowDangerouslySkipPermissions: true,
+      model: 'claude-haiku-4-5',
+      allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'LS'],
+      abortController: this.abortController ?? undefined,
+      pathToClaudeCodeExecutable: this.resolvedClaudePath!,
+    };
 
-    // Use --continue for follow-up messages to maintain conversation history
-    if (this.hasActiveSession) {
-      args.push('--continue');
+    // Resume previous session if we have a session ID
+    if (this.sessionId) {
+      options.resume = this.sessionId;
     }
 
-    args.push('-p', prompt);
+    try {
+      const response = query({ prompt, options });
 
-    const proc = spawn(cliPath, args, {
-      cwd,
-      env: {
-        ...process.env,
-        // Ensure proper terminal behavior
-        TERM: 'dumb',
-        NO_COLOR: '1',
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+      for await (const message of response) {
+        // Check for cancellation
+        if (this.abortController?.signal.aborted) {
+          await response.interrupt();
+          break;
+        }
 
-    // Store reference for cancellation
-    const abortController = this.abortController;
-
-    // Create a queue to collect chunks from the stream
-    const queue: Array<StreamChunk | { type: 'end' } | { type: 'proc_error'; error: Error }> = [];
-    let resolveNext: (() => void) | null = null;
-    let buffer = '';
-    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-
-    const resetInactivityTimer = () => {
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-      }
-      timeoutHandle = setTimeout(() => {
-        pushToQueue({ type: 'proc_error', error: new Error('No response from Claude CLI. Verify you are logged in (run "claude -p \\"hi\\"" in terminal) and try again.') });
-        proc.kill();
-      }, 20000);
-    };
-
-    const pushToQueue = (item: StreamChunk | { type: 'end' } | { type: 'proc_error'; error: Error }) => {
-      queue.push(item);
-      resetInactivityTimer();
-      if (resolveNext) {
-        resolveNext();
-        resolveNext = null;
-      }
-    };
-
-    const processBuffer = () => {
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (!line.trim()) continue;
-
-        try {
-          const parsed = JSON.parse(line);
-          const transformed = this.transformCLIMessage(parsed);
-          if (transformed) {
-            // Check blocklist
-            if (transformed.type === 'tool_use' && transformed.name === 'Bash') {
-              const command = (transformed as any).input?.command || '';
-              if (this.shouldBlockCommand(command)) {
-                pushToQueue({ type: 'blocked', content: `Blocked command: ${command}` });
-                continue;
-              }
+        const transformed = this.transformSDKMessage(message);
+        if (transformed) {
+          // Check blocklist for bash commands
+          if (transformed.type === 'tool_use' && transformed.name === 'Bash') {
+            const command = (transformed as any).input?.command || '';
+            if (this.shouldBlockCommand(command)) {
+              yield { type: 'blocked', content: `Blocked command: ${command}` };
+              continue;
             }
-            pushToQueue(transformed);
           }
-        } catch {
-          // Skip unparseable lines
+          yield transformed;
         }
       }
-    };
-
-    // Handle stdout with event-based approach
-    proc.stdout.on('data', (chunk: Buffer) => {
-      if (abortController?.signal.aborted) {
-        proc.kill();
-        return;
-      }
-
-      buffer += chunk.toString();
-      processBuffer();
-    });
-
-    // Handle stderr (log errors only)
-    proc.stderr.on('data', (data: Buffer) => {
-      const msg = data.toString();
-      if (msg.includes('error') || msg.includes('Error')) {
-        console.error('Claude Agent:', msg);
-      }
-    });
-
-    // Handle process completion
-    proc.on('close', (code: number) => {
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-      }
-      // Process any remaining buffer
-      if (buffer.trim()) {
-        buffer += '\n';
-        processBuffer();
-      }
-
-      if (code !== 0 && code !== null) {
-        pushToQueue({ type: 'proc_error', error: new Error(`Claude CLI exited with code ${code}`) });
-      }
-      pushToQueue({ type: 'end' });
-    });
-
-    proc.on('error', (error: Error) => {
-      pushToQueue({ type: 'proc_error', error });
-      pushToQueue({ type: 'end' });
-    });
-
-    resetInactivityTimer();
-
-    // Yield chunks from the queue
-    while (true) {
-      if (abortController?.signal.aborted) {
-        proc.kill();
-        break;
-      }
-
-      if (queue.length === 0) {
-        // Wait for next item
-        await new Promise<void>((resolve) => {
-          resolveNext = resolve;
-        });
-      }
-
-      const item = queue.shift();
-      if (!item) continue;
-
-      if (item.type === 'end') {
-        break;
-      }
-
-      if (item.type === 'proc_error') {
-        yield { type: 'error', content: item.error.message };
-        break;
-      }
-
-      // Mark session as active after first successful response
-      if (!this.hasActiveSession && (item.type === 'text' || item.type === 'tool_use')) {
-        this.hasActiveSession = true;
-      }
-
-      yield item;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      yield { type: 'error', content: msg };
     }
 
     yield { type: 'done' };
   }
 
   /**
-   * Transform CLI JSON output to our StreamChunk format
+   * Transform SDK message to our StreamChunk format
    */
-  private transformCLIMessage(message: any): StreamChunk | null {
+  private transformSDKMessage(message: any): StreamChunk | null {
     switch (message.type) {
+      case 'system':
+        // Capture session ID from init message
+        if (message.subtype === 'init' && message.session_id) {
+          this.sessionId = message.session_id;
+        }
+        // Don't yield system messages to the UI
+        return null;
+
       case 'assistant':
         // Extract text from content blocks
         if (message.message?.content) {
@@ -278,7 +161,7 @@ export class ClaudeAgentService {
         };
 
       case 'result':
-        // Skip - result duplicates the assistant message content
+        // Skip - result is the terminal message
         break;
 
       case 'error':
@@ -334,7 +217,7 @@ export class ClaudeAgentService {
    * Call this when clearing the chat to start fresh
    */
   resetSession() {
-    this.hasActiveSession = false;
+    this.sessionId = null;
   }
 
   /**

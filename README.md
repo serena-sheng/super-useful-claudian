@@ -8,11 +8,12 @@ An Obsidian plugin that embeds Claude Code as a sidebar chat interface. Your vau
 - **Full Claude Code capabilities**: Read, write, edit files, run bash commands
 - **Vault-aware**: Claude operates with your vault as the working directory
 - **Streaming responses**: See Claude's responses in real-time
+- **Session persistence**: Conversation context maintained within a session
 - **Safety blocklist**: Optionally block dangerous commands
 
 ## Requirements
 
-- [Claude Code CLI](https://claude.ai/code) installed and available in PATH
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed (the SDK uses it internally)
 - Obsidian v1.0.0+
 - Desktop only (macOS, Linux, Windows via WSL)
 
@@ -65,7 +66,6 @@ npm run build
 
 - **Enable command blocklist**: Block dangerous bash commands (default: on)
 - **Blocked commands**: Patterns to block (supports regex)
-- **Custom system prompt**: Additional instructions for Claude
 - **Show tool usage**: Display file operations in chat
 
 ### Default blocklist
@@ -73,8 +73,10 @@ npm run build
 - `rm -rf`
 - `rm -r /`
 - `chmod 777`
+- `chmod -R 777`
 - `mkfs`
 - `dd if=`
+- `> /dev/sd`
 
 ## Architecture
 
@@ -82,14 +84,15 @@ npm run build
 src/
 ├── main.ts              # Plugin entry point
 ├── ClaudeAgentView.ts   # Sidebar chat UI
-├── ClaudeAgentService.ts # Claude SDK/CLI wrapper
+├── ClaudeAgentService.ts # Claude Agent SDK wrapper
 ├── ClaudeAgentSettings.ts # Settings tab
 └── types.ts             # Type definitions
 ```
 
 ## Roadmap
 
-- [ ] Session persistence across restarts
+- [x] Session persistence within sessions (via SDK resume)
+- [ ] Session persistence across plugin restarts
 - [ ] Context menu: "Ask Claude about this file"
 - [ ] Open files that Claude edits
 - [ ] Chat history export
@@ -102,4 +105,4 @@ MIT
 ## Acknowledgments
 
 - [Obsidian](https://obsidian.md) for the plugin API
-- [Anthropic](https://anthropic.com) for Claude and the Agent SDK
+- [Anthropic](https://anthropic.com) for Claude and the [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk)

@@ -3,14 +3,12 @@
 export const VIEW_TYPE_CLAUDE_AGENT = 'claude-agent-view';
 
 export interface ClaudeAgentSettings {
-  claudePath: string;
   enableBlocklist: boolean;
   blockedCommands: string[];
   showToolUse: boolean;
 }
 
 export const DEFAULT_SETTINGS: ClaudeAgentSettings = {
-  claudePath: 'claude',
   enableBlocklist: true,
   blockedCommands: [
     'rm -rf',

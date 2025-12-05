@@ -15,22 +15,6 @@ export class ClaudeAgentSettingTab extends PluginSettingTab {
 
     containerEl.createEl('h2', { text: 'Claude Agent Settings' });
 
-    // CLI configuration section
-    containerEl.createEl('h3', { text: 'CLI Configuration' });
-
-    new Setting(containerEl)
-      .setName('Claude CLI path')
-      .setDesc('Full path to claude executable (run "which claude" in terminal)')
-      .addText((text) =>
-        text
-          .setPlaceholder('/usr/local/bin/claude')
-          .setValue(this.plugin.settings.claudePath)
-          .onChange(async (value) => {
-            this.plugin.settings.claudePath = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
     // Safety section
     containerEl.createEl('h3', { text: 'Safety' });
 
@@ -84,10 +68,7 @@ export class ClaudeAgentSettingTab extends PluginSettingTab {
 
     const infoDiv = containerEl.createDiv({ cls: 'claude-agent-info' });
     infoDiv.createEl('p', {
-      text: 'This plugin requires Claude Code CLI to be installed and available in your PATH.',
-    });
-    infoDiv.createEl('p', {
-      text: 'Install it from: https://claude.ai/code',
+      text: 'This plugin uses the Claude Agent SDK to interact with Claude.',
     });
 
     const vaultPath = this.getVaultPath();

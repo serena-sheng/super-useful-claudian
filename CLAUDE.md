@@ -13,16 +13,13 @@ src/
 ├── main.ts              # Plugin entry point, registers view and settings
 ├── ClaudeAgentView.ts   # Sidebar chat UI (ItemView)
 ├── ClaudeAgentService.ts # Claude Agent SDK wrapper, handles streaming
-├── ClaudeAgentSettings.ts # Settings types and tab
-├── types.ts             # Shared type definitions
-└── utils/
-    ├── markdown.ts      # Markdown rendering helpers
-    └── commands.ts      # Command blocklist logic
+├── ClaudeAgentSettings.ts # Settings tab
+└── types.ts             # Shared type definitions
 ```
 
 ## Key Technologies
 
-- **Claude Agent SDK**: `@anthropic-ai/claude-code` for Claude integration
+- **Claude Agent SDK**: `@anthropic-ai/claude-agent-sdk` for Claude integration
 - **Obsidian API**: Plugin framework, ItemView for sidebar, MarkdownRenderer
 - **Build**: esbuild with TypeScript
 - **Target**: Desktop only (macOS, Linux, Windows via WSL)
@@ -44,15 +41,21 @@ npm install
 
 ### Claude Agent SDK Usage
 ```typescript
-import { query } from '@anthropic-ai/claude-code';
+import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
 
-const options = {
+const options: Options = {
   cwd: vaultPath,
   permissionMode: 'bypassPermissions',
-  allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
+  allowDangerouslySkipPermissions: true,
+  model: 'claude-haiku-4-5',
+  allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'LS'],
+  abortController: this.abortController,
+  pathToClaudeCodeExecutable: '/path/to/claude',
+  resume: sessionId, // Optional: resume previous session
 };
 
-for await (const message of query({ prompt, options })) {
+const response = query({ prompt, options });
+for await (const message of response) {
   // Handle streaming messages
 }
 ```
@@ -76,11 +79,12 @@ await MarkdownRenderer.renderMarkdown(markdown, container, sourcePath, component
 
 | Type | Description |
 |------|-------------|
-| `system` | Session initialization, metadata |
+| `system` | Session initialization, metadata (includes session_id) |
 | `assistant` | Claude's text responses |
 | `tool_use` | Claude invoking a tool (file read, bash, etc.) |
 | `tool_result` | Result of tool execution |
-| `user` | Echoed user messages |
+| `result` | Terminal message (final response) |
+| `error` | Error messages |
 
 ## Settings Structure
 
@@ -88,7 +92,6 @@ await MarkdownRenderer.renderMarkdown(markdown, container, sourcePath, component
 interface ClaudeAgentSettings {
   enableBlocklist: boolean;      // Block dangerous commands
   blockedCommands: string[];     // Regex patterns to block
-  systemPrompt: string;          // Custom instructions
   showToolUse: boolean;          // Show file operations in chat
 }
 ```
@@ -98,8 +101,10 @@ interface ClaudeAgentSettings {
 - `rm -rf`
 - `rm -r /`
 - `chmod 777`
+- `chmod -R 777`
 - `mkfs`
 - `dd if=`
+- `> /dev/sd`
 
 ## File Outputs
 
@@ -109,7 +114,7 @@ interface ClaudeAgentSettings {
 
 ## External Dependencies
 
-- User must have Claude Code CLI installed (`claude` command in PATH)
+- User must have Claude Code CLI installed (SDK uses it internally via `pathToClaudeCodeExecutable`)
 - Obsidian v1.0.0+
 
 ## CSS Class Conventions
