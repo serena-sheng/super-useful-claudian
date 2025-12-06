@@ -71,8 +71,6 @@ export class ClaudeAgentView extends ItemView {
       }
     });
 
-    // Welcome message
-    this.addSystemMessage('Claude Agent ready. Your vault is the working directory.');
   }
 
   async onClose() {

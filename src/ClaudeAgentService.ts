@@ -4,6 +4,7 @@ import * as os from 'os';
 import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
 import type ClaudeAgentPlugin from './main';
 import { StreamChunk } from './types';
+import { SYSTEM_PROMPT } from './systemPrompt';
 
 export class ClaudeAgentService {
   private plugin: ClaudeAgentPlugin;
@@ -75,6 +76,7 @@ export class ClaudeAgentService {
   private async *queryViaSDK(prompt: string, cwd: string): AsyncGenerator<StreamChunk> {
     const options: Options = {
       cwd,
+      systemPrompt: SYSTEM_PROMPT,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       model: 'claude-haiku-4-5',
