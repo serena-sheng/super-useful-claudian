@@ -64,9 +64,11 @@
 
 .claude-agent-message-assistant {
   background: transparent;
-  align-self: flex-end;
+  align-self: stretch;
+  width: 100%;
   max-width: 100%;
   border-bottom-left-radius: 4px;
+  text-align: left;
 }
 
 .claude-agent-message-system {
@@ -83,6 +85,20 @@
   line-height: 1.5;
   user-select: text;
   -webkit-user-select: text;
+}
+
+/* Thinking indicator */
+.claude-agent-thinking {
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 4px 0;
+  text-align: left;
+  animation: thinking-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes thinking-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
 }
 
 /* Text blocks within message content */

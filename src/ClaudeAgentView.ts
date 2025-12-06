@@ -15,6 +15,28 @@ export class ClaudeAgentView extends ItemView {
   private currentTextEl: HTMLElement | null = null;
   private currentTextContent: string = '';
 
+  // Thinking indicator
+  private thinkingEl: HTMLElement | null = null;
+  private thinkingInterval: ReturnType<typeof setInterval> | null = null;
+  private hasReceivedContent = false;
+
+  private static readonly FLAVOR_TEXTS = [
+    'Thinking...',
+    'Ruminating...',
+    'Pondering...',
+    'Contemplating...',
+    'Processing...',
+    'Analyzing...',
+    'Considering...',
+    'Reflecting...',
+    'Mulling it over...',
+    'Working on it...',
+    'Let me think...',
+    'Hmm...',
+    'One moment...',
+    'On it...',
+  ];
+
   constructor(leaf: WorkspaceLeaf, plugin: ClaudeAgentPlugin) {
     super(leaf);
     this.plugin = plugin;
@@ -114,6 +136,10 @@ export class ClaudeAgentView extends ItemView {
     this.currentContentEl = contentEl;
     this.currentTextEl = null;
     this.currentTextContent = '';
+    this.hasReceivedContent = false;
+
+    // Show thinking indicator
+    this.showThinkingIndicator(contentEl);
 
     try {
       for await (const chunk of this.plugin.agentService.query(content)) {
@@ -123,6 +149,7 @@ export class ClaudeAgentView extends ItemView {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       this.appendText(`\n\n**Error:** ${errorMsg}`);
     } finally {
+      this.hideThinkingIndicator();
       this.isStreaming = false;
       this.currentContentEl = null;
       this.currentTextEl = null;
@@ -130,10 +157,45 @@ export class ClaudeAgentView extends ItemView {
     }
   }
 
+  private showThinkingIndicator(parentEl: HTMLElement) {
+    this.thinkingEl = parentEl.createDiv({ cls: 'claude-agent-thinking' });
+    this.updateThinkingText();
+
+    // Rotate flavor text every 2-4 seconds
+    this.thinkingInterval = setInterval(() => {
+      this.updateThinkingText();
+    }, 2000 + Math.random() * 2000);
+  }
+
+  private updateThinkingText() {
+    if (this.thinkingEl) {
+      const texts = ClaudeAgentView.FLAVOR_TEXTS;
+      const randomText = texts[Math.floor(Math.random() * texts.length)];
+      this.thinkingEl.setText(randomText);
+    }
+  }
+
+  private hideThinkingIndicator() {
+    if (this.thinkingInterval) {
+      clearInterval(this.thinkingInterval);
+      this.thinkingInterval = null;
+    }
+    if (this.thinkingEl) {
+      this.thinkingEl.remove();
+      this.thinkingEl = null;
+    }
+  }
+
   private async handleStreamChunk(
     chunk: StreamChunk,
     msg: ChatMessage
   ) {
+    // Hide thinking indicator on first real content
+    if (!this.hasReceivedContent && (chunk.type === 'text' || chunk.type === 'tool_use')) {
+      this.hasReceivedContent = true;
+      this.hideThinkingIndicator();
+    }
+
     switch (chunk.type) {
       case 'text':
         msg.content += chunk.content;
