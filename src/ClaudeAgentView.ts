@@ -17,7 +17,6 @@ export class ClaudeAgentView extends ItemView {
 
   // Thinking indicator
   private thinkingEl: HTMLElement | null = null;
-  private hasReceivedContent = false;
 
   // Conversation history UI
   private currentConversationId: string | null = null;
@@ -141,6 +140,8 @@ export class ClaudeAgentView extends ItemView {
   }
 
   async onClose() {
+    // Clean up thinking indicator interval
+    this.hideThinkingIndicator();
     // Save current conversation before closing
     await this.saveCurrentConversation();
   }
@@ -184,7 +185,6 @@ export class ClaudeAgentView extends ItemView {
     this.currentContentEl = contentEl;
     this.currentTextEl = null;
     this.currentTextContent = '';
-    this.hasReceivedContent = false;
 
     // Show thinking indicator
     this.showThinkingIndicator(contentEl);
@@ -211,8 +211,12 @@ export class ClaudeAgentView extends ItemView {
   }
 
   private showThinkingIndicator(parentEl: HTMLElement) {
+    // If already showing, don't create another
+    if (this.thinkingEl) return;
+
     this.thinkingEl = parentEl.createDiv({ cls: 'claude-agent-thinking' });
-    // Display one random flavor text
+
+    // Pick a random flavor text
     const texts = ClaudeAgentView.FLAVOR_TEXTS;
     const randomText = texts[Math.floor(Math.random() * texts.length)];
     this.thinkingEl.setText(randomText);
@@ -229,9 +233,8 @@ export class ClaudeAgentView extends ItemView {
     chunk: StreamChunk,
     msg: ChatMessage
   ) {
-    // Hide thinking indicator on first real content
-    if (!this.hasReceivedContent && (chunk.type === 'text' || chunk.type === 'tool_use')) {
-      this.hasReceivedContent = true;
+    // Hide thinking indicator when real content arrives
+    if (chunk.type === 'text' || chunk.type === 'tool_use') {
       this.hideThinkingIndicator();
     }
 
@@ -271,6 +274,10 @@ export class ClaudeAgentView extends ItemView {
             toolCall.result = chunk.content;
             this.updateToolCallResult(chunk.id, toolCall);
           }
+        }
+        // Show thinking indicator again - Claude is processing the tool result
+        if (this.currentContentEl) {
+          this.showThinkingIndicator(this.currentContentEl);
         }
         break;
 
