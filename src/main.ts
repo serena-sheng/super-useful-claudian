@@ -120,35 +120,6 @@ export default class ClaudianPlugin extends Plugin {
   }
 
   /**
-   * Prune old conversations to stay within limit
-   */
-  private pruneOldConversations(): void {
-    const max = this.settings.maxConversations || 50;
-    if (this.conversations.length <= max) {
-      return;
-    }
-
-    const activeId = this.activeConversationId;
-    const pruned = this.conversations.slice(0, max);
-
-    if (activeId && !pruned.some(c => c.id === activeId)) {
-      const activeConversation = this.conversations.find(c => c.id === activeId);
-      if (activeConversation) {
-        pruned.pop();
-        pruned.push(activeConversation);
-      }
-    }
-
-    this.conversations = pruned;
-
-    if (this.activeConversationId && !this.conversations.some(c => c.id === this.activeConversationId)) {
-      const fallback = this.conversations[0];
-      this.activeConversationId = fallback ? fallback.id : null;
-      this.agentService.setSessionId(fallback?.sessionId ?? null);
-    }
-  }
-
-  /**
    * Create a new conversation and set it as active
    */
   async createConversation(): Promise<Conversation> {
@@ -164,9 +135,6 @@ export default class ClaudianPlugin extends Plugin {
     // Add to front of list
     this.conversations.unshift(conversation);
     this.activeConversationId = conversation.id;
-
-    // Enforce max limit
-    this.pruneOldConversations();
 
     // Reset agent service session
     this.agentService.resetSession();

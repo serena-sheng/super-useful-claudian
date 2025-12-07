@@ -131,7 +131,6 @@ interface ClaudianSettings {
   enableBlocklist: boolean;      // Block dangerous commands
   blockedCommands: string[];     // Regex patterns to block
   showToolUse: boolean;          // Show file operations in chat
-  maxConversations: number;      // Max saved conversations
   model: ClaudeModel;            // Selected Claude model
   thinkingBudget: ThinkingBudget; // Extended thinking token budget
 }

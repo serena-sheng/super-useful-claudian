@@ -32,7 +32,6 @@ export interface ClaudianSettings {
   enableBlocklist: boolean;
   blockedCommands: string[];
   showToolUse: boolean;
-  maxConversations: number;
   model: ClaudeModel;
   thinkingBudget: ThinkingBudget;
 }
@@ -49,7 +48,6 @@ export const DEFAULT_SETTINGS: ClaudianSettings = {
     '> /dev/sd',
   ],
   showToolUse: true,
-  maxConversations: 50,
   model: 'claude-haiku-4-5',
   thinkingBudget: 'off',
 };
