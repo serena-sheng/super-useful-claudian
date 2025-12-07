@@ -1,13 +1,13 @@
-import { DEFAULT_SETTINGS, VIEW_TYPE_CLAUDE_AGENT } from '../src/types';
+import { DEFAULT_SETTINGS, VIEW_TYPE_CLAUDIAN } from '../src/types';
 
-// Mock fs for ClaudeAgentService
+// Mock fs for ClaudianService
 jest.mock('fs');
 
 // Now import the plugin after mocking
-import ClaudeAgentPlugin from '../src/main';
+import ClaudianPlugin from '../src/main';
 
-describe('ClaudeAgentPlugin', () => {
-  let plugin: ClaudeAgentPlugin;
+describe('ClaudianPlugin', () => {
+  let plugin: ClaudianPlugin;
   let mockApp: any;
   let mockManifest: any;
 
@@ -31,13 +31,13 @@ describe('ClaudeAgentPlugin', () => {
     };
 
     mockManifest = {
-      id: 'obsidian-claude-agent',
-      name: 'Claude Agent',
+      id: 'claudian',
+      name: 'Claudian',
       version: '0.1.0',
     };
 
     // Create plugin instance with mocked app
-    plugin = new ClaudeAgentPlugin(mockApp, mockManifest);
+    plugin = new ClaudianPlugin(mockApp, mockManifest);
     (plugin.loadData as jest.Mock).mockResolvedValue({});
   });
 
@@ -61,7 +61,7 @@ describe('ClaudeAgentPlugin', () => {
       await plugin.onload();
 
       expect((plugin.registerView as jest.Mock)).toHaveBeenCalledWith(
-        VIEW_TYPE_CLAUDE_AGENT,
+        VIEW_TYPE_CLAUDIAN,
         expect.any(Function)
       );
     });
@@ -71,7 +71,7 @@ describe('ClaudeAgentPlugin', () => {
 
       expect((plugin.addRibbonIcon as jest.Mock)).toHaveBeenCalledWith(
         'bot',
-        'Open Claude Agent',
+        'Open Claudian',
         expect.any(Function)
       );
     });
@@ -80,8 +80,8 @@ describe('ClaudeAgentPlugin', () => {
       await plugin.onload();
 
       expect((plugin.addCommand as jest.Mock)).toHaveBeenCalledWith({
-        id: 'open-claude-agent',
-        name: 'Open Claude Agent',
+        id: 'open-claudian',
+        name: 'Open Claudian',
         callback: expect.any(Function),
       });
     });
@@ -128,7 +128,7 @@ describe('ClaudeAgentPlugin', () => {
 
       expect(mockApp.workspace.getRightLeaf).toHaveBeenCalledWith(false);
       expect(mockRightLeaf.setViewState).toHaveBeenCalledWith({
-        type: VIEW_TYPE_CLAUDE_AGENT,
+        type: VIEW_TYPE_CLAUDIAN,
         active: true,
       });
     });

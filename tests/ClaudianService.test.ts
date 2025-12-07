@@ -12,7 +12,7 @@ import {
 jest.mock('fs');
 
 // Now import after all mocks are set up
-import { ClaudeAgentService } from '../src/ClaudeAgentService';
+import { ClaudianService } from '../src/ClaudianService';
 
 // Helper to create SDK-format assistant message with tool_use
 function createAssistantWithToolUse(toolName: string, toolInput: Record<string, unknown>, toolId = 'tool-123') {
@@ -63,15 +63,15 @@ function createMockPlugin(settings = {}) {
   } as any;
 }
 
-describe('ClaudeAgentService', () => {
-  let service: ClaudeAgentService;
+describe('ClaudianService', () => {
+  let service: ClaudianService;
   let mockPlugin: any;
 
   beforeEach(() => {
     jest.clearAllMocks();
     resetMockMessages();
     mockPlugin = createMockPlugin();
-    service = new ClaudeAgentService(mockPlugin);
+    service = new ClaudianService(mockPlugin);
   });
 
   describe('shouldBlockCommand', () => {
@@ -136,7 +136,7 @@ describe('ClaudeAgentService', () => {
 
     it('should not block commands when blocklist is disabled', async () => {
       mockPlugin = createMockPlugin({ enableBlocklist: false });
-      service = new ClaudeAgentService(mockPlugin);
+      service = new ClaudianService(mockPlugin);
 
       (fs.existsSync as jest.Mock).mockReturnValue(true);
 
@@ -480,7 +480,7 @@ describe('ClaudeAgentService', () => {
           },
         },
       };
-      service = new ClaudeAgentService(mockPlugin);
+      service = new ClaudianService(mockPlugin);
 
       const chunks: any[] = [];
       for await (const chunk of service.query('hello')) {
@@ -499,7 +499,7 @@ describe('ClaudeAgentService', () => {
       mockPlugin = createMockPlugin({
         blockedCommands: ['rm\\s+-rf', 'chmod\\s+7{3}'],
       });
-      service = new ClaudeAgentService(mockPlugin);
+      service = new ClaudianService(mockPlugin);
 
       (fs.existsSync as jest.Mock).mockReturnValue(true);
 
@@ -522,7 +522,7 @@ describe('ClaudeAgentService', () => {
       mockPlugin = createMockPlugin({
         blockedCommands: ['[invalid regex'],
       });
-      service = new ClaudeAgentService(mockPlugin);
+      service = new ClaudianService(mockPlugin);
 
       (fs.existsSync as jest.Mock).mockReturnValue(true);
 

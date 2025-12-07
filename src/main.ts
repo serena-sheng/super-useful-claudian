@@ -1,63 +1,63 @@
 import { Plugin } from 'obsidian';
-import { ClaudeAgentView } from './ClaudeAgentView';
-import { ClaudeAgentService } from './ClaudeAgentService';
-import { ClaudeAgentSettingTab } from './ClaudeAgentSettings';
-import { ClaudeAgentSettings, DEFAULT_SETTINGS, VIEW_TYPE_CLAUDE_AGENT, Conversation, ConversationMeta } from './types';
+import { ClaudianView } from './ClaudianView';
+import { ClaudianService } from './ClaudianService';
+import { ClaudianSettingTab } from './ClaudianSettings';
+import { ClaudianSettings, DEFAULT_SETTINGS, VIEW_TYPE_CLAUDIAN, Conversation, ConversationMeta } from './types';
 
-export default class ClaudeAgentPlugin extends Plugin {
-  settings: ClaudeAgentSettings;
-  agentService: ClaudeAgentService;
+export default class ClaudianPlugin extends Plugin {
+  settings: ClaudianSettings;
+  agentService: ClaudianService;
   private conversations: Conversation[] = [];
   private activeConversationId: string | null = null;
 
   async onload() {
-    console.log('Loading Claude Agent plugin');
+    console.log('Loading Claudian plugin');
 
     await this.loadSettings();
 
     // Initialize agent service
-    this.agentService = new ClaudeAgentService(this);
+    this.agentService = new ClaudianService(this);
 
     // Register the sidebar view
     this.registerView(
-      VIEW_TYPE_CLAUDE_AGENT,
-      (leaf) => new ClaudeAgentView(leaf, this)
+      VIEW_TYPE_CLAUDIAN,
+      (leaf) => new ClaudianView(leaf, this)
     );
 
     // Add ribbon icon to open the view
-    this.addRibbonIcon('bot', 'Open Claude Agent', () => {
+    this.addRibbonIcon('bot', 'Open Claudian', () => {
       this.activateView();
     });
 
     // Add command to open view
     this.addCommand({
-      id: 'open-claude-agent',
-      name: 'Open Claude Agent',
+      id: 'open-claudian',
+      name: 'Open Claudian',
       callback: () => {
         this.activateView();
       },
     });
 
     // Add settings tab
-    this.addSettingTab(new ClaudeAgentSettingTab(this.app, this));
+    this.addSettingTab(new ClaudianSettingTab(this.app, this));
   }
 
   onunload() {
-    console.log('Unloading Claude Agent plugin');
+    console.log('Unloading Claudian plugin');
     this.agentService.cleanup();
   }
 
   async activateView() {
     const { workspace } = this.app;
 
-    let leaf = workspace.getLeavesOfType(VIEW_TYPE_CLAUDE_AGENT)[0];
+    let leaf = workspace.getLeavesOfType(VIEW_TYPE_CLAUDIAN)[0];
 
     if (!leaf) {
       // Get the right leaf (sidebar)
       const rightLeaf = workspace.getRightLeaf(false);
       if (rightLeaf) {
         await rightLeaf.setViewState({
-          type: VIEW_TYPE_CLAUDE_AGENT,
+          type: VIEW_TYPE_CLAUDIAN,
           active: true,
         });
         leaf = rightLeaf;

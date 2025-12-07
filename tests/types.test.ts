@@ -1,7 +1,7 @@
 import {
-  VIEW_TYPE_CLAUDE_AGENT,
+  VIEW_TYPE_CLAUDIAN,
   DEFAULT_SETTINGS,
-  ClaudeAgentSettings,
+  ClaudianSettings,
   ChatMessage,
   ToolCallInfo,
   StreamChunk,
@@ -10,9 +10,9 @@ import {
 } from '../src/types';
 
 describe('types.ts', () => {
-  describe('VIEW_TYPE_CLAUDE_AGENT', () => {
+  describe('VIEW_TYPE_CLAUDIAN', () => {
     it('should be defined as the correct view type', () => {
-      expect(VIEW_TYPE_CLAUDE_AGENT).toBe('claude-agent-view');
+      expect(VIEW_TYPE_CLAUDIAN).toBe('claudian-view');
     });
   });
 
@@ -67,9 +67,9 @@ describe('types.ts', () => {
     });
   });
 
-  describe('ClaudeAgentSettings type', () => {
+  describe('ClaudianSettings type', () => {
     it('should be assignable with valid settings', () => {
-      const settings: ClaudeAgentSettings = {
+      const settings: ClaudianSettings = {
         enableBlocklist: false,
         blockedCommands: ['test'],
         showToolUse: false,

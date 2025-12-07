@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Obsidian Claude Agent - An Obsidian plugin that embeds Claude Code as a sidebar chat interface. The vault directory becomes Claude's working directory, giving it full agentic capabilities: file read/write, bash commands, and multi-step workflows.
+Claudian - An Obsidian plugin that embeds Claude Code as a sidebar chat interface. The vault directory becomes Claude's working directory, giving it full agentic capabilities: file read/write, bash commands, and multi-step workflows.
 
 **Core Principle**: "Claude Code in a sidebar" - the full Claude Code experience embedded in Obsidian.
 
@@ -10,12 +10,12 @@ Obsidian Claude Agent - An Obsidian plugin that embeds Claude Code as a sidebar 
 
 ```
 src/
-├── main.ts               # Plugin entry point, registers view and settings
-├── ClaudeAgentView.ts    # Sidebar chat UI (ItemView), handles streaming display
-├── ClaudeAgentService.ts # Claude Agent SDK wrapper, transforms SDK messages
-├── ClaudeAgentSettings.ts # Settings tab
-├── systemPrompt.ts       # System prompt for Claude agent
-└── types.ts              # Shared type definitions (StreamChunk, ToolCallInfo, etc.)
+├── main.ts            # Plugin entry point, registers view and settings
+├── ClaudianView.ts    # Sidebar chat UI (ItemView), handles streaming display
+├── ClaudianService.ts # Claude Agent SDK wrapper, transforms SDK messages
+├── ClaudianSettings.ts # Settings tab
+├── systemPrompt.ts    # System prompt for Claude agent
+└── types.ts           # Shared type definitions (StreamChunk, ToolCallInfo, etc.)
 ```
 
 ## Key Technologies
@@ -63,7 +63,7 @@ for await (const message of response) {
 
 ### Obsidian View Registration
 ```typescript
-this.registerView(VIEW_TYPE_CLAUDE_AGENT, (leaf) => new ClaudeAgentView(leaf, this));
+this.registerView(VIEW_TYPE_CLAUDIAN, (leaf) => new ClaudianView(leaf, this));
 ```
 
 ### Vault Path Access
@@ -98,7 +98,7 @@ await MarkdownRenderer.renderMarkdown(markdown, container, sourcePath, component
 ## Settings Structure
 
 ```typescript
-interface ClaudeAgentSettings {
+interface ClaudianSettings {
   enableBlocklist: boolean;      // Block dangerous commands
   blockedCommands: string[];     // Regex patterns to block
   showToolUse: boolean;          // Show file operations in chat
@@ -129,59 +129,59 @@ interface ClaudeAgentSettings {
 ## CSS Class Conventions
 
 ### Layout
-- `.claude-agent-container` - Main container
-- `.claude-agent-header` - Header with title and action buttons
-- `.claude-agent-title` - Logo and title container
-- `.claude-agent-header-actions` - Right side action buttons container
-- `.claude-agent-header-btn` - Icon buttons in header (history, new)
-- `.claude-agent-messages` - Messages scroll area
-- `.claude-agent-input-container` - Input area wrapper
-- `.claude-agent-input` - Textarea input
+- `.claudian-container` - Main container
+- `.claudian-header` - Header with title and action buttons
+- `.claudian-title` - Logo and title container
+- `.claudian-header-actions` - Right side action buttons container
+- `.claudian-header-btn` - Icon buttons in header (history, new)
+- `.claudian-messages` - Messages scroll area
+- `.claudian-input-container` - Input area wrapper
+- `.claudian-input` - Textarea input
 
 ### Chat History
-- `.claude-agent-history-container` - Dropdown container (positioned relative)
-- `.claude-agent-history-menu` - Dropdown menu (anchored to right)
-- `.claude-agent-history-header` - "Conversations" header in dropdown
-- `.claude-agent-history-list` - Scrollable conversation list
-- `.claude-agent-history-item` - Individual conversation entry
-- `.claude-agent-history-item-icon` - Chat icon for each entry
-- `.claude-agent-history-item-content` - Title and date container
-- `.claude-agent-history-item-title` - Conversation title (first 50 chars)
-- `.claude-agent-history-item-date` - Timestamp metadata
-- `.claude-agent-history-item-actions` - Rename/delete buttons
+- `.claudian-history-container` - Dropdown container (positioned relative)
+- `.claudian-history-menu` - Dropdown menu (anchored to right)
+- `.claudian-history-header` - "Conversations" header in dropdown
+- `.claudian-history-list` - Scrollable conversation list
+- `.claudian-history-item` - Individual conversation entry
+- `.claudian-history-item-icon` - Chat icon for each entry
+- `.claudian-history-item-content` - Title and date container
+- `.claudian-history-item-title` - Conversation title (first 50 chars)
+- `.claudian-history-item-date` - Timestamp metadata
+- `.claudian-history-item-actions` - Rename/delete buttons
 
 ### Messages
-- `.claude-agent-message` - Individual message
-- `.claude-agent-message-user` - User message styling
-- `.claude-agent-message-assistant` - Assistant message styling
-- `.claude-agent-message-system` - System message styling
-- `.claude-agent-message-content` - Message content wrapper
-- `.claude-agent-text-block` - Text block within message (maintains stream order)
+- `.claudian-message` - Individual message
+- `.claudian-message-user` - User message styling
+- `.claudian-message-assistant` - Assistant message styling
+- `.claudian-message-system` - System message styling
+- `.claudian-message-content` - Message content wrapper
+- `.claudian-text-block` - Text block within message (maintains stream order)
 
 ### Tool Calls
-- `.claude-agent-tool-call` - Tool call container (collapsible)
-- `.claude-agent-tool-header` - Clickable header with tool info
-- `.claude-agent-tool-chevron` - Expand/collapse chevron icon
-- `.claude-agent-tool-icon` - Tool type icon
-- `.claude-agent-tool-label` - Tool name and summary
-- `.claude-agent-tool-status` - Status indicator (running/completed/error)
-- `.claude-agent-spinner` - Loading spinner animation
-- `.claude-agent-tool-content` - Collapsible content area
-- `.claude-agent-tool-input` - Input parameters section
-- `.claude-agent-tool-result` - Result output section
-- `.claude-agent-tool-code` - Code/output display
+- `.claudian-tool-call` - Tool call container (collapsible)
+- `.claudian-tool-header` - Clickable header with tool info
+- `.claudian-tool-chevron` - Expand/collapse chevron icon
+- `.claudian-tool-icon` - Tool type icon
+- `.claudian-tool-label` - Tool name and summary
+- `.claudian-tool-status` - Status indicator (running/completed/error)
+- `.claudian-spinner` - Loading spinner animation
+- `.claudian-tool-content` - Collapsible content area
+- `.claudian-tool-input` - Input parameters section
+- `.claudian-tool-result` - Result output section
+- `.claudian-tool-code` - Code/output display
 
 ### File Context
-- `.claude-agent-file-indicator` - Container for attached file chips
-- `.claude-agent-file-chip` - Individual file tag (pill style)
-- `.claude-agent-file-chip-icon` - File icon in chip
-- `.claude-agent-file-chip-name` - Filename text
-- `.claude-agent-file-chip-remove` - Remove button (×)
-- `.claude-agent-mention-dropdown` - @ mention file picker dropdown
-- `.claude-agent-mention-item` - Individual file option in dropdown
-- `.claude-agent-mention-icon` - File icon in dropdown
-- `.claude-agent-mention-path` - File path text in dropdown
-- `.claude-agent-mention-empty` - "No matching files" message
+- `.claudian-file-indicator` - Container for attached file chips
+- `.claudian-file-chip` - Individual file tag (pill style)
+- `.claudian-file-chip-icon` - File icon in chip
+- `.claudian-file-chip-name` - Filename text
+- `.claudian-file-chip-remove` - Remove button (×)
+- `.claudian-mention-dropdown` - @ mention file picker dropdown
+- `.claudian-mention-item` - Individual file option in dropdown
+- `.claudian-mention-icon` - File icon in dropdown
+- `.claudian-mention-path` - File path text in dropdown
+- `.claudian-mention-empty` - "No matching files" message
 
 ## Notes
 - when ask to generate a md file about the finding, implementation of your work, put the file in dev/

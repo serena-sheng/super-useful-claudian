@@ -1,4 +1,4 @@
-# Obsidian Claude Agent
+# Claudian
 
 An Obsidian plugin that embeds Claude Code as a sidebar chat interface. Your vault becomes Claude's working directory, giving it full agentic capabilities: file read/write, bash commands, and multi-step workflows.
 
@@ -27,8 +27,8 @@ An Obsidian plugin that embeds Claude Code as a sidebar chat interface. Your vau
 1. Clone this repository into your vault's plugins folder:
    ```bash
    cd /path/to/vault/.obsidian/plugins
-   git clone https://github.com/yourusername/obsidian-claude-agent.git
-   cd obsidian-claude-agent
+   git clone https://github.com/yourusername/claudian.git
+   cd claudian
    ```
 
 2. Install dependencies and build:
@@ -38,7 +38,7 @@ An Obsidian plugin that embeds Claude Code as a sidebar chat interface. Your vau
    ```
 
 3. Enable the plugin in Obsidian:
-   - Settings → Community plugins → Enable "Claude Agent"
+   - Settings → Community plugins → Enable "Claudian"
 
 ### Development
 
@@ -52,7 +52,7 @@ npm run build
 
 ## Usage
 
-1. Click the bot icon in the ribbon (left sidebar) to open Claude Agent
+1. Click the bot icon in the ribbon (left sidebar) to open Claudian
 2. Type your message and press Enter to send (Shift+Enter for newline)
 3. Claude can read, write, and edit files in your vault
 4. Click on tool call headers to expand and see inputs/results
@@ -94,12 +94,12 @@ npm run build
 
 ```
 src/
-├── main.ts               # Plugin entry point
-├── ClaudeAgentView.ts    # Sidebar chat UI with tool call display
-├── ClaudeAgentService.ts # Claude Agent SDK wrapper
-├── ClaudeAgentSettings.ts # Settings tab
-├── systemPrompt.ts       # System prompt for Claude
-└── types.ts              # Type definitions
+├── main.ts            # Plugin entry point
+├── ClaudianView.ts    # Sidebar chat UI with tool call display
+├── ClaudianService.ts # Claude Agent SDK wrapper
+├── ClaudianSettings.ts # Settings tab
+├── systemPrompt.ts    # System prompt for Claude
+└── types.ts           # Type definitions
 ```
 
 ## Roadmap

@@ -1,10 +1,10 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
-import type ClaudeAgentPlugin from './main';
+import type ClaudianPlugin from './main';
 
-export class ClaudeAgentSettingTab extends PluginSettingTab {
-  plugin: ClaudeAgentPlugin;
+export class ClaudianSettingTab extends PluginSettingTab {
+  plugin: ClaudianPlugin;
 
-  constructor(app: App, plugin: ClaudeAgentPlugin) {
+  constructor(app: App, plugin: ClaudianPlugin) {
     super(app, plugin);
     this.plugin = plugin;
   }
@@ -13,7 +13,7 @@ export class ClaudeAgentSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl('h2', { text: 'Claude Agent Settings' });
+    containerEl.createEl('h2', { text: 'Claudian Settings' });
 
     // Safety section
     containerEl.createEl('h3', { text: 'Safety' });
@@ -66,7 +66,7 @@ export class ClaudeAgentSettingTab extends PluginSettingTab {
     // Info section
     containerEl.createEl('h3', { text: 'Information' });
 
-    const infoDiv = containerEl.createDiv({ cls: 'claude-agent-info' });
+    const infoDiv = containerEl.createDiv({ cls: 'claudian-info' });
     infoDiv.createEl('p', {
       text: 'This plugin uses the Claude Agent SDK to interact with Claude.',
     });
@@ -75,7 +75,7 @@ export class ClaudeAgentSettingTab extends PluginSettingTab {
     if (vaultPath) {
       infoDiv.createEl('p', {
         text: `Vault path: ${vaultPath}`,
-        cls: 'claude-agent-vault-path',
+        cls: 'claudian-vault-path',
       });
     }
   }

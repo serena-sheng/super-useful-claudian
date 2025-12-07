@@ -1,9 +1,9 @@
 import { ItemView, WorkspaceLeaf, MarkdownRenderer, setIcon, TFile } from 'obsidian';
-import type ClaudeAgentPlugin from './main';
-import { VIEW_TYPE_CLAUDE_AGENT, ChatMessage, StreamChunk, ToolCallInfo, ContentBlock } from './types';
+import type ClaudianPlugin from './main';
+import { VIEW_TYPE_CLAUDIAN, ChatMessage, StreamChunk, ToolCallInfo, ContentBlock } from './types';
 
-export class ClaudeAgentView extends ItemView {
-  private plugin: ClaudeAgentPlugin;
+export class ClaudianView extends ItemView {
+  private plugin: ClaudianPlugin;
   private messages: ChatMessage[] = [];
   private messagesEl: HTMLElement;
   private inputEl: HTMLTextAreaElement;
@@ -50,17 +50,17 @@ export class ClaudeAgentView extends ItemView {
     'On it...',
   ];
 
-  constructor(leaf: WorkspaceLeaf, plugin: ClaudeAgentPlugin) {
+  constructor(leaf: WorkspaceLeaf, plugin: ClaudianPlugin) {
     super(leaf);
     this.plugin = plugin;
   }
 
   getViewType(): string {
-    return VIEW_TYPE_CLAUDE_AGENT;
+    return VIEW_TYPE_CLAUDIAN;
   }
 
   getDisplayText(): string {
-    return 'Claude Agent';
+    return 'Claudian';
   }
 
   getIcon(): string {
@@ -70,14 +70,14 @@ export class ClaudeAgentView extends ItemView {
   async onOpen() {
     const container = this.containerEl.children[1] as HTMLElement;
     container.empty();
-    container.addClass('claude-agent-container');
+    container.addClass('claudian-container');
 
     // Header
-    const header = container.createDiv({ cls: 'claude-agent-header' });
+    const header = container.createDiv({ cls: 'claudian-header' });
 
     // Left side: Logo + Title
-    const titleContainer = header.createDiv({ cls: 'claude-agent-title' });
-    const logoEl = titleContainer.createSpan({ cls: 'claude-agent-logo' });
+    const titleContainer = header.createDiv({ cls: 'claudian-title' });
+    const logoEl = titleContainer.createSpan({ cls: 'claudian-logo' });
     logoEl.innerHTML = `<svg viewBox="0 0 100 100" width="16" height="16">
       <g fill="#D97757">
         ${Array.from({ length: 12 }, (_, i) => {
@@ -91,21 +91,21 @@ export class ClaudeAgentView extends ItemView {
         }).join('')}
       </g>
     </svg>`;
-    titleContainer.createEl('h4', { text: 'Claude Agent' });
+    titleContainer.createEl('h4', { text: 'Claudian' });
 
     // Right side: Header actions
-    const headerActions = header.createDiv({ cls: 'claude-agent-header-actions' });
+    const headerActions = header.createDiv({ cls: 'claudian-header-actions' });
 
     // History dropdown container
-    const historyContainer = headerActions.createDiv({ cls: 'claude-agent-history-container' });
+    const historyContainer = headerActions.createDiv({ cls: 'claudian-history-container' });
 
     // Dropdown trigger (icon button)
-    const trigger = historyContainer.createDiv({ cls: 'claude-agent-header-btn' });
+    const trigger = historyContainer.createDiv({ cls: 'claudian-header-btn' });
     setIcon(trigger, 'history');
     trigger.setAttribute('aria-label', 'Chat history');
 
     // Dropdown menu
-    this.historyDropdown = historyContainer.createDiv({ cls: 'claude-agent-history-menu' });
+    this.historyDropdown = historyContainer.createDiv({ cls: 'claudian-history-menu' });
 
     // Toggle dropdown on trigger click
     trigger.addEventListener('click', (e) => {
@@ -119,22 +119,22 @@ export class ClaudeAgentView extends ItemView {
     });
 
     // New conversation button
-    const newBtn = headerActions.createDiv({ cls: 'claude-agent-header-btn' });
+    const newBtn = headerActions.createDiv({ cls: 'claudian-header-btn' });
     setIcon(newBtn, 'plus');
     newBtn.setAttribute('aria-label', 'New conversation');
     newBtn.addEventListener('click', () => this.createNewConversation());
 
     // Messages area
-    this.messagesEl = container.createDiv({ cls: 'claude-agent-messages' });
+    this.messagesEl = container.createDiv({ cls: 'claudian-messages' });
 
     // Input area
-    this.inputContainerEl = container.createDiv({ cls: 'claude-agent-input-container' });
+    this.inputContainerEl = container.createDiv({ cls: 'claudian-input-container' });
 
     // File indicator (above textarea)
-    this.fileIndicatorEl = this.inputContainerEl.createDiv({ cls: 'claude-agent-file-indicator' });
+    this.fileIndicatorEl = this.inputContainerEl.createDiv({ cls: 'claudian-file-indicator' });
 
     this.inputEl = this.inputContainerEl.createEl('textarea', {
-      cls: 'claude-agent-input',
+      cls: 'claudian-input',
       attr: {
         placeholder: 'Ask Claude anything... (Enter to send, Shift+Enter for newline)',
         rows: '3',
@@ -263,7 +263,7 @@ export class ClaudeAgentView extends ItemView {
       contentBlocks: [],
     };
     const msgEl = this.addMessage(assistantMsg);
-    const contentEl = msgEl.querySelector('.claude-agent-message-content') as HTMLElement;
+    const contentEl = msgEl.querySelector('.claudian-message-content') as HTMLElement;
 
     // Reset streaming state
     this.toolCallElements.clear();
@@ -301,10 +301,10 @@ export class ClaudeAgentView extends ItemView {
     // If already showing, don't create another
     if (this.thinkingEl) return;
 
-    this.thinkingEl = parentEl.createDiv({ cls: 'claude-agent-thinking' });
+    this.thinkingEl = parentEl.createDiv({ cls: 'claudian-thinking' });
 
     // Pick a random flavor text
-    const texts = ClaudeAgentView.FLAVOR_TEXTS;
+    const texts = ClaudianView.FLAVOR_TEXTS;
     const randomText = texts[Math.floor(Math.random() * texts.length)];
     this.thinkingEl.setText(randomText);
   }
@@ -389,7 +389,7 @@ export class ClaudeAgentView extends ItemView {
 
     // Create text block if needed
     if (!this.currentTextEl) {
-      this.currentTextEl = this.currentContentEl.createDiv({ cls: 'claude-agent-text-block' });
+      this.currentTextEl = this.currentContentEl.createDiv({ cls: 'claudian-text-block' });
       this.currentTextContent = '';
     }
 
@@ -412,14 +412,14 @@ export class ClaudeAgentView extends ItemView {
     this.messages.push(msg);
 
     const msgEl = this.messagesEl.createDiv({
-      cls: `claude-agent-message claude-agent-message-${msg.role}`,
+      cls: `claudian-message claudian-message-${msg.role}`,
     });
 
-    const contentEl = msgEl.createDiv({ cls: 'claude-agent-message-content' });
+    const contentEl = msgEl.createDiv({ cls: 'claudian-message-content' });
 
     // For user messages, render content directly
     if (msg.role === 'user' && msg.content) {
-      const textEl = contentEl.createDiv({ cls: 'claude-agent-text-block' });
+      const textEl = contentEl.createDiv({ cls: 'claudian-text-block' });
       this.renderContent(textEl, msg.content);
     }
     // For assistant messages, content will be added dynamically during streaming
@@ -430,7 +430,7 @@ export class ClaudeAgentView extends ItemView {
 
   private addSystemMessage(content: string) {
     const msgEl = this.messagesEl.createDiv({
-      cls: 'claude-agent-message claude-agent-message-system',
+      cls: 'claudian-message claudian-message-system',
     });
     msgEl.setText(content);
   }
@@ -441,46 +441,46 @@ export class ClaudeAgentView extends ItemView {
   }
 
   private renderToolCall(parentEl: HTMLElement, toolCall: ToolCallInfo) {
-    const toolEl = parentEl.createDiv({ cls: 'claude-agent-tool-call' });
+    const toolEl = parentEl.createDiv({ cls: 'claudian-tool-call' });
     toolEl.dataset.toolId = toolCall.id;
     this.toolCallElements.set(toolCall.id, toolEl);
 
     // Header (clickable to expand/collapse)
-    const header = toolEl.createDiv({ cls: 'claude-agent-tool-header' });
+    const header = toolEl.createDiv({ cls: 'claudian-tool-header' });
 
     // Chevron icon
-    const chevron = header.createSpan({ cls: 'claude-agent-tool-chevron' });
+    const chevron = header.createSpan({ cls: 'claudian-tool-chevron' });
     setIcon(chevron, 'chevron-right');
 
     // Tool icon
-    const iconEl = header.createSpan({ cls: 'claude-agent-tool-icon' });
+    const iconEl = header.createSpan({ cls: 'claudian-tool-icon' });
     this.setToolIcon(iconEl, toolCall.name);
 
     // Tool label
-    const labelEl = header.createSpan({ cls: 'claude-agent-tool-label' });
+    const labelEl = header.createSpan({ cls: 'claudian-tool-label' });
     labelEl.setText(this.getToolLabel(toolCall.name, toolCall.input));
 
     // Status indicator
-    const statusEl = header.createSpan({ cls: 'claude-agent-tool-status' });
+    const statusEl = header.createSpan({ cls: 'claudian-tool-status' });
     statusEl.addClass(`status-${toolCall.status}`);
     if (toolCall.status === 'running') {
-      statusEl.createSpan({ cls: 'claude-agent-spinner' });
+      statusEl.createSpan({ cls: 'claudian-spinner' });
     }
 
     // Collapsible content
-    const content = toolEl.createDiv({ cls: 'claude-agent-tool-content' });
+    const content = toolEl.createDiv({ cls: 'claudian-tool-content' });
     content.style.display = 'none';
 
     // Input parameters
-    const inputSection = content.createDiv({ cls: 'claude-agent-tool-input' });
-    inputSection.createDiv({ cls: 'claude-agent-tool-section-label', text: 'Input' });
-    const inputCode = inputSection.createEl('pre', { cls: 'claude-agent-tool-code' });
+    const inputSection = content.createDiv({ cls: 'claudian-tool-input' });
+    inputSection.createDiv({ cls: 'claudian-tool-section-label', text: 'Input' });
+    const inputCode = inputSection.createEl('pre', { cls: 'claudian-tool-code' });
     inputCode.setText(this.formatToolInput(toolCall.name, toolCall.input));
 
     // Result placeholder
-    const resultSection = content.createDiv({ cls: 'claude-agent-tool-result' });
-    resultSection.createDiv({ cls: 'claude-agent-tool-section-label', text: 'Result' });
-    const resultCode = resultSection.createEl('pre', { cls: 'claude-agent-tool-code claude-agent-tool-result-code' });
+    const resultSection = content.createDiv({ cls: 'claudian-tool-result' });
+    resultSection.createDiv({ cls: 'claudian-tool-section-label', text: 'Result' });
+    const resultCode = resultSection.createEl('pre', { cls: 'claudian-tool-code claudian-tool-result-code' });
     resultCode.setText('Running...');
 
     // Toggle expand/collapse on header click
@@ -503,9 +503,9 @@ export class ClaudeAgentView extends ItemView {
     if (!toolEl) return;
 
     // Update status indicator
-    const statusEl = toolEl.querySelector('.claude-agent-tool-status');
+    const statusEl = toolEl.querySelector('.claudian-tool-status');
     if (statusEl) {
-      statusEl.className = 'claude-agent-tool-status';
+      statusEl.className = 'claudian-tool-status';
       statusEl.addClass(`status-${toolCall.status}`);
       statusEl.empty();
       if (toolCall.status === 'completed') {
@@ -516,7 +516,7 @@ export class ClaudeAgentView extends ItemView {
     }
 
     // Update result content
-    const resultCode = toolEl.querySelector('.claude-agent-tool-result-code');
+    const resultCode = toolEl.querySelector('.claudian-tool-result-code');
     if (resultCode && toolCall.result) {
       const truncated = this.truncateResult(toolCall.result);
       resultCode.setText(truncated);
@@ -733,20 +733,20 @@ export class ClaudeAgentView extends ItemView {
    */
   private renderStoredMessage(msg: ChatMessage) {
     const msgEl = this.messagesEl.createDiv({
-      cls: `claude-agent-message claude-agent-message-${msg.role}`,
+      cls: `claudian-message claudian-message-${msg.role}`,
     });
 
-    const contentEl = msgEl.createDiv({ cls: 'claude-agent-message-content' });
+    const contentEl = msgEl.createDiv({ cls: 'claudian-message-content' });
 
     if (msg.role === 'user') {
-      const textEl = contentEl.createDiv({ cls: 'claude-agent-text-block' });
+      const textEl = contentEl.createDiv({ cls: 'claudian-text-block' });
       this.renderContent(textEl, msg.content);
     } else if (msg.role === 'assistant') {
       // Use contentBlocks for proper ordering if available
       if (msg.contentBlocks && msg.contentBlocks.length > 0) {
         for (const block of msg.contentBlocks) {
           if (block.type === 'text') {
-            const textEl = contentEl.createDiv({ cls: 'claude-agent-text-block' });
+            const textEl = contentEl.createDiv({ cls: 'claudian-text-block' });
             this.renderContent(textEl, block.content);
           } else if (block.type === 'tool_use' && this.plugin.settings.showToolUse) {
             const toolCall = msg.toolCalls?.find(tc => tc.id === block.toolId);
@@ -758,7 +758,7 @@ export class ClaudeAgentView extends ItemView {
       } else {
         // Fallback for old conversations without contentBlocks
         if (msg.content) {
-          const textEl = contentEl.createDiv({ cls: 'claude-agent-text-block' });
+          const textEl = contentEl.createDiv({ cls: 'claudian-text-block' });
           this.renderContent(textEl, msg.content);
         }
         if (msg.toolCalls && this.plugin.settings.showToolUse) {
@@ -774,25 +774,25 @@ export class ClaudeAgentView extends ItemView {
    * Render a stored tool call (completed state)
    */
   private renderStoredToolCall(parentEl: HTMLElement, toolCall: ToolCallInfo) {
-    const toolEl = parentEl.createDiv({ cls: 'claude-agent-tool-call' });
+    const toolEl = parentEl.createDiv({ cls: 'claudian-tool-call' });
 
     // Header
-    const header = toolEl.createDiv({ cls: 'claude-agent-tool-header' });
+    const header = toolEl.createDiv({ cls: 'claudian-tool-header' });
 
     // Chevron icon
-    const chevron = header.createSpan({ cls: 'claude-agent-tool-chevron' });
+    const chevron = header.createSpan({ cls: 'claudian-tool-chevron' });
     setIcon(chevron, 'chevron-right');
 
     // Tool icon
-    const iconEl = header.createSpan({ cls: 'claude-agent-tool-icon' });
+    const iconEl = header.createSpan({ cls: 'claudian-tool-icon' });
     this.setToolIcon(iconEl, toolCall.name);
 
     // Tool label
-    const labelEl = header.createSpan({ cls: 'claude-agent-tool-label' });
+    const labelEl = header.createSpan({ cls: 'claudian-tool-label' });
     labelEl.setText(this.getToolLabel(toolCall.name, toolCall.input));
 
     // Status indicator (already completed)
-    const statusEl = header.createSpan({ cls: 'claude-agent-tool-status' });
+    const statusEl = header.createSpan({ cls: 'claudian-tool-status' });
     statusEl.addClass(`status-${toolCall.status}`);
     if (toolCall.status === 'completed') {
       setIcon(statusEl, 'check');
@@ -801,19 +801,19 @@ export class ClaudeAgentView extends ItemView {
     }
 
     // Collapsible content
-    const content = toolEl.createDiv({ cls: 'claude-agent-tool-content' });
+    const content = toolEl.createDiv({ cls: 'claudian-tool-content' });
     content.style.display = 'none';
 
     // Input parameters
-    const inputSection = content.createDiv({ cls: 'claude-agent-tool-input' });
-    inputSection.createDiv({ cls: 'claude-agent-tool-section-label', text: 'Input' });
-    const inputCode = inputSection.createEl('pre', { cls: 'claude-agent-tool-code' });
+    const inputSection = content.createDiv({ cls: 'claudian-tool-input' });
+    inputSection.createDiv({ cls: 'claudian-tool-section-label', text: 'Input' });
+    const inputCode = inputSection.createEl('pre', { cls: 'claudian-tool-code' });
     inputCode.setText(this.formatToolInput(toolCall.name, toolCall.input));
 
     // Result
-    const resultSection = content.createDiv({ cls: 'claude-agent-tool-result' });
-    resultSection.createDiv({ cls: 'claude-agent-tool-section-label', text: 'Result' });
-    const resultCode = resultSection.createEl('pre', { cls: 'claude-agent-tool-code' });
+    const resultSection = content.createDiv({ cls: 'claudian-tool-result' });
+    resultSection.createDiv({ cls: 'claudian-tool-section-label', text: 'Result' });
+    const resultCode = resultSection.createEl('pre', { cls: 'claudian-tool-code' });
     resultCode.setText(toolCall.result ? this.truncateResult(toolCall.result) : 'No result');
 
     // Toggle expand/collapse on header click
@@ -856,31 +856,31 @@ export class ClaudeAgentView extends ItemView {
     this.historyDropdown.empty();
 
     // Header
-    const dropdownHeader = this.historyDropdown.createDiv({ cls: 'claude-agent-history-header' });
+    const dropdownHeader = this.historyDropdown.createDiv({ cls: 'claudian-history-header' });
     dropdownHeader.createSpan({ text: 'Conversations' });
 
     // Conversation list (exclude current session)
-    const list = this.historyDropdown.createDiv({ cls: 'claude-agent-history-list' });
+    const list = this.historyDropdown.createDiv({ cls: 'claudian-history-list' });
     const conversations = this.plugin.getConversationList()
       .filter(conv => conv.id !== this.currentConversationId);
 
     if (conversations.length === 0) {
-      list.createDiv({ cls: 'claude-agent-history-empty', text: 'No other conversations' });
+      list.createDiv({ cls: 'claudian-history-empty', text: 'No other conversations' });
       return;
     }
 
     for (const conv of conversations) {
-      const item = list.createDiv({ cls: 'claude-agent-history-item' });
+      const item = list.createDiv({ cls: 'claudian-history-item' });
 
       // Icon
-      const iconEl = item.createDiv({ cls: 'claude-agent-history-item-icon' });
+      const iconEl = item.createDiv({ cls: 'claudian-history-item-icon' });
       setIcon(iconEl, 'message-square');
 
       // Content area (clickable to switch)
-      const content = item.createDiv({ cls: 'claude-agent-history-item-content' });
-      content.createDiv({ cls: 'claude-agent-history-item-title', text: conv.title });
+      const content = item.createDiv({ cls: 'claudian-history-item-content' });
+      content.createDiv({ cls: 'claudian-history-item-title', text: conv.title });
       content.createDiv({
-        cls: 'claude-agent-history-item-date',
+        cls: 'claudian-history-item-date',
         text: this.formatDate(conv.updatedAt),
       });
 
@@ -890,9 +890,9 @@ export class ClaudeAgentView extends ItemView {
       });
 
       // Action buttons
-      const actions = item.createDiv({ cls: 'claude-agent-history-item-actions' });
+      const actions = item.createDiv({ cls: 'claudian-history-item-actions' });
 
-      const renameBtn = actions.createEl('button', { cls: 'claude-agent-action-btn' });
+      const renameBtn = actions.createEl('button', { cls: 'claudian-action-btn' });
       setIcon(renameBtn, 'pencil');
       renameBtn.setAttribute('aria-label', 'Rename');
       renameBtn.addEventListener('click', (e) => {
@@ -900,7 +900,7 @@ export class ClaudeAgentView extends ItemView {
         this.showRenameInput(item, conv.id, conv.title);
       });
 
-      const deleteBtn = actions.createEl('button', { cls: 'claude-agent-action-btn claude-agent-delete-btn' });
+      const deleteBtn = actions.createEl('button', { cls: 'claudian-action-btn claudian-delete-btn' });
       setIcon(deleteBtn, 'trash-2');
       deleteBtn.setAttribute('aria-label', 'Delete');
       deleteBtn.addEventListener('click', async (e) => {
@@ -923,12 +923,12 @@ export class ClaudeAgentView extends ItemView {
    * Show inline rename input
    */
   private showRenameInput(item: HTMLElement, convId: string, currentTitle: string) {
-    const titleEl = item.querySelector('.claude-agent-history-item-title') as HTMLElement;
+    const titleEl = item.querySelector('.claudian-history-item-title') as HTMLElement;
     if (!titleEl) return;
 
     const input = document.createElement('input');
     input.type = 'text';
-    input.className = 'claude-agent-rename-input';
+    input.className = 'claudian-rename-input';
     input.value = currentTitle;
 
     titleEl.replaceWith(input);
@@ -1023,18 +1023,18 @@ export class ClaudeAgentView extends ItemView {
   private renderFileChip(path: string, onRemove: () => void) {
     if (!this.fileIndicatorEl) return;
 
-    const chipEl = this.fileIndicatorEl.createDiv({ cls: 'claude-agent-file-chip' });
+    const chipEl = this.fileIndicatorEl.createDiv({ cls: 'claudian-file-chip' });
 
-    const iconEl = chipEl.createSpan({ cls: 'claude-agent-file-chip-icon' });
+    const iconEl = chipEl.createSpan({ cls: 'claudian-file-chip-icon' });
     setIcon(iconEl, 'file-text');
 
     // Extract filename from path
     const filename = path.split('/').pop() || path;
-    const nameEl = chipEl.createSpan({ cls: 'claude-agent-file-chip-name' });
+    const nameEl = chipEl.createSpan({ cls: 'claudian-file-chip-name' });
     nameEl.setText(filename);
     nameEl.setAttribute('title', path); // Show full path on hover
 
-    const removeEl = chipEl.createSpan({ cls: 'claude-agent-file-chip-remove' });
+    const removeEl = chipEl.createSpan({ cls: 'claudian-file-chip-remove' });
     removeEl.setText('\u00D7'); // × symbol
     removeEl.setAttribute('aria-label', 'Remove');
 
@@ -1119,27 +1119,27 @@ export class ClaudeAgentView extends ItemView {
    */
   private renderMentionDropdown() {
     if (!this.mentionDropdown) {
-      this.mentionDropdown = this.inputContainerEl!.createDiv({ cls: 'claude-agent-mention-dropdown' });
+      this.mentionDropdown = this.inputContainerEl!.createDiv({ cls: 'claudian-mention-dropdown' });
     }
 
     this.mentionDropdown.empty();
 
     if (this.filteredFiles.length === 0) {
-      const emptyEl = this.mentionDropdown.createDiv({ cls: 'claude-agent-mention-empty' });
+      const emptyEl = this.mentionDropdown.createDiv({ cls: 'claudian-mention-empty' });
       emptyEl.setText('No matching files');
     } else {
       for (let i = 0; i < this.filteredFiles.length; i++) {
         const file = this.filteredFiles[i];
-        const itemEl = this.mentionDropdown.createDiv({ cls: 'claude-agent-mention-item' });
+        const itemEl = this.mentionDropdown.createDiv({ cls: 'claudian-mention-item' });
 
         if (i === this.selectedMentionIndex) {
           itemEl.addClass('selected');
         }
 
-        const iconEl = itemEl.createSpan({ cls: 'claude-agent-mention-icon' });
+        const iconEl = itemEl.createSpan({ cls: 'claudian-mention-icon' });
         setIcon(iconEl, 'file-text');
 
-        const pathEl = itemEl.createSpan({ cls: 'claude-agent-mention-path' });
+        const pathEl = itemEl.createSpan({ cls: 'claudian-mention-path' });
         pathEl.setText(file.path);
 
         itemEl.addEventListener('click', () => {
@@ -1170,7 +1170,7 @@ export class ClaudeAgentView extends ItemView {
    * Update the visual selection in the dropdown
    */
   private updateMentionSelection() {
-    const items = this.mentionDropdown?.querySelectorAll('.claude-agent-mention-item');
+    const items = this.mentionDropdown?.querySelectorAll('.claudian-mention-item');
     items?.forEach((item, index) => {
       if (index === this.selectedMentionIndex) {
         item.addClass('selected');

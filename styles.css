@@ -1,6 +1,6 @@
-/* Claude Agent Plugin Styles */
+/* Claudian Plugin Styles */
 
-.claude-agent-container {
+.claudian-container {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -9,39 +9,39 @@
 }
 
 /* Header */
-.claude-agent-header {
+.claudian-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
 }
 
-.claude-agent-title {
+.claudian-title {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.claude-agent-logo {
+.claudian-logo {
   display: flex;
   align-items: center;
 }
 
-.claude-agent-header h4 {
+.claudian-header h4 {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
 }
 
 /* Header actions (right side) */
-.claude-agent-header-actions {
+.claudian-header-actions {
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
 /* Header icon buttons (history, new, etc.) */
-.claude-agent-header-btn {
+.claudian-header-btn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -52,23 +52,23 @@
   transition: background 0.15s ease, color 0.15s ease;
 }
 
-.claude-agent-header-btn:hover {
+.claudian-header-btn:hover {
   background: var(--background-modifier-hover);
   color: var(--text-normal);
 }
 
-.claude-agent-header-btn svg {
+.claudian-header-btn svg {
   width: 16px;
   height: 16px;
 }
 
 /* History dropdown container */
-.claude-agent-history-container {
+.claudian-history-container {
   position: relative;
 }
 
 /* History dropdown menu */
-.claude-agent-history-menu {
+.claudian-history-menu {
   display: none;
   position: absolute;
   top: 100%;
@@ -86,11 +86,11 @@
   width: 280px;
 }
 
-.claude-agent-history-menu.visible {
+.claudian-history-menu.visible {
   display: block;
 }
 
-.claude-agent-history-header {
+.claudian-history-header {
   padding: 8px 12px;
   font-size: 12px;
   font-weight: 600;
@@ -100,12 +100,12 @@
   border-bottom: 1px solid var(--background-modifier-border);
 }
 
-.claude-agent-history-list {
+.claudian-history-list {
   max-height: 350px;
   overflow-y: auto;
 }
 
-.claude-agent-history-empty {
+.claudian-history-empty {
   padding: 16px;
   text-align: center;
   color: var(--text-muted);
@@ -113,7 +113,7 @@
 }
 
 /* History item */
-.claude-agent-history-item {
+.claudian-history-item {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -122,37 +122,37 @@
   transition: background 0.15s ease;
 }
 
-.claude-agent-history-item-icon {
+.claudian-history-item-icon {
   display: flex;
   align-items: center;
   color: var(--text-muted);
   flex-shrink: 0;
 }
 
-.claude-agent-history-item-icon svg {
+.claudian-history-item-icon svg {
   width: 16px;
   height: 16px;
 }
 
-.claude-agent-history-item:last-child {
+.claudian-history-item:last-child {
   border-bottom: none;
 }
 
-.claude-agent-history-item:hover {
+.claudian-history-item:hover {
   background: var(--background-modifier-hover);
 }
 
-.claude-agent-history-item.active {
+.claudian-history-item.active {
   background: var(--background-secondary);
 }
 
-.claude-agent-history-item-content {
+.claudian-history-item-content {
   flex: 1;
   min-width: 0;
   cursor: pointer;
 }
 
-.claude-agent-history-item-title {
+.claudian-history-item-title {
   font-size: 13px;
   font-weight: 500;
   color: var(--text-normal);
@@ -161,13 +161,13 @@
   text-overflow: ellipsis;
 }
 
-.claude-agent-history-item-date {
+.claudian-history-item-date {
   font-size: 11px;
   color: var(--text-faint);
   margin-top: 2px;
 }
 
-.claude-agent-history-item-actions {
+.claudian-history-item-actions {
   display: flex;
   gap: 4px;
   margin-left: 8px;
@@ -175,11 +175,11 @@
   transition: opacity 0.15s ease;
 }
 
-.claude-agent-history-item:hover .claude-agent-history-item-actions {
+.claudian-history-item:hover .claudian-history-item-actions {
   opacity: 1;
 }
 
-.claude-agent-action-btn {
+.claudian-action-btn {
   background: transparent;
   border: none;
   cursor: pointer;
@@ -189,22 +189,22 @@
   transition: background 0.15s ease, color 0.15s ease;
 }
 
-.claude-agent-action-btn:hover {
+.claudian-action-btn:hover {
   background: var(--background-modifier-hover);
   color: var(--text-normal);
 }
 
-.claude-agent-action-btn svg {
+.claudian-action-btn svg {
   width: 14px;
   height: 14px;
 }
 
-.claude-agent-delete-btn:hover {
+.claudian-delete-btn:hover {
   color: var(--color-red);
 }
 
 /* Rename input */
-.claude-agent-rename-input {
+.claudian-rename-input {
   width: 100%;
   padding: 2px 4px;
   font-size: 13px;
@@ -215,13 +215,13 @@
   color: var(--text-normal);
 }
 
-.claude-agent-rename-input:focus {
+.claudian-rename-input:focus {
   outline: none;
   box-shadow: 0 0 0 2px var(--interactive-accent-hover);
 }
 
 /* Messages area */
-.claude-agent-messages {
+.claudian-messages {
   flex: 1;
   overflow-y: auto;
   padding: 12px;
@@ -231,21 +231,21 @@
 }
 
 /* Individual messages */
-.claude-agent-message {
+.claudian-message {
   padding: 10px 14px;
   border-radius: 8px;
   max-width: 95%;
   word-wrap: break-word;
 }
 
-.claude-agent-message-user {
+.claudian-message-user {
   background: var(--interactive-accent);
   color: var(--text-on-accent);
   align-self: flex-end;
   border-bottom-right-radius: 4px;
 }
 
-.claude-agent-message-assistant {
+.claudian-message-assistant {
   background: transparent;
   align-self: stretch;
   width: 100%;
@@ -254,7 +254,7 @@
   text-align: left;
 }
 
-.claude-agent-message-system {
+.claudian-message-system {
   background: var(--background-primary-alt);
   color: var(--text-muted);
   font-size: 12px;
@@ -264,15 +264,15 @@
 }
 
 /* Message content */
-.claude-agent-message-content {
+.claudian-message-content {
   line-height: 1.5;
   user-select: text;
   -webkit-user-select: text;
 }
 
 /* Thinking indicator */
-.claude-agent-thinking {
-  color: var(--interactive-accent);
+.claudian-thinking {
+  color: #D97757;
   font-style: italic;
   padding: 4px 0;
   text-align: left;
@@ -285,27 +285,27 @@
 }
 
 /* Text blocks within message content */
-.claude-agent-text-block {
+.claudian-text-block {
   margin: 0;
 }
 
-.claude-agent-text-block + .claude-agent-tool-call {
+.claudian-text-block + .claudian-tool-call {
   margin-top: 8px;
 }
 
-.claude-agent-tool-call + .claude-agent-text-block {
+.claudian-tool-call + .claudian-text-block {
   margin-top: 8px;
 }
 
-.claude-agent-message-content p {
+.claudian-message-content p {
   margin: 0 0 8px 0;
 }
 
-.claude-agent-message-content p:last-child {
+.claudian-message-content p:last-child {
   margin-bottom: 0;
 }
 
-.claude-agent-message-content pre {
+.claudian-message-content pre {
   background: var(--background-primary);
   padding: 8px 12px;
   border-radius: 4px;
@@ -313,19 +313,19 @@
   margin: 8px 0;
 }
 
-.claude-agent-message-content code {
+.claudian-message-content code {
   font-family: var(--font-monospace);
   font-size: 13px;
 }
 
-.claude-agent-message-content ul,
-.claude-agent-message-content ol {
+.claudian-message-content ul,
+.claudian-message-content ol {
   margin: 8px 0;
   padding-left: 20px;
 }
 
 /* Tool call container */
-.claude-agent-tool-call {
+.claudian-tool-call {
   margin: 8px 0;
   border: 1px solid var(--background-modifier-border);
   border-radius: 6px;
@@ -333,12 +333,12 @@
   overflow: hidden;
 }
 
-.claude-agent-tool-call.expanded {
+.claudian-tool-call.expanded {
   border-color: var(--interactive-accent);
 }
 
 /* Tool call header */
-.claude-agent-tool-header {
+.claudian-tool-header {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -348,35 +348,35 @@
   transition: background 0.15s ease;
 }
 
-.claude-agent-tool-header:hover {
+.claudian-tool-header:hover {
   background: var(--background-modifier-hover);
 }
 
-.claude-agent-tool-chevron {
+.claudian-tool-chevron {
   display: flex;
   align-items: center;
   color: var(--text-muted);
   flex-shrink: 0;
 }
 
-.claude-agent-tool-chevron svg {
+.claudian-tool-chevron svg {
   width: 14px;
   height: 14px;
 }
 
-.claude-agent-tool-icon {
+.claudian-tool-icon {
   display: flex;
   align-items: center;
   color: var(--text-accent);
   flex-shrink: 0;
 }
 
-.claude-agent-tool-icon svg {
+.claudian-tool-icon svg {
   width: 16px;
   height: 16px;
 }
 
-.claude-agent-tool-label {
+.claudian-tool-label {
   flex: 1;
   font-size: 13px;
   font-family: var(--font-monospace);
@@ -386,31 +386,31 @@
   text-overflow: ellipsis;
 }
 
-.claude-agent-tool-status {
+.claudian-tool-status {
   display: flex;
   align-items: center;
   flex-shrink: 0;
 }
 
-.claude-agent-tool-status svg {
+.claudian-tool-status svg {
   width: 14px;
   height: 14px;
 }
 
-.claude-agent-tool-status.status-running {
+.claudian-tool-status.status-running {
   color: var(--text-accent);
 }
 
-.claude-agent-tool-status.status-completed {
+.claudian-tool-status.status-completed {
   color: var(--color-green);
 }
 
-.claude-agent-tool-status.status-error {
+.claudian-tool-status.status-error {
   color: var(--color-red);
 }
 
 /* Spinner animation */
-.claude-agent-spinner {
+.claudian-spinner {
   width: 14px;
   height: 14px;
   border: 2px solid var(--background-modifier-border);
@@ -424,21 +424,21 @@
 }
 
 /* Tool call content (collapsible) */
-.claude-agent-tool-content {
+.claudian-tool-content {
   border-top: 1px solid var(--background-modifier-border);
 }
 
-.claude-agent-tool-input,
-.claude-agent-tool-result {
+.claudian-tool-input,
+.claudian-tool-result {
   padding: 8px 12px;
 }
 
-.claude-agent-tool-result {
+.claudian-tool-result {
   border-top: 1px solid var(--background-modifier-border);
   background: var(--background-primary-alt);
 }
 
-.claude-agent-tool-section-label {
+.claudian-tool-section-label {
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
@@ -447,7 +447,7 @@
   letter-spacing: 0.5px;
 }
 
-.claude-agent-tool-code {
+.claudian-tool-code {
   font-family: var(--font-monospace);
   font-size: 12px;
   line-height: 1.4;
@@ -466,14 +466,14 @@
 
 
 /* Input area */
-.claude-agent-input-container {
+.claudian-input-container {
   position: relative;
   padding: 12px 0;
   background: var(--background-primary);
 }
 
 /* File indicator (attached files) */
-.claude-agent-file-indicator {
+.claudian-file-indicator {
   display: none;
   flex-wrap: wrap;
   gap: 6px;
@@ -481,7 +481,7 @@
   margin-bottom: 8px;
 }
 
-.claude-agent-file-chip {
+.claudian-file-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -493,26 +493,26 @@
   max-width: 200px;
 }
 
-.claude-agent-file-chip-icon {
+.claudian-file-chip-icon {
   display: flex;
   align-items: center;
   color: var(--text-muted);
   flex-shrink: 0;
 }
 
-.claude-agent-file-chip-icon svg {
+.claudian-file-chip-icon svg {
   width: 12px;
   height: 12px;
 }
 
-.claude-agent-file-chip-name {
+.claudian-file-chip-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-normal);
 }
 
-.claude-agent-file-chip-remove {
+.claudian-file-chip-remove {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -526,13 +526,13 @@
   transition: background 0.15s ease, color 0.15s ease;
 }
 
-.claude-agent-file-chip-remove:hover {
+.claudian-file-chip-remove:hover {
   background: var(--background-modifier-hover);
   color: var(--text-normal);
 }
 
 /* @ Mention dropdown */
-.claude-agent-mention-dropdown {
+.claudian-mention-dropdown {
   display: none;
   position: absolute;
   bottom: 100%;
@@ -550,11 +550,11 @@
   overflow-y: auto;
 }
 
-.claude-agent-mention-dropdown.visible {
+.claudian-mention-dropdown.visible {
   display: block;
 }
 
-.claude-agent-mention-item {
+.claudian-mention-item {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -563,24 +563,24 @@
   transition: background 0.1s ease;
 }
 
-.claude-agent-mention-item:hover,
-.claude-agent-mention-item.selected {
+.claudian-mention-item:hover,
+.claudian-mention-item.selected {
   background: var(--background-modifier-hover);
 }
 
-.claude-agent-mention-icon {
+.claudian-mention-icon {
   display: flex;
   align-items: center;
   color: var(--text-muted);
   flex-shrink: 0;
 }
 
-.claude-agent-mention-icon svg {
+.claudian-mention-icon svg {
   width: 14px;
   height: 14px;
 }
 
-.claude-agent-mention-path {
+.claudian-mention-path {
   font-size: 13px;
   color: var(--text-normal);
   overflow: hidden;
@@ -588,7 +588,7 @@
   white-space: nowrap;
 }
 
-.claude-agent-mention-empty {
+.claudian-mention-empty {
   padding: 12px;
   text-align: center;
   color: var(--text-muted);
@@ -596,20 +596,20 @@
 }
 
 /* Scrollbar for mention dropdown */
-.claude-agent-mention-dropdown::-webkit-scrollbar {
+.claudian-mention-dropdown::-webkit-scrollbar {
   width: 6px;
 }
 
-.claude-agent-mention-dropdown::-webkit-scrollbar-track {
+.claudian-mention-dropdown::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.claude-agent-mention-dropdown::-webkit-scrollbar-thumb {
+.claudian-mention-dropdown::-webkit-scrollbar-thumb {
   background: var(--background-modifier-border);
   border-radius: 3px;
 }
 
-.claude-agent-input {
+.claudian-input {
   width: 100%;
   min-height: 60px;
   max-height: 200px;
@@ -624,24 +624,24 @@
   line-height: 1.4;
 }
 
-.claude-agent-input:focus {
+.claudian-input:focus {
   outline: none;
   border-color: var(--interactive-accent);
   box-shadow: 0 0 0 2px var(--interactive-accent-hover);
 }
 
-.claude-agent-input::placeholder {
+.claudian-input::placeholder {
   color: var(--text-muted);
 }
 
-.claude-agent-buttons {
+.claudian-buttons {
   display: flex;
   justify-content: flex-end;
   margin-top: 8px;
   gap: 8px;
 }
 
-.claude-agent-send-btn {
+.claudian-send-btn {
   padding: 6px 16px;
   border-radius: 4px;
   font-size: 14px;
@@ -649,38 +649,38 @@
 }
 
 /* Settings page */
-.claude-agent-info {
+.claudian-info {
   background: var(--background-secondary);
   padding: 12px;
   border-radius: 6px;
   margin-top: 8px;
 }
 
-.claude-agent-info p {
+.claudian-info p {
   margin: 4px 0;
   font-size: 13px;
 }
 
-.claude-agent-vault-path {
+.claudian-vault-path {
   font-family: var(--font-monospace);
   font-size: 12px;
   color: var(--text-muted);
 }
 
 /* Scrollbar styling */
-.claude-agent-messages::-webkit-scrollbar {
+.claudian-messages::-webkit-scrollbar {
   width: 6px;
 }
 
-.claude-agent-messages::-webkit-scrollbar-track {
+.claudian-messages::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.claude-agent-messages::-webkit-scrollbar-thumb {
+.claudian-messages::-webkit-scrollbar-thumb {
   background: var(--background-modifier-border);
   border-radius: 3px;
 }
 
-.claude-agent-messages::-webkit-scrollbar-thumb:hover {
+.claudian-messages::-webkit-scrollbar-thumb:hover {
   background: var(--background-modifier-border-hover);
 }

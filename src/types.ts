@@ -1,15 +1,15 @@
-// Type definitions for Claude Agent plugin
+// Type definitions for Claudian plugin
 
-export const VIEW_TYPE_CLAUDE_AGENT = 'claude-agent-view';
+export const VIEW_TYPE_CLAUDIAN = 'claudian-view';
 
-export interface ClaudeAgentSettings {
+export interface ClaudianSettings {
   enableBlocklist: boolean;
   blockedCommands: string[];
   showToolUse: boolean;
   maxConversations: number;
 }
 
-export const DEFAULT_SETTINGS: ClaudeAgentSettings = {
+export const DEFAULT_SETTINGS: ClaudianSettings = {
   enableBlocklist: true,
   blockedCommands: [
     'rm -rf',

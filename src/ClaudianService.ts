@@ -2,17 +2,17 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { query, type Options } from '@anthropic-ai/claude-agent-sdk';
-import type ClaudeAgentPlugin from './main';
+import type ClaudianPlugin from './main';
 import { StreamChunk, ChatMessage, ToolCallInfo } from './types';
 import { SYSTEM_PROMPT } from './systemPrompt';
 
-export class ClaudeAgentService {
-  private plugin: ClaudeAgentPlugin;
+export class ClaudianService {
+  private plugin: ClaudianPlugin;
   private abortController: AbortController | null = null;
   private sessionId: string | null = null;
   private resolvedClaudePath: string | null = null;
 
-  constructor(plugin: ClaudeAgentPlugin) {
+  constructor(plugin: ClaudianPlugin) {
     this.plugin = plugin;
   }
 

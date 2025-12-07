@@ -1,7 +1,7 @@
 {
-  "name": "obsidian-claude-agent",
+  "name": "claudian",
   "version": "0.1.0",
-  "description": "Claude Code agent embedded in Obsidian sidebar",
+  "description": "Claudian - Claude Code embedded in Obsidian sidebar",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",

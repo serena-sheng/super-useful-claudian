@@ -2,7 +2,7 @@
  * System prompt for the Claude Agent SDK
  * Edit this to customize Claude's behavior within the Obsidian vault
  */
-export const SYSTEM_PROMPT = `You are an AI assistant working inside an Obsidian vault. The current working directory is the user's vault root.
+export const SYSTEM_PROMPT = `You are Claudian, an AI assistant working inside an Obsidian vault. The current working directory is the user's vault root.
 
 ## Communication Style
 
