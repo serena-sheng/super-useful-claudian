@@ -5,6 +5,7 @@
 
 import { TFile, WorkspaceLeaf } from 'obsidian';
 import { ClaudianView } from '../src/ClaudianView';
+import { FileContextManager } from '../src/ui/FileContext';
 
 // Helper to create a mock plugin
 function createMockPlugin(settingsOverrides = {}) {
@@ -169,19 +170,33 @@ function createMockElement(tag = 'div') {
   return element;
 }
 
-describe('ClaudianView - Edited Files Tracking', () => {
-  let view: ClaudianView;
+// Helper to create a FileContextManager for testing
+function createFileContextManager(mockPlugin: any) {
+  const containerEl = createMockElement('div');
+  const inputEl = createMockElement('textarea');
+  inputEl.value = '';
+  inputEl.selectionStart = 0;
+  inputEl.selectionEnd = 0;
+
+  return new FileContextManager(
+    mockPlugin.app,
+    containerEl,
+    inputEl as any,
+    {
+      getExcludedTags: () => mockPlugin.settings.excludedTags,
+      onFileOpen: async () => {},
+    }
+  );
+}
+
+describe('FileContextManager - Edited Files Tracking', () => {
+  let fileContextManager: FileContextManager;
   let mockPlugin: any;
-  let mockLeaf: any;
 
   beforeEach(() => {
     jest.clearAllMocks();
     mockPlugin = createMockPlugin();
-    mockLeaf = createMockLeaf();
-    view = new ClaudianView(mockLeaf, mockPlugin);
-
-    // Access private property for testing
-    (view as any).editedFilesThisSession = new Set<string>();
+    fileContextManager = createFileContextManager(mockPlugin);
   });
 
   describe('Tracking edited files from tool results', () => {
@@ -190,9 +205,9 @@ describe('ClaudianView - Edited Files Tracking', () => {
       const normalizedPath = 'notes/test.md';
 
       // Simulate a Write tool completing
-      (view as any).trackEditedFile('Write', { file_path: rawPath }, false);
+      fileContextManager.trackEditedFile('Write', { file_path: rawPath }, false);
 
-      expect((view as any).editedFilesThisSession.has(normalizedPath)).toBe(true);
+      expect((fileContextManager as any).editedFilesThisSession.has(normalizedPath)).toBe(true);
     });
 
     it('should track file when Edit tool completes successfully', async () => {
@@ -200,9 +215,9 @@ describe('ClaudianView - Edited Files Tracking', () => {
       const normalizedPath = 'notes/edited.md';
 
       // Simulate an Edit tool completing
-      (view as any).trackEditedFile('Edit', { file_path: rawPath }, false);
+      fileContextManager.trackEditedFile('Edit', { file_path: rawPath }, false);
 
-      expect((view as any).editedFilesThisSession.has(normalizedPath)).toBe(true);
+      expect((fileContextManager as any).editedFilesThisSession.has(normalizedPath)).toBe(true);
     });
 
     it('should NOT track file when tool result has error', async () => {
@@ -210,9 +225,9 @@ describe('ClaudianView - Edited Files Tracking', () => {
       const normalizedPath = 'notes/error.md';
 
       // Simulate a Write tool completing with error
-      (view as any).trackEditedFile('Write', { file_path: rawPath }, true);
+      fileContextManager.trackEditedFile('Write', { file_path: rawPath }, true);
 
-      expect((view as any).editedFilesThisSession.has(normalizedPath)).toBe(false);
+      expect((fileContextManager as any).editedFilesThisSession.has(normalizedPath)).toBe(false);
     });
 
     it('should NOT track files from Read tool', async () => {
@@ -220,18 +235,16 @@ describe('ClaudianView - Edited Files Tracking', () => {
       const normalizedPath = 'notes/read.md';
 
       // Simulate a Read tool completing
-      (view as any).trackEditedFile('Read', { file_path: rawPath }, false);
+      fileContextManager.trackEditedFile('Read', { file_path: rawPath }, false);
 
-      expect((view as any).editedFilesThisSession.has(normalizedPath)).toBe(false);
+      expect((fileContextManager as any).editedFilesThisSession.has(normalizedPath)).toBe(false);
     });
 
     it('should NOT track files from Bash tool', async () => {
-      const filePath = '/test/vault/script.sh';
-
       // Simulate a Bash tool completing
-      (view as any).trackEditedFile('Bash', { command: 'ls -la' }, false);
+      fileContextManager.trackEditedFile('Bash', { command: 'ls -la' }, false);
 
-      expect((view as any).editedFilesThisSession.size).toBe(0);
+      expect((fileContextManager as any).editedFilesThisSession.size).toBe(0);
     });
 
     it('should track NotebookEdit tool with notebook_path', async () => {
@@ -239,96 +252,122 @@ describe('ClaudianView - Edited Files Tracking', () => {
       const normalizedPath = 'notebook.ipynb';
 
       // Simulate NotebookEdit tool completing
-      (view as any).trackEditedFile('NotebookEdit', { notebook_path: notebookPath }, false);
+      fileContextManager.trackEditedFile('NotebookEdit', { notebook_path: notebookPath }, false);
 
-      expect((view as any).editedFilesThisSession.has(normalizedPath)).toBe(true);
+      expect((fileContextManager as any).editedFilesThisSession.has(normalizedPath)).toBe(true);
     });
 
     it('should normalize absolute paths to vault-relative for tracking and dismissal', async () => {
       const rawPath = '/test/vault/notes/absolute.md';
       const normalizedPath = 'notes/absolute.md';
 
-      (view as any).trackEditedFile('Write', { file_path: rawPath }, false);
-      expect((view as any).editedFilesThisSession.has(normalizedPath)).toBe(true);
+      fileContextManager.trackEditedFile('Write', { file_path: rawPath }, false);
+      expect((fileContextManager as any).editedFilesThisSession.has(normalizedPath)).toBe(true);
 
-      (view as any).dismissEditedFile(rawPath);
-      expect((view as any).editedFilesThisSession.has(normalizedPath)).toBe(false);
+      // Dismiss via private method for testing
+      (fileContextManager as any).dismissEditedFile(rawPath);
+      expect((fileContextManager as any).editedFilesThisSession.has(normalizedPath)).toBe(false);
     });
   });
 
   describe('Clearing edited files', () => {
-    it('should clear edited files on clearChat()', async () => {
+    it('should clear edited files on resetForNewConversation()', async () => {
       // Add some edited files
-      (view as any).editedFilesThisSession.add('file1.md');
-      (view as any).editedFilesThisSession.add('file2.md');
+      (fileContextManager as any).editedFilesThisSession.add('file1.md');
+      (fileContextManager as any).editedFilesThisSession.add('file2.md');
 
-      expect((view as any).editedFilesThisSession.size).toBe(2);
+      expect((fileContextManager as any).editedFilesThisSession.size).toBe(2);
 
-      // Clear the chat (simulate the clearEditedFiles call)
-      (view as any).clearEditedFiles();
+      // Reset for new conversation
+      fileContextManager.resetForNewConversation();
 
-      expect((view as any).editedFilesThisSession.size).toBe(0);
+      expect((fileContextManager as any).editedFilesThisSession.size).toBe(0);
     });
 
     it('should clear edited files on new conversation', async () => {
-      (view as any).editedFilesThisSession.add('old-file.md');
+      (fileContextManager as any).editedFilesThisSession.add('old-file.md');
 
       // Start new conversation
-      (view as any).clearEditedFiles();
+      fileContextManager.resetForNewConversation();
 
-      expect((view as any).editedFilesThisSession.size).toBe(0);
+      expect((fileContextManager as any).editedFilesThisSession.size).toBe(0);
     });
 
     it('should remove file from edited set when file is focused', async () => {
       const filePath = 'notes/edited.md';
-      (view as any).editedFilesThisSession.add(filePath);
+      (fileContextManager as any).editedFilesThisSession.add(filePath);
 
-      expect((view as any).editedFilesThisSession.has(filePath)).toBe(true);
+      expect((fileContextManager as any).editedFilesThisSession.has(filePath)).toBe(true);
 
-      // Simulate focusing on the file
-      (view as any).dismissEditedFile(filePath);
+      // Simulate focusing on the file (via private method)
+      (fileContextManager as any).dismissEditedFile(filePath);
 
-      expect((view as any).editedFilesThisSession.has(filePath)).toBe(false);
+      expect((fileContextManager as any).editedFilesThisSession.has(filePath)).toBe(false);
     });
 
-    it('should dismiss edited indicator when clicking chip and focusing file', async () => {
+    it('should dismiss edited indicator when focusing file', async () => {
       const filePath = 'notes/clicked.md';
-      (view as any).editedFilesThisSession.add(filePath);
+      (fileContextManager as any).editedFilesThisSession.add(filePath);
 
-      // After opening and focusing, file should be dismissed
-      (view as any).dismissEditedFile(filePath);
+      // After focusing, file should be dismissed
+      (fileContextManager as any).dismissEditedFile(filePath);
 
-      expect((view as any).isFileEdited(filePath)).toBe(false);
-    });
-  });
-
-  describe('Handling tool results when tool UI is hidden', () => {
-    it('should still track edited files from tool_result chunks', async () => {
-      mockPlugin.settings.showToolUse = false;
-      (view as any).messagesEl = createMockElement('div');
-      (view as any).messagesEl.scrollTop = 0;
-      (view as any).messagesEl.scrollHeight = 0;
-
-      const msg: any = { id: 'assistant-1', role: 'assistant', content: '', timestamp: Date.now(), toolCalls: [], contentBlocks: [] };
-
-      await (view as any).handleStreamChunk(
-        { type: 'tool_use', id: 'tool-1', name: 'Write', input: { file_path: 'notes/hidden.md' } },
-        msg
-      );
-      await (view as any).handleStreamChunk(
-        { type: 'tool_result', id: 'tool-1', content: 'ok', isError: false },
-        msg
-      );
-
-      expect((view as any).editedFilesThisSession.has('notes/hidden.md')).toBe(true);
+      expect((fileContextManager as any).isFileEdited(filePath)).toBe(false);
     });
   });
 });
 
-describe('ClaudianView - File Chip Click Handlers', () => {
+describe('ClaudianView - Handling tool results when tool UI is hidden', () => {
   let view: ClaudianView;
   let mockPlugin: any;
   let mockLeaf: any;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPlugin = createMockPlugin({ showToolUse: false });
+    mockLeaf = createMockLeaf();
+    view = new ClaudianView(mockLeaf, mockPlugin);
+
+    // Set up required elements
+    (view as any).messagesEl = createMockElement('div');
+    (view as any).messagesEl.scrollTop = 0;
+    (view as any).messagesEl.scrollHeight = 0;
+
+    // Create a mock file context manager
+    const containerEl = createMockElement('div');
+    const inputEl = createMockElement('textarea');
+    inputEl.value = '';
+    (view as any).fileContextManager = new FileContextManager(
+      mockPlugin.app,
+      containerEl,
+      inputEl as any,
+      {
+        getExcludedTags: () => mockPlugin.settings.excludedTags,
+        onFileOpen: async () => {},
+      }
+    );
+  });
+
+  it('should still track edited files from tool_result chunks', async () => {
+    const msg: any = { id: 'assistant-1', role: 'assistant', content: '', timestamp: Date.now(), toolCalls: [], contentBlocks: [] };
+
+    await (view as any).handleStreamChunk(
+      { type: 'tool_use', id: 'tool-1', name: 'Write', input: { file_path: 'notes/hidden.md' } },
+      msg
+    );
+    await (view as any).handleStreamChunk(
+      { type: 'tool_result', id: 'tool-1', content: 'ok', isError: false },
+      msg
+    );
+
+    expect((view as any).fileContextManager.getAttachedFiles().has('notes/hidden.md') ||
+           (view as any).fileContextManager['editedFilesThisSession'].has('notes/hidden.md')).toBe(true);
+  });
+});
+
+describe('FileContextManager - File Chip Click Handlers', () => {
+  let fileContextManager: FileContextManager;
+  let mockPlugin: any;
   let mockOpenFile: jest.Mock;
 
   beforeEach(() => {
@@ -338,11 +377,7 @@ describe('ClaudianView - File Chip Click Handlers', () => {
     mockPlugin.app.workspace.getLeaf = jest.fn().mockReturnValue({
       openFile: mockOpenFile,
     });
-    mockLeaf = createMockLeaf();
-    view = new ClaudianView(mockLeaf, mockPlugin);
-    (view as any).editedFilesThisSession = new Set<string>();
-    // Set the app property (inherited from ItemView)
-    (view as any).app = mockPlugin.app;
+    fileContextManager = createFileContextManager(mockPlugin);
   });
 
   describe('Opening files on chip click', () => {
@@ -352,8 +387,8 @@ describe('ClaudianView - File Chip Click Handlers', () => {
 
       mockPlugin.app.vault.getAbstractFileByPath.mockReturnValue(mockFile);
 
-      // Simulate opening file from chip click
-      await (view as any).openFileFromChip(filePath);
+      // Simulate opening file from chip click (via private method)
+      await (fileContextManager as any).openFileFromChip(filePath);
 
       expect(mockPlugin.app.vault.getAbstractFileByPath).toHaveBeenCalledWith(filePath);
       expect(mockPlugin.app.workspace.getLeaf).toHaveBeenCalledWith('tab');
@@ -365,7 +400,7 @@ describe('ClaudianView - File Chip Click Handlers', () => {
 
       mockPlugin.app.vault.getAbstractFileByPath.mockReturnValue(null);
 
-      await (view as any).openFileFromChip(filePath);
+      await (fileContextManager as any).openFileFromChip(filePath);
 
       expect(mockPlugin.app.vault.getAbstractFileByPath).toHaveBeenCalledWith(filePath);
       expect(mockOpenFile).not.toHaveBeenCalled();
@@ -375,9 +410,9 @@ describe('ClaudianView - File Chip Click Handlers', () => {
   describe('Edited class on chips', () => {
     it('should return true when file is in editedFilesThisSession', () => {
       const filePath = 'edited.md';
-      (view as any).editedFilesThisSession.add(filePath);
+      (fileContextManager as any).editedFilesThisSession.add(filePath);
 
-      const isEdited = (view as any).isFileEdited(filePath);
+      const isEdited = (fileContextManager as any).isFileEdited(filePath);
 
       expect(isEdited).toBe(true);
     });
@@ -385,37 +420,33 @@ describe('ClaudianView - File Chip Click Handlers', () => {
     it('should return false when file is NOT in editedFilesThisSession', () => {
       const filePath = 'not-edited.md';
 
-      const isEdited = (view as any).isFileEdited(filePath);
+      const isEdited = (fileContextManager as any).isFileEdited(filePath);
 
       expect(isEdited).toBe(false);
     });
   });
 });
 
-describe('ClaudianView - Edited Files Section', () => {
-  let view: ClaudianView;
+describe('FileContextManager - Edited Files Section', () => {
+  let fileContextManager: FileContextManager;
   let mockPlugin: any;
-  let mockLeaf: any;
 
   beforeEach(() => {
     jest.clearAllMocks();
     mockPlugin = createMockPlugin();
-    mockLeaf = createMockLeaf();
-    view = new ClaudianView(mockLeaf, mockPlugin);
-    (view as any).editedFilesThisSession = new Set<string>();
-    (view as any).attachedFiles = new Set<string>();
+    fileContextManager = createFileContextManager(mockPlugin);
   });
 
   describe('Visibility logic', () => {
     it('should return non-attached edited files only', () => {
       // File is edited but NOT attached
-      (view as any).editedFilesThisSession.add('edited1.md');
-      (view as any).editedFilesThisSession.add('edited2.md');
+      (fileContextManager as any).editedFilesThisSession.add('edited1.md');
+      (fileContextManager as any).editedFilesThisSession.add('edited2.md');
       // This file is both edited AND attached
-      (view as any).editedFilesThisSession.add('attached.md');
-      (view as any).attachedFiles.add('attached.md');
+      (fileContextManager as any).editedFilesThisSession.add('attached.md');
+      (fileContextManager as any).attachedFiles.add('attached.md');
 
-      const nonAttached = (view as any).getNonAttachedEditedFiles();
+      const nonAttached = (fileContextManager as any).getNonAttachedEditedFiles();
 
       expect(nonAttached).toHaveLength(2);
       expect(nonAttached).toContain('edited1.md');
@@ -424,39 +455,39 @@ describe('ClaudianView - Edited Files Section', () => {
     });
 
     it('should return empty array when all edited files are attached', () => {
-      (view as any).editedFilesThisSession.add('file.md');
-      (view as any).attachedFiles.add('file.md');
+      (fileContextManager as any).editedFilesThisSession.add('file.md');
+      (fileContextManager as any).attachedFiles.add('file.md');
 
-      const nonAttached = (view as any).getNonAttachedEditedFiles();
+      const nonAttached = (fileContextManager as any).getNonAttachedEditedFiles();
 
       expect(nonAttached).toHaveLength(0);
     });
 
     it('should return empty array when no files are edited', () => {
-      const nonAttached = (view as any).getNonAttachedEditedFiles();
+      const nonAttached = (fileContextManager as any).getNonAttachedEditedFiles();
 
       expect(nonAttached).toHaveLength(0);
     });
 
     it('should show edited files section when has non-attached edited files', () => {
-      (view as any).editedFilesThisSession.add('edited.md');
+      (fileContextManager as any).editedFilesThisSession.add('edited.md');
 
-      const shouldShow = (view as any).shouldShowEditedFilesSection();
+      const shouldShow = (fileContextManager as any).shouldShowEditedFilesSection();
 
       expect(shouldShow).toBe(true);
     });
 
     it('should NOT show edited files section when all edited files are attached', () => {
-      (view as any).editedFilesThisSession.add('attached.md');
-      (view as any).attachedFiles.add('attached.md');
+      (fileContextManager as any).editedFilesThisSession.add('attached.md');
+      (fileContextManager as any).attachedFiles.add('attached.md');
 
-      const shouldShow = (view as any).shouldShowEditedFilesSection();
+      const shouldShow = (fileContextManager as any).shouldShowEditedFilesSection();
 
       expect(shouldShow).toBe(false);
     });
 
     it('should NOT show edited files section when no files are edited', () => {
-      const shouldShow = (view as any).shouldShowEditedFilesSection();
+      const shouldShow = (fileContextManager as any).shouldShowEditedFilesSection();
 
       expect(shouldShow).toBe(false);
     });
@@ -464,32 +495,28 @@ describe('ClaudianView - Edited Files Section', () => {
 
   describe('UI refresh on attachment changes', () => {
     it('should hide edited section when an edited file becomes attached', () => {
-      (view as any).editedFilesIndicatorEl = createMockElement('div');
-      (view as any).fileIndicatorEl = createMockElement('div');
-      (view as any).editedFilesThisSession.add('notes/edited.md');
+      (fileContextManager as any).editedFilesThisSession.add('notes/edited.md');
 
-      (view as any).updateEditedFilesIndicator();
-      expect((view as any).editedFilesIndicatorEl.style.display).toBe('flex');
+      (fileContextManager as any).updateEditedFilesIndicator();
+      expect((fileContextManager as any).editedFilesIndicatorEl.style.display).toBe('flex');
 
-      (view as any).attachedFiles.add('notes/edited.md');
-      (view as any).updateFileIndicator();
+      (fileContextManager as any).attachedFiles.add('notes/edited.md');
+      (fileContextManager as any).updateFileIndicator();
 
-      expect((view as any).editedFilesIndicatorEl.style.display).toBe('none');
+      expect((fileContextManager as any).editedFilesIndicatorEl.style.display).toBe('none');
     });
 
     it('should show edited section when an edited attached file is removed', () => {
-      (view as any).editedFilesIndicatorEl = createMockElement('div');
-      (view as any).fileIndicatorEl = createMockElement('div');
-      (view as any).editedFilesThisSession.add('notes/edited.md');
-      (view as any).attachedFiles.add('notes/edited.md');
+      (fileContextManager as any).editedFilesThisSession.add('notes/edited.md');
+      (fileContextManager as any).attachedFiles.add('notes/edited.md');
 
-      (view as any).updateFileIndicator();
-      expect((view as any).editedFilesIndicatorEl.style.display).toBe('none');
+      (fileContextManager as any).updateFileIndicator();
+      expect((fileContextManager as any).editedFilesIndicatorEl.style.display).toBe('none');
 
-      (view as any).attachedFiles.delete('notes/edited.md');
-      (view as any).updateFileIndicator();
+      (fileContextManager as any).attachedFiles.delete('notes/edited.md');
+      (fileContextManager as any).updateFileIndicator();
 
-      expect((view as any).editedFilesIndicatorEl.style.display).toBe('flex');
+      expect((fileContextManager as any).editedFilesIndicatorEl.style.display).toBe('flex');
     });
   });
 });
@@ -506,28 +533,38 @@ describe('ClaudianView - Conversation boundaries', () => {
 
     const view = new ClaudianView(createMockLeaf(), mockPlugin);
     (view as any).messagesEl = createMockElement('div');
-    (view as any).fileIndicatorEl = createMockElement('div');
-    (view as any).editedFilesIndicatorEl = createMockElement('div');
     (view as any).currentConversationId = 'conv-1';
     (view as any).messages = [];
-    (view as any).editedFilesThisSession = new Set<string>(['notes/old.md']);
+
+    // Create a mock file context manager
+    const containerEl = createMockElement('div');
+    const inputEl = createMockElement('textarea');
+    inputEl.value = '';
+    (view as any).fileContextManager = new FileContextManager(
+      mockPlugin.app,
+      containerEl,
+      inputEl as any,
+      {
+        getExcludedTags: () => mockPlugin.settings.excludedTags,
+        onFileOpen: async () => {},
+      }
+    );
+    ((view as any).fileContextManager as any).editedFilesThisSession.add('notes/old.md');
 
     await (view as any).onConversationSelect('conv-2');
 
-    expect((view as any).editedFilesThisSession.size).toBe(0);
+    expect(((view as any).fileContextManager as any).editedFilesThisSession.size).toBe(0);
   });
 });
 
-describe('ClaudianView - Excluded Tags', () => {
-  let view: ClaudianView;
+describe('FileContextManager - Excluded Tags', () => {
+  let fileContextManager: FileContextManager;
   let mockPlugin: any;
-  let mockLeaf: any;
 
   beforeEach(() => {
     jest.clearAllMocks();
     mockPlugin = createMockPlugin({ excludedTags: ['system', 'private'] });
-    mockLeaf = createMockLeaf();
-    view = new ClaudianView(mockLeaf, mockPlugin);
+    fileContextManager = createFileContextManager(mockPlugin);
   });
 
   describe('hasExcludedTag', () => {
@@ -535,7 +572,7 @@ describe('ClaudianView - Excluded Tags', () => {
       mockPlugin.settings.excludedTags = [];
       const file = new TFile('notes/test.md');
 
-      const result = (view as any).hasExcludedTag(file);
+      const result = (fileContextManager as any).hasExcludedTag(file);
 
       expect(result).toBe(false);
     });
@@ -544,7 +581,7 @@ describe('ClaudianView - Excluded Tags', () => {
       mockPlugin.app.metadataCache.getFileCache.mockReturnValue(null);
       const file = new TFile('notes/test.md');
 
-      const result = (view as any).hasExcludedTag(file);
+      const result = (fileContextManager as any).hasExcludedTag(file);
 
       expect(result).toBe(false);
     });
@@ -553,7 +590,7 @@ describe('ClaudianView - Excluded Tags', () => {
       mockPlugin.app.metadataCache.getFileCache.mockReturnValue({});
       const file = new TFile('notes/test.md');
 
-      const result = (view as any).hasExcludedTag(file);
+      const result = (fileContextManager as any).hasExcludedTag(file);
 
       expect(result).toBe(false);
     });
@@ -564,7 +601,7 @@ describe('ClaudianView - Excluded Tags', () => {
       });
       const file = new TFile('notes/test.md');
 
-      const result = (view as any).hasExcludedTag(file);
+      const result = (fileContextManager as any).hasExcludedTag(file);
 
       expect(result).toBe(true);
     });
@@ -575,7 +612,7 @@ describe('ClaudianView - Excluded Tags', () => {
       });
       const file = new TFile('notes/test.md');
 
-      const result = (view as any).hasExcludedTag(file);
+      const result = (fileContextManager as any).hasExcludedTag(file);
 
       expect(result).toBe(true);
     });
@@ -586,7 +623,7 @@ describe('ClaudianView - Excluded Tags', () => {
       });
       const file = new TFile('notes/test.md');
 
-      const result = (view as any).hasExcludedTag(file);
+      const result = (fileContextManager as any).hasExcludedTag(file);
 
       expect(result).toBe(true);
     });
@@ -597,7 +634,7 @@ describe('ClaudianView - Excluded Tags', () => {
       });
       const file = new TFile('notes/test.md');
 
-      const result = (view as any).hasExcludedTag(file);
+      const result = (fileContextManager as any).hasExcludedTag(file);
 
       expect(result).toBe(true);
     });
@@ -609,7 +646,7 @@ describe('ClaudianView - Excluded Tags', () => {
       });
       const file = new TFile('notes/test.md');
 
-      const result = (view as any).hasExcludedTag(file);
+      const result = (fileContextManager as any).hasExcludedTag(file);
 
       expect(result).toBe(false);
     });
@@ -620,18 +657,13 @@ describe('ClaudianView - Excluded Tags', () => {
       });
       const file = new TFile('notes/secret.md');
 
-      const result = (view as any).hasExcludedTag(file);
+      const result = (fileContextManager as any).hasExcludedTag(file);
 
       expect(result).toBe(true);
     });
   });
 
   describe('Auto-attach exclusion', () => {
-    beforeEach(() => {
-      (view as any).attachedFiles = new Set<string>();
-      (view as any).sessionStarted = false;
-    });
-
     it('should NOT auto-attach file with excluded tag on file-open', () => {
       mockPlugin.app.metadataCache.getFileCache.mockReturnValue({
         frontmatter: { tags: ['system'] },
@@ -639,7 +671,7 @@ describe('ClaudianView - Excluded Tags', () => {
       const file = new TFile('notes/system-file.md');
 
       // Simulate the check that happens during file-open
-      const hasExcluded = (view as any).hasExcludedTag(file);
+      const hasExcluded = (fileContextManager as any).hasExcludedTag(file);
 
       expect(hasExcluded).toBe(true);
       // File should NOT be added to attachedFiles
@@ -651,7 +683,7 @@ describe('ClaudianView - Excluded Tags', () => {
       });
       const file = new TFile('notes/normal-file.md');
 
-      const hasExcluded = (view as any).hasExcludedTag(file);
+      const hasExcluded = (fileContextManager as any).hasExcludedTag(file);
 
       expect(hasExcluded).toBe(false);
       // File CAN be added to attachedFiles

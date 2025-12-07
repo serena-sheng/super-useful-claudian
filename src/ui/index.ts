@@ -1,0 +1,39 @@
+// UI Components barrel export
+
+export { ApprovalModal, type ApprovalDecision } from './ApprovalModal';
+
+export {
+  ModelSelector,
+  ThinkingBudgetSelector,
+  PermissionToggle,
+  createInputToolbar,
+  type ToolbarSettings,
+  type ToolbarCallbacks,
+} from './InputToolbar';
+
+export {
+  FileContextManager,
+  type FileContextCallbacks,
+} from './FileContext';
+
+export {
+  getToolIcon,
+  setToolIcon,
+  getToolLabel,
+  formatToolInput,
+  truncateResult,
+  isBlockedToolResult,
+  renderToolCall,
+  updateToolCallResult,
+  renderStoredToolCall,
+} from './ToolCallRenderer';
+
+export {
+  createThinkingBlock,
+  appendThinkingContent,
+  finalizeThinkingBlock,
+  cleanupThinkingBlock,
+  renderStoredThinkingBlock,
+  type ThinkingBlockState,
+  type RenderContentFn,
+} from './ThinkingBlockRenderer';

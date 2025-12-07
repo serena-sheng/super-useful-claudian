@@ -110,13 +110,20 @@ npm run build
 
 ```
 src/
-├── main.ts            # Plugin entry point
-├── ClaudianView.ts    # Sidebar chat UI with tool call display
-├── ClaudianService.ts # Claude Agent SDK wrapper
-├── ClaudianSettings.ts # Settings tab
-├── systemPrompt.ts    # System prompt for Claude
-├── types.ts           # Type definitions
-└── utils.ts           # Utility functions
+├── main.ts              # Plugin entry point
+├── ClaudianView.ts      # Sidebar chat UI, orchestrates components
+├── ClaudianService.ts   # Claude Agent SDK wrapper
+├── ClaudianSettings.ts  # Settings tab
+├── systemPrompt.ts      # System prompt for Claude
+├── types.ts             # Type definitions
+├── utils.ts             # Utility functions
+└── ui/                  # Modular UI components
+    ├── index.ts              # Barrel export
+    ├── ApprovalModal.ts      # Permission approval dialog
+    ├── InputToolbar.ts       # Model/thinking/permission selectors
+    ├── FileContext.ts        # File attachments & @mentions
+    ├── ToolCallRenderer.ts   # Tool call display
+    └── ThinkingBlockRenderer.ts # Extended thinking UI
 ```
 
 ## Roadmap
@@ -130,7 +137,8 @@ src/
 - [x] Model selection (Haiku, Sonnet, Opus)
 - [x] Thinking token budget adjustment (Off/Low/Medium/High)
 - [x] Permission modes (Yolo/Safe)
-- [x] Edited files indicator for Claude edits (border on attachments, “Edited:” chips, click-to-open, auto-dismiss)
+- [x] Edited files indicator for Claude edits (border on attachments, "Edited:" chips, click-to-open, auto-dismiss)
+- [x] Modular UI architecture (extracted reusable components)
 - [ ] Chat history export
 
 ## License

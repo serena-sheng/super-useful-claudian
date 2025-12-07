@@ -10,14 +10,32 @@ Claudian - An Obsidian plugin that embeds Claude Code as a sidebar chat interfac
 
 ```
 src/
-├── main.ts            # Plugin entry point, registers view and settings
-├── ClaudianView.ts    # Sidebar chat UI (ItemView), handles streaming display
-├── ClaudianService.ts # Claude Agent SDK wrapper, transforms SDK messages
-├── ClaudianSettings.ts # Settings tab
-├── systemPrompt.ts    # System prompt for Claude agent
-├── types.ts           # Shared type definitions (StreamChunk, ToolCallInfo, etc.)
-└── utils.ts           # Utility functions (getVaultPath)
+├── main.ts              # Plugin entry point, registers view and settings
+├── ClaudianView.ts      # Sidebar chat UI (ItemView), orchestrates UI components
+├── ClaudianService.ts   # Claude Agent SDK wrapper, transforms SDK messages
+├── ClaudianSettings.ts  # Settings tab
+├── systemPrompt.ts      # System prompt for Claude agent
+├── types.ts             # Shared type definitions (StreamChunk, ToolCallInfo, etc.)
+├── utils.ts             # Utility functions (getVaultPath)
+└── ui/                  # Modular UI components
+    ├── index.ts              # Barrel export for all UI components
+    ├── ApprovalModal.ts      # Permission approval dialog (Modal)
+    ├── InputToolbar.ts       # Model selector, thinking budget, permission toggle
+    ├── FileContext.ts        # File attachments, @mentions, edited files tracking
+    ├── ToolCallRenderer.ts   # Tool call UI rendering and status updates
+    └── ThinkingBlockRenderer.ts # Extended thinking block UI with timer
 ```
+
+### UI Component Responsibilities
+
+| Component | Responsibility |
+|-----------|----------------|
+| `ClaudianView` | Core chat view, message streaming, conversation management |
+| `ApprovalModal` | Permission dialogs for Safe mode tool approval |
+| `InputToolbar` | Model/thinking/permission selectors below textarea |
+| `FileContext` | File attachment state, @mention dropdown, edited files indicator |
+| `ToolCallRenderer` | Tool call display with expand/collapse and status |
+| `ThinkingBlockRenderer` | Extended thinking blocks with live timer |
 
 ## Key Technologies
 
@@ -81,6 +99,40 @@ const vaultPath = this.app.vault.adapter.basePath;
 ### Markdown Rendering
 ```typescript
 await MarkdownRenderer.renderMarkdown(markdown, container, sourcePath, component);
+```
+
+### UI Component Usage
+```typescript
+// Import from barrel export
+import {
+  ApprovalModal,
+  createInputToolbar,
+  FileContextManager,
+  renderToolCall,
+  createThinkingBlock,
+} from './ui';
+
+// Create toolbar with callbacks
+const toolbar = createInputToolbar(parentEl, {
+  getSettings: () => plugin.settings,
+  onModelChange: async (model) => { /* ... */ },
+  onThinkingBudgetChange: async (budget) => { /* ... */ },
+  onPermissionModeChange: async (mode) => { /* ... */ },
+});
+
+// Create file context manager
+const fileContext = new FileContextManager(app, containerEl, inputEl, {
+  getExcludedTags: () => settings.excludedTags,
+  onFileOpen: async (path) => { /* ... */ },
+});
+
+// Render tool calls during streaming
+renderToolCall(contentEl, toolCall, toolCallElements);
+
+// Create thinking block with timer
+const thinkingState = createThinkingBlock(contentEl, renderContentFn);
+await appendThinkingContent(thinkingState, content, renderContentFn);
+finalizeThinkingBlock(thinkingState);
 ```
 
 ## SDK Message Types
