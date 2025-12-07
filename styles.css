@@ -571,7 +571,6 @@
 .claudian-input-container {
   position: relative;
   padding: 12px 0;
-  background: var(--background-primary);
 }
 
 /* File indicator (attached files) */
@@ -896,17 +895,19 @@
   background: transparent;
 }
 
-/* Options container - absolutely positioned to avoid layout shift */
+/* Options container - expands vertically upward */
 .claudian-thinking-options {
   position: absolute;
   left: 0;
-  top: 0;
+  bottom: 100%;
+  margin-bottom: 4px;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 2px;
   background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
   border-radius: 4px;
-  padding: 2px;
+  padding: 4px;
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.15s ease, visibility 0.15s ease;

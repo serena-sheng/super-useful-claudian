@@ -103,14 +103,14 @@ export class ClaudianView extends ItemView {
     logoEl.innerHTML = `<svg viewBox="0 0 100 100" width="16" height="16">
       <g fill="#D97757">
         ${Array.from({ length: 12 }, (_, i) => {
-          const angle = (i * 30 - 90) * Math.PI / 180;
-          const cx = 53, cy = 50;
-          const x1 = cx + 15 * Math.cos(angle);
-          const y1 = cy + 15 * Math.sin(angle);
-          const x2 = cx + 45 * Math.cos(angle);
-          const y2 = cy + 45 * Math.sin(angle);
-          return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#D97757" stroke-width="8" stroke-linecap="round"/>`;
-        }).join('')}
+      const angle = (i * 30 - 90) * Math.PI / 180;
+      const cx = 53, cy = 50;
+      const x1 = cx + 15 * Math.cos(angle);
+      const y1 = cy + 15 * Math.sin(angle);
+      const x2 = cx + 45 * Math.cos(angle);
+      const y2 = cy + 45 * Math.sin(angle);
+      return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#D97757" stroke-width="8" stroke-linecap="round"/>`;
+    }).join('')}
       </g>
     </svg>`;
     titleContainer.createEl('h4', { text: 'Claudian' });
@@ -167,7 +167,7 @@ export class ClaudianView extends ItemView {
     this.inputEl = inputWrapper.createEl('textarea', {
       cls: 'claudian-input',
       attr: {
-        placeholder: 'Ask Claude anything... (Enter to send, Shift+Enter for newline)',
+        placeholder: 'Ask Claudian anything...\n\n(Enter to send, Shift+Enter for newline)',
         rows: '3',
       },
     });
