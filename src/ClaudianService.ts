@@ -343,6 +343,14 @@ export class ClaudianService {
         break;
 
       case 'user':
+        // Check for blocked tool calls (from hook denials)
+        if ((message as any)._blocked && (message as any)._blockReason) {
+          yield {
+            type: 'blocked',
+            content: (message as any)._blockReason,
+          };
+          break;
+        }
         // User messages can contain tool results
         if (message.tool_use_result !== undefined && message.parent_tool_use_id) {
           yield {

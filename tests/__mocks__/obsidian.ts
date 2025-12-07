@@ -86,6 +86,51 @@ export class Setting {
   addTextArea = jest.fn().mockReturnThis();
 }
 
+export class Modal {
+  app: any;
+  containerEl: any = {
+    createDiv: jest.fn().mockReturnValue({
+      createEl: jest.fn().mockReturnValue({ addEventListener: jest.fn() }),
+      createDiv: jest.fn().mockReturnValue({
+        createEl: jest.fn().mockReturnValue({ addEventListener: jest.fn() }),
+        createDiv: jest.fn().mockReturnValue({
+          createEl: jest.fn(),
+        }),
+        setText: jest.fn(),
+      }),
+      addClass: jest.fn(),
+      setText: jest.fn(),
+    }),
+    empty: jest.fn(),
+    addClass: jest.fn(),
+  };
+  contentEl: any = {
+    createDiv: jest.fn().mockReturnValue({
+      createEl: jest.fn().mockReturnValue({ addEventListener: jest.fn() }),
+      createDiv: jest.fn().mockReturnValue({
+        createEl: jest.fn().mockReturnValue({ addEventListener: jest.fn() }),
+        createDiv: jest.fn().mockReturnValue({
+          createEl: jest.fn(),
+        }),
+        setText: jest.fn(),
+      }),
+      addClass: jest.fn(),
+      setText: jest.fn(),
+    }),
+    empty: jest.fn(),
+    addClass: jest.fn(),
+  };
+
+  constructor(app: any) {
+    this.app = app;
+  }
+
+  open = jest.fn();
+  close = jest.fn();
+  onOpen = jest.fn();
+  onClose = jest.fn();
+}
+
 export const MarkdownRenderer = {
   renderMarkdown: jest.fn().mockResolvedValue(undefined),
 };

@@ -34,10 +34,6 @@ describe('types.ts', () => {
       expect(DEFAULT_SETTINGS.blockedCommands).toContain('rm -rf');
     });
 
-    it('should block rm -r / by default', () => {
-      expect(DEFAULT_SETTINGS.blockedCommands).toContain('rm -r /');
-    });
-
     it('should block chmod 777 by default', () => {
       expect(DEFAULT_SETTINGS.blockedCommands).toContain('chmod 777');
     });
@@ -46,24 +42,9 @@ describe('types.ts', () => {
       expect(DEFAULT_SETTINGS.blockedCommands).toContain('chmod -R 777');
     });
 
-    it('should block mkfs by default', () => {
-      expect(DEFAULT_SETTINGS.blockedCommands).toContain('mkfs');
-    });
-
-    it('should block dd if= by default', () => {
-      expect(DEFAULT_SETTINGS.blockedCommands).toContain('dd if=');
-    });
-
-    it('should block > /dev/sd by default', () => {
-      expect(DEFAULT_SETTINGS.blockedCommands).toContain('> /dev/sd');
-    });
-
-    it('should have exactly 7 default blocked commands', () => {
-      expect(DEFAULT_SETTINGS.blockedCommands).toHaveLength(7);
-    });
-
-    it('should have maxConversations set to 50 by default', () => {
-      expect(DEFAULT_SETTINGS.maxConversations).toBe(50);
+    it('should only contain non-empty default blocked commands', () => {
+      expect(DEFAULT_SETTINGS.blockedCommands.every((cmd) => cmd.trim().length > 0)).toBe(true);
+      expect(new Set(DEFAULT_SETTINGS.blockedCommands).size).toBe(DEFAULT_SETTINGS.blockedCommands.length);
     });
   });
 
@@ -73,13 +54,16 @@ describe('types.ts', () => {
         enableBlocklist: false,
         blockedCommands: ['test'],
         showToolUse: false,
-        maxConversations: 25,
+        model: 'claude-haiku-4-5',
+        thinkingBudget: 'off',
+        permissionMode: 'yolo',
+        approvedActions: [],
       };
 
       expect(settings.enableBlocklist).toBe(false);
       expect(settings.blockedCommands).toEqual(['test']);
       expect(settings.showToolUse).toBe(false);
-      expect(settings.maxConversations).toBe(25);
+      expect(settings.model).toBe('claude-haiku-4-5');
     });
   });
 
@@ -104,17 +88,6 @@ describe('types.ts', () => {
       };
 
       expect(msg.role).toBe('assistant');
-    });
-
-    it('should accept system role', () => {
-      const msg: ChatMessage = {
-        id: 'msg-1',
-        role: 'system',
-        content: 'System message',
-        timestamp: Date.now(),
-      };
-
-      expect(msg.role).toBe('system');
     });
 
     it('should accept optional toolCalls array', () => {

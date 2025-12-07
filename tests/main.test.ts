@@ -487,26 +487,4 @@ describe('ClaudianPlugin', () => {
     });
   });
 
-  describe('max conversations pruning', () => {
-    it('should retain active conversation when pruning to max limit', async () => {
-      await plugin.onload();
-
-      // Create conversations with default max (50)
-      const conv1 = await plugin.createConversation();
-      await plugin.createConversation();
-
-      // Switch to older conversation
-      await plugin.switchConversation(conv1.id);
-
-      // Now set max to 1 and force prune
-      plugin.settings.maxConversations = 1;
-      (plugin as any).pruneOldConversations();
-
-      // Active conversation (conv1) should be retained even though it's older
-      expect(plugin.getActiveConversation()?.id).toBe(conv1.id);
-      const list = plugin.getConversationList();
-      expect(list).toHaveLength(1);
-      expect(list[0].id).toBe(conv1.id);
-    });
-  });
 });
