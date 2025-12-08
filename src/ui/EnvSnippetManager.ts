@@ -19,7 +19,7 @@ export class EnvSnippetModal extends Modal {
 
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl('h2', { text: this.snippet ? 'Edit Environment Snippet' : 'Save Environment Snippet' });
+    this.setTitle(this.snippet ? 'Edit snippet' : 'Save snippet');
 
     // Make modal more compact
     this.modalEl.addClass('claudian-env-snippet-modal');
@@ -132,7 +132,7 @@ export class EnvSnippetManager {
 
     // Header with save button
     const headerEl = this.containerEl.createDiv({ cls: 'claudian-snippet-header' });
-    headerEl.createEl('h4', { text: 'Environment Snippets' });
+    headerEl.createSpan({ text: 'Snippets', cls: 'claudian-snippet-label' });
 
     const saveBtn = headerEl.createEl('button', {
       text: 'Save Current',

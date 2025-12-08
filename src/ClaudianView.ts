@@ -108,19 +108,28 @@ export class ClaudianView extends ItemView {
     // Left side: Logo + Title
     const titleContainer = header.createDiv({ cls: 'claudian-title' });
     const logoEl = titleContainer.createSpan({ cls: 'claudian-logo' });
-    logoEl.innerHTML = `<svg viewBox="0 0 100 100" width="16" height="16">
-      <g fill="#D97757">
-        ${Array.from({ length: 12 }, (_, i) => {
+    // Create SVG logo using DOM API (avoid innerHTML per Obsidian guidelines)
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 100 100');
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('fill', '#D97757');
+    for (let i = 0; i < 12; i++) {
       const angle = (i * 30 - 90) * Math.PI / 180;
       const cx = 53, cy = 50;
-      const x1 = cx + 15 * Math.cos(angle);
-      const y1 = cy + 15 * Math.sin(angle);
-      const x2 = cx + 45 * Math.cos(angle);
-      const y2 = cy + 45 * Math.sin(angle);
-      return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#D97757" stroke-width="8" stroke-linecap="round"/>`;
-    }).join('')}
-      </g>
-    </svg>`;
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', String(cx + 15 * Math.cos(angle)));
+      line.setAttribute('y1', String(cy + 15 * Math.sin(angle)));
+      line.setAttribute('x2', String(cx + 45 * Math.cos(angle)));
+      line.setAttribute('y2', String(cy + 45 * Math.sin(angle)));
+      line.setAttribute('stroke', '#D97757');
+      line.setAttribute('stroke-width', '8');
+      line.setAttribute('stroke-linecap', 'round');
+      g.appendChild(line);
+    }
+    svg.appendChild(g);
+    logoEl.appendChild(svg);
     titleContainer.createEl('h4', { text: 'Claudian' });
 
     // Right side: Header actions

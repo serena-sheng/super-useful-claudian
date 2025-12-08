@@ -29,9 +29,7 @@ export class ApprovalModal extends Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.addClass('claudian-approval-modal');
-
-    // Title
-    contentEl.createEl('h2', { text: 'Permission Required', cls: 'claudian-approval-title' });
+    this.setTitle('Permission required');
 
     // Tool info
     const infoEl = contentEl.createDiv({ cls: 'claudian-approval-info' });

@@ -24,8 +24,6 @@ export default class ClaudianPlugin extends Plugin {
   private hasNotifiedEnvChange = false;
 
   async onload() {
-    console.log('Loading Claudian plugin');
-
     await this.loadSettings();
 
     // Initialize agent service
@@ -56,7 +54,6 @@ export default class ClaudianPlugin extends Plugin {
   }
 
   onunload() {
-    console.log('Unloading Claudian plugin');
     this.agentService.cleanup();
   }
 

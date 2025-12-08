@@ -15,10 +15,8 @@ export class ClaudianSettingTab extends PluginSettingTab {
     containerEl.empty();
     containerEl.addClass('claudian-settings');
 
-    containerEl.createEl('h2', { text: 'Claudian Settings' });
-
     // General section
-    containerEl.createEl('h3', { text: 'General' });
+    new Setting(containerEl).setName('General').setHeading();
 
     new Setting(containerEl)
       .setName('Show tool usage')
@@ -61,7 +59,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
             this.plugin.settings.mediaFolder = value.trim();
             await this.plugin.saveSettings();
           });
-        text.inputEl.style.width = '200px';
+        text.inputEl.addClass('claudian-settings-media-input');
       });
 
     new Setting(containerEl)
@@ -80,7 +78,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
       });
 
     // Safety section
-    containerEl.createEl('h3', { text: 'Safety' });
+    new Setting(containerEl).setName('Safety').setHeading();
 
     new Setting(containerEl)
       .setName('Enable command blocklist')
@@ -111,9 +109,6 @@ export class ClaudianSettingTab extends PluginSettingTab {
         text.inputEl.rows = 6;
         text.inputEl.cols = 40;
       });
-
-    // Approved Actions subsection
-    containerEl.createEl('h4', { text: 'Approved Actions' });
 
     const approvedDesc = containerEl.createDiv({ cls: 'claudian-approved-desc' });
     approvedDesc.createEl('p', {
@@ -172,11 +167,11 @@ export class ClaudianSettingTab extends PluginSettingTab {
     }
 
     // Environment Variables section
-    containerEl.createEl('h3', { text: 'Environment Variables' });
+    new Setting(containerEl).setName('Environment').setHeading();
 
     new Setting(containerEl)
-      .setName('Environment variables')
-      .setDesc('Custom environment variables for Claude (KEY=VALUE format, one per line)')
+      .setName('Custom variables')
+      .setDesc('Environment variables for Claude SDK (KEY=VALUE format, one per line)')
       .addTextArea((text) => {
         text
           .setPlaceholder('ANTHROPIC_API_KEY=your-key\nANTHROPIC_BASE_URL=https://api.example.com\nANTHROPIC_MODEL=custom-model')

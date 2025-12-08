@@ -37,7 +37,7 @@ An Obsidian plugin that embeds Claude Agent as a sidebar chat interface. Your va
 1. Clone this repository into your vault's plugins folder:
    ```bash
    cd /path/to/vault/.obsidian/plugins
-   git clone https://github.com/yourusername/claudian.git
+   git clone https://github.com/YishenTu/claudian.git
    cd claudian
    ```
 
@@ -133,6 +133,14 @@ When you configure a media folder in settings, Claude can read embedded images:
   - Bash approvals require an exact command match.
   - File tools allow exact or prefix path matches.
 
+## Privacy & Data Use
+
+- **Outbound scope**: Content sent to Claude/custom APIs includes your input, attached files/snippets, images (base64), and model-issued tool calls plus summarized outputs. Default provider is Anthropic; if `ANTHROPIC_BASE_URL` is set, traffic goes to that endpoint.
+- **Local storage**: Settings, chat history, approved actions, and environment variable snippets are stored in `.obsidian/plugins/claudian`. Image cache is written to `.claudian-cache/images`; you can clear it when deleting conversations or uninstalling the plugin.
+- **Commands & file access**: The plugin can read/write files and execute Bash commands within the vault directory; Safe mode approvals and the blocklist apply, and paths are constrained to the vault via `realpath`.
+- **User controls**: You can edit the blocked-command list, switch Safe/Yolo modes, clear history, delete caches, and remove API keys; disabling the plugin stops all remote calls.
+- **Telemetry**: No additional telemetry or third-party tracking. Data retention/compliance follows the terms of your configured API provider.
+
 ## Architecture
 
 ```
@@ -172,6 +180,7 @@ src/
 - [x] Modular UI architecture (extracted reusable components)
 - [x] Environment variables support with snippet management
 - [x] Image support (drag/drop, paste, path detection, embedded images)
+- [ ] Skills, Hooks, MCP and other advanced features
 
 ## License
 

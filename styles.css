@@ -776,25 +776,6 @@
   color: var(--text-muted);
 }
 
-/* Settings page */
-.claudian-info {
-  background: var(--background-secondary);
-  padding: 12px;
-  border-radius: 6px;
-  margin-top: 8px;
-}
-
-.claudian-info p {
-  margin: 4px 0;
-  font-size: 13px;
-}
-
-.claudian-vault-path {
-  font-family: var(--font-monospace);
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
 /* Scrollbar styling */
 .claudian-messages::-webkit-scrollbar {
   width: 6px;
@@ -1040,12 +1021,6 @@
   padding: 16px;
 }
 
-.claudian-approval-title {
-  margin: 0 0 16px 0;
-  font-size: 18px;
-  color: var(--text-normal);
-}
-
 .claudian-approval-info {
   margin-bottom: 12px;
 }
@@ -1242,12 +1217,13 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
+  margin-top: 16px;
 }
 
-.claudian-snippet-header h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
+.claudian-snippet-label {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  font-weight: var(--font-medium);
 }
 
 .claudian-save-env-btn {
@@ -1659,27 +1635,26 @@
   border-top: none;
 }
 
-/* Main settings title */
-.claudian-settings h2 {
-  font-size: 1.5em;
-  font-weight: 600;
-  margin-bottom: 16px;
+/* Settings section headings (via setHeading()) */
+.claudian-settings .setting-item-heading {
+  padding-top: 18px;
+  margin-top: 12px;
+  border-top: 1px solid var(--background-modifier-border);
 }
 
-/* Section titles with separator line */
-.claudian-settings h3 {
-  font-size: 1.1em;
-  font-weight: 600;
-  border-bottom: 1px solid var(--background-modifier-border);
-  padding-bottom: 8px;
-  margin-top: 24px;
-  margin-bottom: 12px;
+.claudian-settings .setting-item-heading:first-child {
+  padding-top: 0;
+  margin-top: 0;
+  border-top: none;
 }
 
-/* Subsection titles (no separator) */
-.claudian-settings h4 {
-  font-size: 1em;
-  font-weight: 600;
-  margin-top: 16px;
-  margin-bottom: 8px;
+.claudian-settings .setting-item-heading .setting-item-name {
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+}
+
+/* Media folder input width */
+.claudian-settings-media-input {
+  width: 200px;
 }
