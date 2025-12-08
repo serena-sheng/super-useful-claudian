@@ -1181,7 +1181,7 @@ describe('ClaudianService', () => {
       ];
 
       const chunks: any[] = [];
-      for await (const chunk of service.query('Follow up', history)) {
+      for await (const chunk of service.query('Follow up', undefined, history)) {
         chunks.push(chunk);
       }
 

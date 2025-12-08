@@ -1,6 +1,5 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import type ClaudianPlugin from './main';
-import { getVaultPath } from './utils';
 import { EnvSnippetManager } from './ui';
 
 export class ClaudianSettingTab extends PluginSettingTab {
@@ -14,8 +13,71 @@ export class ClaudianSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
+    containerEl.addClass('claudian-settings');
 
     containerEl.createEl('h2', { text: 'Claudian Settings' });
+
+    // General section
+    containerEl.createEl('h3', { text: 'General' });
+
+    new Setting(containerEl)
+      .setName('Show tool usage')
+      .setDesc('Display when Claude reads, writes, or edits files')
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.showToolUse)
+          .onChange(async (value) => {
+            this.plugin.settings.showToolUse = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName('Excluded tags')
+      .setDesc('Notes with these tags will not auto-load as context (one per line, without #)')
+      .addTextArea((text) => {
+        text
+          .setPlaceholder('system\nprivate\ndraft')
+          .setValue(this.plugin.settings.excludedTags.join('\n'))
+          .onChange(async (value) => {
+            this.plugin.settings.excludedTags = value
+              .split('\n')
+              .map((s) => s.trim().replace(/^#/, ''))  // Remove leading # if present
+              .filter((s) => s.length > 0);
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.rows = 4;
+        text.inputEl.cols = 30;
+      });
+
+    new Setting(containerEl)
+      .setName('Media folder')
+      .setDesc('Folder containing attachments/images. When notes use ![[image.jpg]], Claude will look here. Leave empty for vault root.')
+      .addText((text) => {
+        text
+          .setPlaceholder('attachments')
+          .setValue(this.plugin.settings.mediaFolder)
+          .onChange(async (value) => {
+            this.plugin.settings.mediaFolder = value.trim();
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.style.width = '200px';
+      });
+
+    new Setting(containerEl)
+      .setName('Custom system prompt')
+      .setDesc('Additional instructions appended to the default system prompt')
+      .addTextArea((text) => {
+        text
+          .setPlaceholder('Add custom instructions here...')
+          .setValue(this.plugin.settings.systemPrompt)
+          .onChange(async (value) => {
+            this.plugin.settings.systemPrompt = value;
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.rows = 6;
+        text.inputEl.cols = 50;
+      });
 
     // Safety section
     containerEl.createEl('h3', { text: 'Safety' });
@@ -50,60 +112,8 @@ export class ClaudianSettingTab extends PluginSettingTab {
         text.inputEl.cols = 40;
       });
 
-    // UI section
-    containerEl.createEl('h3', { text: 'Interface' });
-
-    new Setting(containerEl)
-      .setName('Show tool usage')
-      .setDesc('Display when Claude reads, writes, or edits files')
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.showToolUse)
-          .onChange(async (value) => {
-            this.plugin.settings.showToolUse = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName('Excluded tags')
-      .setDesc('Notes with these tags will not auto-load as context (one per line, without #)')
-      .addTextArea((text) => {
-        text
-          .setPlaceholder('system\nprivate\ndraft')
-          .setValue(this.plugin.settings.excludedTags.join('\n'))
-          .onChange(async (value) => {
-            this.plugin.settings.excludedTags = value
-              .split('\n')
-              .map((s) => s.trim().replace(/^#/, ''))  // Remove leading # if present
-              .filter((s) => s.length > 0);
-            await this.plugin.saveSettings();
-          });
-        text.inputEl.rows = 4;
-        text.inputEl.cols = 30;
-      });
-
-    new Setting(containerEl)
-      .setName('Environment variables')
-      .setDesc('Custom environment variables for Claude (KEY=VALUE format, one per line)')
-      .addTextArea((text) => {
-        text
-          .setPlaceholder('ANTHROPIC_API_KEY=your-key\nANTHROPIC_BASE_URL=https://api.example.com\nANTHROPIC_MODEL=custom-model')
-          .setValue(this.plugin.settings.environmentVariables)
-          .onChange(async (value) => {
-            await this.plugin.applyEnvironmentVariables(value);
-          });
-        text.inputEl.rows = 6;
-        text.inputEl.cols = 50;
-        text.inputEl.addClass('claudian-settings-env-textarea');
-      });
-
-    // Environment Snippets section
-    const envSnippetsContainer = containerEl.createDiv({ cls: 'claudian-env-snippets-container' });
-    new EnvSnippetManager(envSnippetsContainer, this.plugin);
-
-    // Approved Actions section
-    containerEl.createEl('h3', { text: 'Approved Actions' });
+    // Approved Actions subsection
+    containerEl.createEl('h4', { text: 'Approved Actions' });
 
     const approvedDesc = containerEl.createDiv({ cls: 'claudian-approved-desc' });
     approvedDesc.createEl('p', {
@@ -161,20 +171,26 @@ export class ClaudianSettingTab extends PluginSettingTab {
         );
     }
 
-    // Info section
-    containerEl.createEl('h3', { text: 'Information' });
+    // Environment Variables section
+    containerEl.createEl('h3', { text: 'Environment Variables' });
 
-    const infoDiv = containerEl.createDiv({ cls: 'claudian-info' });
-    infoDiv.createEl('p', {
-      text: 'This plugin uses the Claude Agent SDK to interact with Claude.',
-    });
-
-    const vaultPath = getVaultPath(this.app);
-    if (vaultPath) {
-      infoDiv.createEl('p', {
-        text: `Vault path: ${vaultPath}`,
-        cls: 'claudian-vault-path',
+    new Setting(containerEl)
+      .setName('Environment variables')
+      .setDesc('Custom environment variables for Claude (KEY=VALUE format, one per line)')
+      .addTextArea((text) => {
+        text
+          .setPlaceholder('ANTHROPIC_API_KEY=your-key\nANTHROPIC_BASE_URL=https://api.example.com\nANTHROPIC_MODEL=custom-model')
+          .setValue(this.plugin.settings.environmentVariables)
+          .onChange(async (value) => {
+            await this.plugin.applyEnvironmentVariables(value);
+          });
+        text.inputEl.rows = 6;
+        text.inputEl.cols = 50;
+        text.inputEl.addClass('claudian-settings-env-textarea');
       });
-    }
+
+    // Environment Snippets subsection
+    const envSnippetsContainer = containerEl.createDiv({ cls: 'claudian-env-snippets-container' });
+    new EnvSnippetManager(envSnippetsContainer, this.plugin);
   }
 }

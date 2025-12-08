@@ -22,6 +22,7 @@ src/
     ├── ApprovalModal.ts      # Permission approval dialog (Modal)
     ├── InputToolbar.ts       # Model selector, thinking budget, permission toggle
     ├── FileContext.ts        # File attachments, @mentions, edited files tracking
+    ├── ImageContext.ts       # Image attachments, drag/drop, paste, path detection
     ├── ToolCallRenderer.ts   # Tool call UI rendering and status updates
     ├── ThinkingBlockRenderer.ts # Extended thinking block UI with timer
     └── EnvSnippetManager.ts  # Environment variable snippet management
@@ -35,6 +36,7 @@ src/
 | `ApprovalModal` | Permission dialogs for Safe mode tool approval |
 | `InputToolbar` | Model/thinking/permission selectors below textarea |
 | `FileContext` | File attachment state, @mention dropdown, edited files indicator |
+| `ImageContext` | Image drag/drop, paste, path detection, preview display |
 | `ToolCallRenderer` | Tool call display with expand/collapse and status |
 | `ThinkingBlockRenderer` | Extended thinking blocks with live timer |
 | `EnvSnippetManager` | Environment variable snippet save/restore |
@@ -186,7 +188,7 @@ interface ClaudianSettings {
   blockedCommands: string[];     // Regex patterns to block
   showToolUse: boolean;          // Show file operations in chat
   model: ClaudeModel;            // Selected Claude model (or custom model string)
-  lastDefaultModel?: ClaudeModel; // Last selected default model (for category switching)
+  lastClaudeModel?: ClaudeModel; // Last selected default model (for category switching)
   lastCustomModel?: ClaudeModel;  // Last selected custom model (for category switching)
   thinkingBudget: ThinkingBudget; // Extended thinking token budget
   permissionMode: PermissionMode; // Yolo or Safe mode
@@ -272,6 +274,33 @@ tags: system
 - Files with excluded tags won't auto-attach on new session creation
 - Users can still manually attach excluded files via `@` mention
 
+## Media Folder
+
+Configure where Obsidian stores attachments/images so the agent can read embedded images from notes.
+
+**Configuration**: Settings → Claudian → Media folder
+
+When notes contain embedded images like `![[image.jpg]]` or `![[screenshot.png]]`, the agent needs to know where these files are stored to read them.
+
+| Setting Value | Image Location | Example |
+|---------------|----------------|---------|
+| (empty) | Vault root | `./image.jpg` |
+| `attachments` | `attachments/` folder | `./attachments/image.jpg` |
+| `- attachments` | `- attachments/` folder | `./- attachments/image.jpg` |
+
+**How it works**:
+- The system prompt instructs the agent about the media folder location
+- When the agent sees `![[image.jpg]]` in a note, it knows to read from the configured folder
+- The agent uses the `Read` tool to view images (supports PNG, JPG, GIF, WebP)
+
+**Example**: If your vault uses `- attachments` folder and a note contains:
+```markdown
+Here's a screenshot of the error:
+![[error-screenshot.png]]
+```
+
+The agent will read `./- attachments/error-screenshot.png` to analyze the image.
+
 ## Environment Variables
 
 Custom environment variables can be configured to use alternative API providers or customize Claude SDK behavior.
@@ -315,6 +344,54 @@ Save and restore environment variable configurations as named snippets for quick
 - **Plugin restart required**: After directly editing environment variables in settings, restart the plugin for changes to take effect
 - **No mixing**: When custom models are detected, only custom models appear in the model selector
 - **Snippets are instant**: Using "Insert" on a snippet applies immediately (no restart needed)
+
+## Image Support
+
+Send images to Claude for analysis, description, or any vision-related task.
+
+### Adding Images
+
+**Three ways to attach images:**
+
+1. **Drag and Drop**: Drag an image file onto the input area
+2. **Copy/Paste**: Paste an image from clipboard (Cmd/Ctrl+V)
+3. **File Path**: Include an image path in your message (e.g., `describe this: ./screenshots/error.png`)
+
+### Supported Formats
+
+| Format | Extension |
+|--------|-----------|
+| JPEG | `.jpg`, `.jpeg` |
+| PNG | `.png` |
+| GIF | `.gif` |
+| WebP | `.webp` |
+
+### Constraints
+
+- **Maximum file size**: 5MB per image
+- **Multiple images**: Attach several images in one message
+- Images are sent as base64-encoded content blocks
+
+### Path Detection
+
+The plugin automatically detects image paths in your message text:
+- Quoted paths: `"path/to/image.jpg"` or `'path/to/image.png'`
+- Relative paths: `./screenshots/image.png`, `../assets/photo.jpg`
+- Vault-relative paths: `attachments/diagram.png`
+- Absolute paths: `/Users/name/Pictures/image.jpg`
+
+When a valid image path is detected, the image is loaded and attached to the message automatically.
+
+### Usage Example
+
+```
+Describe what you see in this image: ./design-mockup.png
+```
+
+Or drag an image and type:
+```
+What's wrong with this error screenshot?
+```
 
 ## Permission Modes
 
@@ -479,6 +556,22 @@ Permanently approved actions are stored and can be managed in Settings → Appro
 - `.claudian-env-preview` - Preformatted env vars display
 - `.claudian-snippet-buttons` - Modal button container
 - `.claudian-settings-env-textarea` - Environment variables textarea in settings
+
+### Image Attachments
+- `.claudian-image-preview` - Container for image previews in input area
+- `.claudian-image-chip` - Individual image preview chip
+- `.claudian-image-thumb` - Thumbnail container
+- `.claudian-image-info` - Image name and size container
+- `.claudian-image-name` - Image filename
+- `.claudian-image-size` - File size display
+- `.claudian-image-remove` - Remove button (×)
+- `.claudian-drop-overlay` - Drag-and-drop overlay
+- `.claudian-drop-content` - Drop overlay content (icon + text)
+- `.claudian-message-images` - Container for images in messages
+- `.claudian-message-image` - Individual image in message
+- `.claudian-image-modal-overlay` - Full-size image modal backdrop
+- `.claudian-image-modal` - Full-size image modal container
+- `.claudian-image-modal-close` - Modal close button
 
 ## Notes
 - when ask to generate a md file about the finding, implementation of your work, put the file in dev/

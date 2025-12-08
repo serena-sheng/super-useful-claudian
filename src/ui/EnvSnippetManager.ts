@@ -42,8 +42,6 @@ export class EnvSnippetModal extends Modal {
           name,
           description: descEl.value.trim(),
           envVars: this.plugin.settings.environmentVariables,
-          createdAt: this.snippet?.createdAt || Date.now(),
-          lastUsed: Date.now(),
         };
 
         this.onSave(snippet);
@@ -103,8 +101,6 @@ export class EnvSnippetModal extends Modal {
         name,
         description: descEl.value.trim(),
         envVars: this.plugin.settings.environmentVariables,
-        createdAt: this.snippet?.createdAt || Date.now(),
-        lastUsed: Date.now(),
       };
 
       this.onSave(snippet);
@@ -136,7 +132,7 @@ export class EnvSnippetManager {
 
     // Header with save button
     const headerEl = this.containerEl.createDiv({ cls: 'claudian-snippet-header' });
-    headerEl.createEl('h3', { text: 'Environment Snippets' });
+    headerEl.createEl('h4', { text: 'Environment Snippets' });
 
     const saveBtn = headerEl.createEl('button', {
       text: 'Save Current',
@@ -229,10 +225,6 @@ export class EnvSnippetManager {
       // Update settings with model reconciliation
       await this.plugin.applyEnvironmentVariables(snippetContent);
 
-      // Update last used timestamp
-      snippet.lastUsed = Date.now();
-      await this.plugin.saveSettings();
-
       // Trigger model selector refresh if it exists
       const view = this.plugin.app.workspace.getLeavesOfType('claudian-view')[0]?.view as any;
       if (view?.modelSelector) {
@@ -243,8 +235,6 @@ export class EnvSnippetManager {
     } else {
       // Fallback: directly replace in settings if textarea not found
       await this.plugin.applyEnvironmentVariables(snippet.envVars);
-      snippet.lastUsed = Date.now();
-      await this.plugin.saveSettings();
       this.render();
 
       // Trigger model selector refresh if it exists

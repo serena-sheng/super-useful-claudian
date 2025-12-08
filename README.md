@@ -8,6 +8,7 @@ An Obsidian plugin that embeds Claude Agent as a sidebar chat interface. Your va
 - **Full Claude Code capabilities**: Read, write, edit files, run bash commands
 - **Vault-aware**: Claude operates with your vault as the working directory
 - **File context awareness**: Auto-attach focused note, or use `@` to mention files
+- **Image support**: Send images via drag-and-drop, paste, or file path for vision analysis
 - **Excluded tags**: Prevent notes with specific tags from auto-loading as context
 - **Streaming responses**: See Claude's responses in real-time
 - **Extended thinking**: Watch Claude's reasoning process with live timer display
@@ -74,6 +75,28 @@ npm run build
 - **Excluded tags**: Notes with tags listed in Settings → Excluded tags won't auto-attach (but can still be manually attached via `@`)
 - Files are sent as context with your message; Claude will read them to understand your question
 
+### Image Context
+
+Send images to Claude for analysis, description, or any vision-related task.
+
+**Adding images:**
+- **Drag and drop**: Drag image files onto the input area
+- **Copy/paste**: Paste images from clipboard (Cmd/Ctrl+V)
+- **File path**: Include an image path in your message (auto-detected)
+
+**Supported formats:** JPEG, PNG, GIF, WebP (max 5MB per image)
+
+**Path detection examples:**
+- Quoted: `"path/to/image.jpg"` or `'path/to/image.png'`
+- Relative: `./screenshots/error.png`
+- Vault-relative: `attachments/diagram.png`
+
+**Embedded images in notes:**
+When you configure a media folder in settings, Claude can read embedded images:
+```markdown
+![[screenshot.png]]  →  Claude reads from configured media folder
+```
+
 ### Example prompts
 
 - "List all notes in this vault"
@@ -90,6 +113,7 @@ npm run build
 - **Blocked commands**: Patterns to block (supports regex)
 - **Show tool usage**: Display file operations in chat
 - **Excluded tags**: Tags that prevent notes from auto-loading (e.g., `system`, `private`)
+- **Media folder**: Configure where vault stores attachments for embedded image support (e.g., `attachments`)
 - **Environment variables**: Custom environment variables for Claude SDK (KEY=VALUE format)
 - **Environment snippets**: Save and restore environment variable configurations
 - **Permission mode**: Toggle Yolo (bypass prompts) or Safe (require approval)
@@ -118,6 +142,8 @@ src/
 ├── ClaudianService.ts   # Claude Agent SDK wrapper
 ├── ClaudianSettings.ts  # Settings tab
 ├── systemPrompt.ts      # System prompt for Claude
+├── promptInstructions.ts # Dynamic prompt instruction generators
+├── imageCache.ts        # Image caching utilities
 ├── types.ts             # Type definitions
 ├── utils.ts             # Utility functions (env var parsing, model detection)
 └── ui/                  # Modular UI components
@@ -125,6 +151,7 @@ src/
     ├── ApprovalModal.ts      # Permission approval dialog
     ├── InputToolbar.ts       # Model/thinking/permission selectors
     ├── FileContext.ts        # File attachments & @mentions
+    ├── ImageContext.ts       # Image drag/drop, paste, path detection
     ├── ToolCallRenderer.ts   # Tool call display
     ├── ThinkingBlockRenderer.ts # Extended thinking UI
     └── EnvSnippetManager.ts  # Environment variable snippets
@@ -144,6 +171,7 @@ src/
 - [x] Edited files indicator for Claude edits (border on attachments, "Edited:" chips, click-to-open, auto-dismiss)
 - [x] Modular UI architecture (extracted reusable components)
 - [x] Environment variables support with snippet management
+- [x] Image support (drag/drop, paste, path detection, embedded images)
 
 ## License
 

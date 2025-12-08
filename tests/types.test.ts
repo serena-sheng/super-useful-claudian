@@ -56,8 +56,8 @@ describe('types.ts', () => {
       expect(DEFAULT_SETTINGS.envSnippets).toEqual([]);
     });
 
-    it('should have lastDefaultModel set to claude-haiku-4-5 by default', () => {
-      expect(DEFAULT_SETTINGS.lastDefaultModel).toBe('claude-haiku-4-5');
+    it('should have lastClaudeModel set to claude-haiku-4-5 by default', () => {
+      expect(DEFAULT_SETTINGS.lastClaudeModel).toBe('claude-haiku-4-5');
     });
 
     it('should have lastCustomModel as empty string by default', () => {
@@ -103,13 +103,13 @@ describe('types.ts', () => {
       expect(settings.model).toBe('anthropic/custom-model-v1');
     });
 
-    it('should accept optional lastDefaultModel and lastCustomModel', () => {
+    it('should accept optional lastClaudeModel and lastCustomModel', () => {
       const settings: ClaudianSettings = {
         enableBlocklist: true,
         blockedCommands: [],
         showToolUse: true,
         model: 'claude-sonnet-4-5',
-        lastDefaultModel: 'claude-opus-4-5',
+        lastClaudeModel: 'claude-opus-4-5',
         lastCustomModel: 'custom/model',
         thinkingBudget: 'high',
         permissionMode: 'yolo',
@@ -119,7 +119,7 @@ describe('types.ts', () => {
         envSnippets: [],
       };
 
-      expect(settings.lastDefaultModel).toBe('claude-opus-4-5');
+      expect(settings.lastClaudeModel).toBe('claude-opus-4-5');
       expect(settings.lastCustomModel).toBe('custom/model');
     });
   });

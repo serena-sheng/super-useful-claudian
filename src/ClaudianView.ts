@@ -1,6 +1,10 @@
 import { ItemView, WorkspaceLeaf, MarkdownRenderer, setIcon } from 'obsidian';
+import * as fs from 'fs';
+import * as path from 'path';
 import type ClaudianPlugin from './main';
-import { VIEW_TYPE_CLAUDIAN, ChatMessage, StreamChunk, ToolCallInfo, ContentBlock, ClaudeModel, ThinkingBudget, DEFAULT_THINKING_BUDGET, DEFAULT_CLAUDE_MODELS } from './types';
+import { VIEW_TYPE_CLAUDIAN, ChatMessage, StreamChunk, ToolCallInfo, ContentBlock, ClaudeModel, ThinkingBudget, DEFAULT_THINKING_BUDGET, DEFAULT_CLAUDE_MODELS, ImageAttachment } from './types';
+import { getVaultPath } from './utils';
+import { readCachedImageBase64 } from './imageCache';
 
 // Import UI components
 import {
@@ -10,6 +14,7 @@ import {
   ThinkingBudgetSelector,
   PermissionToggle,
   FileContextManager,
+  ImageContextManager,
   renderToolCall,
   updateToolCallResult,
   renderStoredToolCall,
@@ -47,6 +52,9 @@ export class ClaudianView extends ItemView {
 
   // File context manager
   private fileContextManager: FileContextManager | null = null;
+
+  // Image context manager
+  private imageContextManager: ImageContextManager | null = null;
 
   // Toolbar components
   private modelSelector: ModelSelector | null = null;
@@ -176,6 +184,19 @@ export class ClaudianView extends ItemView {
       }
     );
 
+    // Initialize image context manager (creates its own preview elements in inputContainerEl)
+    this.imageContextManager = new ImageContextManager(
+      this.plugin.app,
+      inputContainerEl,
+      this.inputEl,
+      {
+        onImagesChanged: () => {
+          // Images changed - could update UI state if needed
+        },
+        getMediaFolder: () => this.plugin.settings.mediaFolder,
+      }
+    );
+
     // Keep file cache fresh
     this.registerEvent(this.plugin.app.vault.on('create', () => this.fileContextManager?.markFilesCacheDirty()));
     this.registerEvent(this.plugin.app.vault.on('delete', () => this.fileContextManager?.markFilesCacheDirty()));
@@ -198,7 +219,7 @@ export class ClaudianView extends ItemView {
         const isDefaultModel = DEFAULT_CLAUDE_MODELS.find((m: any) => m.value === model);
         if (isDefaultModel) {
           this.plugin.settings.thinkingBudget = DEFAULT_THINKING_BUDGET[model];
-          this.plugin.settings.lastDefaultModel = model;
+          this.plugin.settings.lastClaudeModel = model;
         } else {
           this.plugin.settings.lastCustomModel = model;
         }
@@ -279,8 +300,9 @@ export class ClaudianView extends ItemView {
   }
 
   private async sendMessage() {
-    const content = this.inputEl.value.trim();
-    if (!content || this.isStreaming) return;
+    let content = this.inputEl.value.trim();
+    if (!content && !this.imageContextManager?.hasImages()) return;
+    if (this.isStreaming) return;
 
     this.inputEl.value = '';
     this.isStreaming = true;
@@ -288,6 +310,21 @@ export class ClaudianView extends ItemView {
 
     // Mark session as started
     this.fileContextManager?.startSession();
+
+    // Check for image path in message and try to load it
+    if (content && this.imageContextManager) {
+      const result = await this.imageContextManager.handleImagePathInText(content);
+      if (result.imageLoaded) {
+        content = result.text;
+      }
+    }
+
+    // Get attached images
+    const images = this.imageContextManager?.getAttachedImages() || [];
+    const imagesForMessage = images.length > 0 ? [...images] : undefined;
+
+    // Clear images after collecting them
+    this.imageContextManager?.clearImages();
 
     // Check if attached files have changed since last message
     const attachedFiles = this.fileContextManager?.getAttachedFiles() || new Set();
@@ -320,6 +357,7 @@ export class ClaudianView extends ItemView {
       content,
       timestamp: Date.now(),
       contextFiles: contextFilesForMessage,
+      images: imagesForMessage,
     };
     this.addMessage(userMsg);
 
@@ -352,7 +390,7 @@ export class ClaudianView extends ItemView {
 
     try {
       // Pass conversation history for session expiration recovery
-      for await (const chunk of this.plugin.agentService.query(promptToSend, this.messages)) {
+      for await (const chunk of this.plugin.agentService.query(promptToSend, imagesForMessage, this.messages)) {
         if (this.cancelRequested) {
           break;
         }
@@ -545,19 +583,126 @@ export class ClaudianView extends ItemView {
   private addMessage(msg: ChatMessage): HTMLElement {
     this.messages.push(msg);
 
+    // For user messages with images, render images above the bubble
+    if (msg.role === 'user' && msg.images && msg.images.length > 0) {
+      this.renderMessageImages(this.messagesEl, msg.images);
+    }
+
     const msgEl = this.messagesEl.createDiv({
       cls: `claudian-message claudian-message-${msg.role}`,
     });
 
     const contentEl = msgEl.createDiv({ cls: 'claudian-message-content' });
 
-    if (msg.role === 'user' && msg.content) {
-      const textEl = contentEl.createDiv({ cls: 'claudian-text-block' });
-      this.renderContent(textEl, msg.content);
+    if (msg.role === 'user') {
+      // Render text content only (images are above)
+      if (msg.content) {
+        const textEl = contentEl.createDiv({ cls: 'claudian-text-block' });
+        this.renderContent(textEl, msg.content);
+      }
     }
 
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
     return msgEl;
+  }
+
+  private renderMessageImages(containerEl: HTMLElement, images: ImageAttachment[]) {
+    const imagesEl = containerEl.createDiv({ cls: 'claudian-message-images' });
+
+    for (const image of images) {
+      const imageWrapper = imagesEl.createDiv({ cls: 'claudian-message-image' });
+      const imgEl = imageWrapper.createEl('img', {
+        attr: {
+          alt: image.name,
+        },
+      });
+
+      void this.setImageSrc(imgEl, image);
+
+      // Click to view full size
+      imgEl.addEventListener('click', () => {
+        void this.showFullImage(image);
+      });
+    }
+  }
+
+  private async showFullImage(image: ImageAttachment) {
+    const dataUri = await this.getImageDataUri(image);
+    if (!dataUri) return;
+
+    const overlay = document.body.createDiv({ cls: 'claudian-image-modal-overlay' });
+    const modal = overlay.createDiv({ cls: 'claudian-image-modal' });
+
+    modal.createEl('img', {
+      attr: {
+        src: dataUri,
+        alt: image.name,
+      },
+    });
+
+    const closeBtn = modal.createDiv({ cls: 'claudian-image-modal-close' });
+    closeBtn.setText('\u00D7');
+
+    const close = () => overlay.remove();
+    closeBtn.addEventListener('click', close);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) close();
+    });
+
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        close();
+        document.removeEventListener('keydown', handleEsc);
+      }
+    };
+    document.addEventListener('keydown', handleEsc);
+  }
+
+  private async setImageSrc(imgEl: HTMLImageElement, image: ImageAttachment) {
+    const dataUri = await this.getImageDataUri(image);
+    if (dataUri) {
+      imgEl.setAttribute('src', dataUri);
+    } else {
+      imgEl.setAttribute('alt', `${image.name} (missing)`);
+    }
+  }
+
+  private async getImageDataUri(image: ImageAttachment): Promise<string | null> {
+    const base64 = await this.loadImageBase64(image);
+    if (!base64) return null;
+    return `data:${image.mediaType};base64,${base64}`;
+  }
+
+  private async loadImageBase64(image: ImageAttachment): Promise<string | null> {
+    if (image.data) return image.data;
+
+    if (image.cachePath) {
+      const cached = readCachedImageBase64(this.plugin.app, image.cachePath);
+      if (cached) {
+        image.data = cached;
+        return cached;
+      }
+    }
+
+    if (image.filePath) {
+      const vaultPath = getVaultPath(this.plugin.app);
+      const absPath = path.isAbsolute(image.filePath)
+        ? image.filePath
+        : (vaultPath ? path.join(vaultPath, image.filePath) : null);
+
+      if (absPath && fs.existsSync(absPath)) {
+        try {
+          const buffer = fs.readFileSync(absPath);
+          const base64 = buffer.toString('base64');
+          image.data = base64;
+          return base64;
+        } catch {
+          return null;
+        }
+      }
+    }
+
+    return null;
   }
 
   private async renderContent(el: HTMLElement, markdown: string) {
@@ -585,6 +730,9 @@ export class ClaudianView extends ItemView {
     // Reset file context
     this.fileContextManager?.resetForNewConversation();
     this.fileContextManager?.autoAttachActiveFile();
+
+    // Clear any attached images
+    this.imageContextManager?.clearImages();
   }
 
   private async loadActiveConversation() {
@@ -636,7 +784,7 @@ export class ClaudianView extends ItemView {
 
     const sessionId = this.plugin.agentService.getSessionId();
     await this.plugin.updateConversation(this.currentConversationId, {
-      messages: this.messages,
+      messages: this.getPersistedMessages(),
       sessionId: sessionId,
     });
   }
@@ -652,6 +800,11 @@ export class ClaudianView extends ItemView {
   }
 
   private renderStoredMessage(msg: ChatMessage) {
+    // For user messages with images, render images above the bubble
+    if (msg.role === 'user' && msg.images && msg.images.length > 0) {
+      this.renderMessageImages(this.messagesEl, msg.images);
+    }
+
     const msgEl = this.messagesEl.createDiv({
       cls: `claudian-message claudian-message-${msg.role}`,
     });
@@ -659,8 +812,11 @@ export class ClaudianView extends ItemView {
     const contentEl = msgEl.createDiv({ cls: 'claudian-message-content' });
 
     if (msg.role === 'user') {
-      const textEl = contentEl.createDiv({ cls: 'claudian-text-block' });
-      this.renderContent(textEl, msg.content);
+      // Render text content only (images are above)
+      if (msg.content) {
+        const textEl = contentEl.createDiv({ cls: 'claudian-text-block' });
+        this.renderContent(textEl, msg.content);
+      }
     } else if (msg.role === 'assistant') {
       if (msg.contentBlocks && msg.contentBlocks.length > 0) {
         for (const block of msg.contentBlocks) {
@@ -806,6 +962,16 @@ export class ClaudianView extends ItemView {
   // ============================================
   // Utility Methods
   // ============================================
+
+  private getPersistedMessages(): ChatMessage[] {
+    return this.messages.map(msg => ({
+      ...msg,
+      images: msg.images?.map(img => {
+        const { data, ...rest } = img;
+        return { ...rest };
+      }),
+    }));
+  }
 
   private generateTitle(firstMessage: string): string {
     const firstSentence = firstMessage.split(/[.!?\n]/)[0].trim();

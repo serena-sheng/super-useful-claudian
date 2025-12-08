@@ -22,6 +22,11 @@ export {
 } from './FileContext';
 
 export {
+  ImageContextManager,
+  type ImageContextCallbacks,
+} from './ImageContext';
+
+export {
   getToolIcon,
   setToolIcon,
   getToolLabel,

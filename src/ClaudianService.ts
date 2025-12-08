@@ -3,9 +3,27 @@ import * as path from 'path';
 import * as os from 'os';
 import { query, type Options, type CanUseTool, type PermissionResult, type HookCallbackMatcher } from '@anthropic-ai/claude-agent-sdk';
 import type ClaudianPlugin from './main';
-import { StreamChunk, ChatMessage, ToolCallInfo, SDKMessage, THINKING_BUDGETS, ApprovedAction } from './types';
-import { SYSTEM_PROMPT } from './systemPrompt';
+import { StreamChunk, ChatMessage, ToolCallInfo, SDKMessage, THINKING_BUDGETS, ApprovedAction, ImageAttachment } from './types';
+import { buildSystemPrompt } from './systemPrompt';
 import { getVaultPath, parseEnvironmentVariables } from './utils';
+import { readCachedImageBase64 } from './imageCache';
+
+// Content block types for SDK message format
+interface TextContentBlock {
+  type: 'text';
+  text: string;
+}
+
+interface ImageContentBlock {
+  type: 'image';
+  source: {
+    type: 'base64';
+    media_type: string;
+    data: string;
+  };
+}
+
+type ContentBlock = TextContentBlock | ImageContentBlock;
 
 // Callback type for requesting user approval
 export type ApprovalCallback = (
@@ -59,9 +77,10 @@ export class ClaudianService {
   /**
    * Send a query to Claude and stream the response
    * @param prompt The user's message
+   * @param images Optional images to include with the message
    * @param conversationHistory Optional message history for session expiration recovery
    */
-  async *query(prompt: string, conversationHistory?: ChatMessage[]): AsyncGenerator<StreamChunk> {
+  async *query(prompt: string, images?: ImageAttachment[], conversationHistory?: ChatMessage[]): AsyncGenerator<StreamChunk> {
     // Get vault path
     const vaultPath = getVaultPath(this.plugin.app);
     if (!vaultPath) {
@@ -82,8 +101,10 @@ export class ClaudianService {
     // Create abort controller for cancellation
     this.abortController = new AbortController();
 
+    const hydratedImages = await this.hydrateImagesData(images, vaultPath);
+
     try {
-      yield* this.queryViaSDK(prompt, vaultPath);
+      yield* this.queryViaSDK(prompt, vaultPath, hydratedImages);
     } catch (error) {
       // Handle session expiration - rebuild context and retry
       if (this.isSessionExpiredError(error) && conversationHistory && conversationHistory.length > 0) {
@@ -102,9 +123,11 @@ export class ClaudianService {
             : historyContext
           : prompt;
 
-        // Retry without resume
+        // Retry without resume (note: images not included in retry for simplicity)
+        const retryImages = await this.hydrateImagesData(lastUserMessage?.images, vaultPath);
+
         try {
-          yield* this.queryViaSDK(fullPrompt, vaultPath);
+          yield* this.queryViaSDK(fullPrompt, vaultPath, retryImages);
         } catch (retryError) {
           const msg = retryError instanceof Error ? retryError.message : 'Unknown error';
           yield { type: 'error', content: msg };
@@ -227,7 +250,110 @@ export class ClaudianService {
     return `Context files: [${fileList}]`;
   }
 
-  private async *queryViaSDK(prompt: string, cwd: string): AsyncGenerator<StreamChunk> {
+  /**
+   * Ensure images have base64 data loaded from cache or file paths
+   */
+  private async hydrateImagesData(images?: ImageAttachment[], vaultPath?: string | null): Promise<ImageAttachment[] | undefined> {
+    if (!images || images.length === 0) return undefined;
+
+    const hydrated: ImageAttachment[] = [];
+
+    for (const image of images) {
+      if (image.data) {
+        hydrated.push(image);
+        continue;
+      }
+
+      const base64 = await this.loadImageBase64(image, vaultPath);
+      if (base64) {
+        hydrated.push({ ...image, data: base64 });
+      }
+    }
+
+    return hydrated.length > 0 ? hydrated : undefined;
+  }
+
+  private async loadImageBase64(image: ImageAttachment, vaultPath?: string | null): Promise<string | null> {
+    if (image.cachePath) {
+      const base64 = readCachedImageBase64(this.plugin.app, image.cachePath);
+      if (base64) return base64;
+    }
+
+    if (image.filePath) {
+      const absPath = this.resolveImagePath(image.filePath, vaultPath);
+      if (absPath && fs.existsSync(absPath)) {
+        try {
+          const buffer = fs.readFileSync(absPath);
+          return buffer.toString('base64');
+        } catch {
+          return null;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  private resolveImagePath(filePath: string, vaultPath?: string | null): string | null {
+    if (path.isAbsolute(filePath)) {
+      return filePath;
+    }
+    if (vaultPath) {
+      return path.join(vaultPath, filePath);
+    }
+    return null;
+  }
+
+  /**
+   * Build a prompt with images as content blocks
+   * If no images, returns the string prompt directly
+   * If images present, returns an async generator yielding the message
+   */
+  private buildPromptWithImages(prompt: string, images?: ImageAttachment[]): string | AsyncGenerator<any> {
+    // If no images, return plain string prompt
+    const validImages = (images || []).filter(img => !!img.data);
+    if (validImages.length === 0) {
+      return prompt;
+    }
+
+    // Build content blocks array - images first, then text
+    const content: ContentBlock[] = [];
+
+    // Add image blocks first (Claude recommends images before text)
+    for (const image of validImages) {
+      content.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: image.mediaType,
+          data: image.data!,
+        },
+      });
+    }
+
+    // Add text block with the prompt
+    if (prompt.trim()) {
+      content.push({
+        type: 'text',
+        text: prompt,
+      });
+    }
+
+    // Return async generator for SDK
+    async function* messageGenerator() {
+      yield {
+        type: 'user',
+        message: {
+          role: 'user',
+          content,
+        },
+      };
+    }
+
+    return messageGenerator();
+  }
+
+  private async *queryViaSDK(prompt: string, cwd: string, images?: ImageAttachment[]): AsyncGenerator<StreamChunk> {
     const selectedModel = this.plugin.settings.model;
     const permissionMode = this.plugin.settings.permissionMode;
 
@@ -237,9 +363,18 @@ export class ClaudianService {
     // Parse custom environment variables from settings
     const customEnv = parseEnvironmentVariables(this.plugin.getActiveEnvironmentVariables());
 
+    // Build the prompt - either a string or content blocks with images
+    const queryPrompt = this.buildPromptWithImages(prompt, images);
+
+    // Build system prompt with settings
+    const systemPrompt = buildSystemPrompt({
+      mediaFolder: this.plugin.settings.mediaFolder,
+      customPrompt: this.plugin.settings.systemPrompt,
+    });
+
     const options: Options = {
       cwd,
-      systemPrompt: SYSTEM_PROMPT,
+      systemPrompt,
       model: selectedModel,
       abortController: this.abortController ?? undefined,
       pathToClaudeCodeExecutable: this.resolvedClaudePath!,
@@ -285,7 +420,7 @@ export class ClaudianService {
     }
 
     try {
-      const response = query({ prompt, options });
+      const response = query({ prompt: queryPrompt, options });
 
       for await (const message of response) {
         // Check for cancellation

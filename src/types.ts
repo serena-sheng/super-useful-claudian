@@ -46,14 +46,16 @@ export interface ClaudianSettings {
   showToolUse: boolean;
   model: ClaudeModel;
   // Remember last selected models per category for smoother switching
-  lastDefaultModel?: ClaudeModel;
+  lastClaudeModel?: ClaudeModel;
   lastCustomModel?: ClaudeModel;
   thinkingBudget: ThinkingBudget;
   permissionMode: PermissionMode;
   approvedActions: ApprovedAction[];
   excludedTags: string[];  // Tags that exclude files from auto-loading context
+  mediaFolder: string;  // Folder for attachments/media (e.g., "- attachments"), empty for root
   environmentVariables: string;  // Custom env vars in KEY=VALUE format (one per line)
   envSnippets: EnvSnippet[];  // Saved environment variable configurations
+  systemPrompt: string;  // Custom system prompt appended to default
 }
 
 export interface EnvSnippet {
@@ -61,8 +63,6 @@ export interface EnvSnippet {
   name: string;
   description: string;
   envVars: string;
-  createdAt: number;
-  lastUsed?: number;
 }
 
 export const DEFAULT_SETTINGS: ClaudianSettings = {
@@ -74,14 +74,16 @@ export const DEFAULT_SETTINGS: ClaudianSettings = {
   ],
   showToolUse: true,
   model: 'claude-haiku-4-5',
-  lastDefaultModel: 'claude-haiku-4-5',
+  lastClaudeModel: 'claude-haiku-4-5',
   lastCustomModel: '',
   thinkingBudget: 'off',
   permissionMode: 'yolo',
   approvedActions: [],
   excludedTags: [],
+  mediaFolder: '',
   environmentVariables: '',
   envSnippets: [],
+  systemPrompt: '',
 };
 
 // Conversation persistence types
@@ -109,6 +111,23 @@ export type ContentBlock =
   | { type: 'tool_use'; toolId: string }
   | { type: 'thinking'; content: string; durationSeconds?: number };
 
+// Supported image media types
+export type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+
+// Image attachment for sending to Claude
+export interface ImageAttachment {
+  id: string;
+  name: string;           // Original filename or generated name
+  mediaType: ImageMediaType;
+  data?: string;          // Base64-encoded image data (not persisted)
+  cachePath?: string;     // Cached file path relative to vault (e.g., .claudian-cache/images/abc.jpg)
+  filePath?: string;      // Original file path (relative to vault or absolute)
+  width?: number;         // Image dimensions (if known)
+  height?: number;
+  size: number;           // File size in bytes
+  source: 'file' | 'paste' | 'drop';  // How the image was added
+}
+
 // Message types for the chat UI
 export interface ChatMessage {
   id: string;
@@ -120,6 +139,8 @@ export interface ChatMessage {
   contentBlocks?: ContentBlock[];
   // File paths attached to this message via @ mention or auto-attach
   contextFiles?: string[];
+  // Images attached to this message
+  images?: ImageAttachment[];
 }
 
 // Enhanced tool call tracking with status and result

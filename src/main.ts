@@ -11,6 +11,7 @@ import {
   DEFAULT_CLAUDE_MODELS,
 } from './types';
 import { getCurrentModelFromEnvironment, getModelsFromEnvironment, parseEnvironmentVariables } from './utils';
+import { deleteCachedImages } from './imageCache';
 
 export default class ClaudianPlugin extends Plugin {
   settings: ClaudianSettings;
@@ -141,29 +142,50 @@ export default class ClaudianPlugin extends Plugin {
   private reconcileModelWithEnvironment(envText: string): void {
     const envVars = parseEnvironmentVariables(envText || '');
     const customModels = getModelsFromEnvironment(envVars);
-    const defaultModels = this.getDefaultModelValues();
 
     if (customModels.length > 0) {
-      const available = customModels.map((m) => m.value);
-      const preferred =
-        (this.settings.lastCustomModel && available.includes(this.settings.lastCustomModel))
-          ? this.settings.lastCustomModel
-          : (available.includes(this.settings.model)
-            ? this.settings.model
-            : this.getPreferredCustomModel(envVars, customModels));
-
-      this.settings.model = preferred;
-      this.settings.lastCustomModel = preferred;
+      // When switching to custom env: reset to priority order (ANTHROPIC_MODEL > opus > sonnet > haiku)
+      this.settings.model = this.getPreferredCustomModel(envVars, customModels);
     } else {
-      const preferred =
-        (this.settings.lastDefaultModel && defaultModels.includes(this.settings.lastDefaultModel))
-          ? this.settings.lastDefaultModel
-          : (defaultModels.includes(this.settings.model)
-            ? this.settings.model
-            : DEFAULT_CLAUDE_MODELS[0].value);
+      // When clearing env vars: reset to default haiku
+      this.settings.model = DEFAULT_CLAUDE_MODELS[0].value;
+    }
+  }
 
-      this.settings.model = preferred;
-      this.settings.lastDefaultModel = preferred;
+  /**
+   * Remove cached images associated with a conversation
+   */
+  private cleanupConversationImages(conversation: Conversation): void {
+    const cachePaths = new Set<string>();
+
+    for (const message of conversation.messages || []) {
+      if (!message.images) continue;
+      for (const img of message.images) {
+        if (img.cachePath) {
+          cachePaths.add(img.cachePath);
+        }
+      }
+    }
+
+    if (cachePaths.size === 0) return;
+
+    // Skip files still referenced by other conversations
+    const inUseElsewhere = new Set<string>();
+    for (const conv of this.conversations) {
+      if (conv.id === conversation.id) continue;
+      for (const msg of conv.messages || []) {
+        if (!msg.images) continue;
+        for (const img of msg.images) {
+          if (img.cachePath && cachePaths.has(img.cachePath)) {
+            inUseElsewhere.add(img.cachePath);
+          }
+        }
+      }
+    }
+
+    const deletable = Array.from(cachePaths).filter(p => !inUseElsewhere.has(p));
+    if (deletable.length > 0) {
+      deleteCachedImages(this.app, deletable);
     }
   }
 
@@ -243,6 +265,8 @@ export default class ClaudianPlugin extends Plugin {
     const index = this.conversations.findIndex(c => c.id === id);
     if (index === -1) return;
 
+    const conversation = this.conversations[index];
+    this.cleanupConversationImages(conversation);
     this.conversations.splice(index, 1);
 
     // If deleted active conversation, switch to newest or create new
