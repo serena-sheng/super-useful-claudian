@@ -3,8 +3,6 @@
  * Edit this to customize Claude's behavior within the Obsidian vault
  */
 
-import { getMediaFolderInstruction } from './promptInstructions';
-
 const BASE_SYSTEM_PROMPT = `You are Claudian, an AI assistant working inside an Obsidian vault. The current working directory is the user's vault root.
 
 # Critical Path Rules
@@ -106,13 +104,44 @@ Track task progress with a todo list. Parameter: \`todos\` (array of {content, s
 - Statuses: pending, in_progress, completed`;
 
 /**
+ * Generate instructions for handling images in notes
+ * Covers both local embedded images (![[image.jpg]]) and external URLs (![alt](url))
+ */
+function getImageInstructions(mediaFolder: string): string {
+  const folder = mediaFolder.trim();
+  const mediaPath = folder ? `./${folder}` : '.';
+  const examplePath = folder ? `${folder}/` : '';
+
+  return `
+
+# Embedded Images in Notes
+
+**Proactive image reading**: When reading a note that contains embedded images, ALWAYS read the images alongside the text to get full context. Images often contain critical information (diagrams, screenshots, charts) that complements the text. Don't wait for the user to ask - read images proactively when they appear relevant to understanding the note.
+
+When you see embedded images in Obsidian markdown notes using the syntax \`![[image.jpg]]\` or \`![[image.png]]\`:
+- The actual image file is located in the media folder: \`${mediaPath}\`
+- To view/analyze the image, use Read with the full path: \`${mediaPath}/image.jpg\`
+- Example: If a note contains \`![[screenshot.png]]\`, read it with: Read file_path="${examplePath}screenshot.png"
+- Supported formats: PNG, JPG/JPEG, GIF, WebP
+
+When you see external images using standard markdown syntax \`![alt text](url)\`:
+- These are external URLs, not local files
+- WebFetch does NOT support images (only text and PDF)
+- To analyze external images: download to temp location, read, then ALWAYS delete
+- Example: If a note contains \`![diagram](https://example.com/arch.png)\`:
+  1. Bash command="mkdir -p .claudian-cache/temp && curl -o .claudian-cache/temp/image.png 'https://example.com/arch.png'"
+  2. Read file_path=".claudian-cache/temp/image.png"
+  3. ALWAYS delete after: Bash command="rm .claudian-cache/temp/image.png"`;
+}
+
+/**
  * Build the complete system prompt with settings
  */
 export function buildSystemPrompt(settings: { mediaFolder?: string; customPrompt?: string } = {}): string {
   let prompt = BASE_SYSTEM_PROMPT;
 
-  // Add media folder instructions
-  prompt += getMediaFolderInstruction(settings.mediaFolder || '');
+  // Add image handling instructions
+  prompt += getImageInstructions(settings.mediaFolder || '');
 
   // Append custom system prompt if provided
   if (settings.customPrompt?.trim()) {

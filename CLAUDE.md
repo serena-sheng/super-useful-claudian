@@ -14,7 +14,7 @@ src/
 ├── ClaudianView.ts      # Sidebar chat UI (ItemView), orchestrates UI components
 ├── ClaudianService.ts   # Claude Agent SDK wrapper, transforms SDK messages
 ├── ClaudianSettings.ts  # Settings tab
-├── systemPrompt.ts      # System prompt for Claude agent
+├── systemPrompt.ts      # System prompt and image handling instructions
 ├── types.ts             # Shared type definitions (StreamChunk, ToolCallInfo, etc.)
 ├── utils.ts             # Utility functions (getVaultPath, env var parsing, model detection)
 └── ui/                  # Modular UI components
@@ -306,6 +306,20 @@ Here's a screenshot of the error:
 ```
 
 The agent will read `./- attachments/error-screenshot.png` to analyze the image.
+
+### External Images
+
+For standard markdown images with external URLs (`![alt text](url)`), WebFetch does **not** support images (only text and PDF). The agent must download the image first:
+
+```markdown
+Here's the architecture diagram:
+![diagram](https://example.com/arch.png)
+```
+
+The agent will:
+1. Download to cache: `curl -o .claudian-cache/temp/image.png "https://example.com/arch.png"`
+2. Read the local file: `Read file_path=".claudian-cache/temp/image.png"`
+3. **Always delete** after analysis: `rm .claudian-cache/temp/image.png`
 
 ## Environment Variables
 

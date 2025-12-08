@@ -97,6 +97,12 @@ When you configure a media folder in settings, Claude can read embedded images:
 ![[screenshot.png]]  →  Claude reads from configured media folder
 ```
 
+**External images:**
+Standard markdown images with URLs require download first (WebFetch doesn't support images):
+```markdown
+![diagram](https://example.com/arch.png)  →  Claude downloads with curl, then reads locally
+```
+
 ### Example prompts
 
 - "List all notes in this vault"
@@ -149,8 +155,7 @@ src/
 ├── ClaudianView.ts      # Sidebar chat UI, orchestrates components
 ├── ClaudianService.ts   # Claude Agent SDK wrapper
 ├── ClaudianSettings.ts  # Settings tab
-├── systemPrompt.ts      # System prompt for Claude
-├── promptInstructions.ts # Dynamic prompt instruction generators
+├── systemPrompt.ts      # System prompt and image handling instructions
 ├── imageCache.ts        # Image caching utilities
 ├── types.ts             # Type definitions
 ├── utils.ts             # Utility functions (env var parsing, model detection)
