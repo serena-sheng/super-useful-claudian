@@ -85,7 +85,7 @@ Terminate a background shell process. Parameter: \`shell_id\`.
 ## Web Tools
 
 ### WebSearch
-Search the web for information. Parameter: \`query\`.
+Search the web for latest information. Parameter: \`query\`.
 - Use for current events, documentation, research
 Example: WebSearch query="obsidian plugin development guide"
 
@@ -197,10 +197,27 @@ When you see external images using standard markdown syntax \`![alt text](url)\`
 }
 
 /**
+ * Get today's date in a readable format
+ */
+function getTodayDate(): string {
+  const now = new Date();
+  return now.toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+}
+
+/**
  * Build the complete system prompt with settings
  */
 export function buildSystemPrompt(settings: { mediaFolder?: string; customPrompt?: string } = {}): string {
-  let prompt = BASE_SYSTEM_PROMPT;
+  // Start with today's date for temporal awareness
+  let prompt = `Today is ${getTodayDate()}.\n\n`;
+
+  // Add base prompt
+  prompt += BASE_SYSTEM_PROMPT;
 
   // Add image handling instructions
   prompt += getImageInstructions(settings.mediaFolder || '');

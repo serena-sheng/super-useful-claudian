@@ -126,20 +126,20 @@ describe('Async Subagent Renderer', () => {
     parentEl = createMockElement('div');
   });
 
-  it('hides label while running and shows running status text', () => {
+  it('shows label immediately and running status text', () => {
     const state = createAsyncSubagentBlock(parentEl as any, 'task-1', { description: 'Background job' });
 
-    expect(state.labelEl.textContent).toBe('');
+    expect(state.labelEl.textContent).toBe('Background job');
     expect(state.statusTextEl.textContent).toBe('Running');
     expect((state.wrapperEl as any).getClasses()).toEqual(expect.arrayContaining(['async', 'pending']));
   });
 
-  it('shows agent id in content and keeps label hidden while running', () => {
+  it('shows agent id in content and keeps label visible while running', () => {
     const state = createAsyncSubagentBlock(parentEl as any, 'task-2', { description: 'Background job' });
 
     updateAsyncSubagentRunning(state, 'agent-xyz');
 
-    expect(state.labelEl.textContent).toBe('');
+    expect(state.labelEl.textContent).toBe('Background job');
     expect(state.statusTextEl.textContent).toBe('Running');
     const contentText = getTextByClass(state.contentEl as any, 'claudian-subagent-done-text')[0];
     expect(contentText).toContain('agent-xyz');

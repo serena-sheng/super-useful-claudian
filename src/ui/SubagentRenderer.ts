@@ -435,13 +435,9 @@ function getAsyncStatusText(asyncStatus: string | undefined): string {
   return 'Running';
 }
 
-function updateAsyncLabel(state: AsyncSubagentState, displayStatus: 'running' | 'completed' | 'error' | 'orphaned'): void {
-  // Only show label once finished (completed/error). Hide during running states.
-  if (displayStatus === 'completed' || displayStatus === 'error') {
-    state.labelEl.setText(truncateDescription(state.info.description));
-  } else {
-    state.labelEl.setText('');
-  }
+function updateAsyncLabel(state: AsyncSubagentState, _displayStatus: 'running' | 'completed' | 'error' | 'orphaned'): void {
+  // Always show label (description) for immediate visibility
+  state.labelEl.setText(truncateDescription(state.info.description));
 }
 
 /**
@@ -486,9 +482,9 @@ export function createAsyncSubagentBlock(
   iconEl.setAttribute('aria-hidden', 'true');
   setIcon(iconEl, 'bot');
 
-  // Label (description)
+  // Label (description) - show immediately for visibility
   const labelEl = headerEl.createDiv({ cls: 'claudian-subagent-label' });
-  labelEl.setText(''); // Hidden while running
+  labelEl.setText(truncateDescription(description));
 
   // Status text (instead of tool count)
   const statusTextEl = headerEl.createDiv({ cls: 'claudian-subagent-status-text' });
@@ -719,11 +715,8 @@ export function renderStoredAsyncSubagent(
   setIcon(iconEl, 'bot');
 
   const labelEl = headerEl.createDiv({ cls: 'claudian-subagent-label' });
-  if (displayStatus === 'completed' || displayStatus === 'error') {
-    labelEl.setText(truncateDescription(subagent.description));
-  } else {
-    labelEl.setText('');
-  }
+  // Always show description for visibility
+  labelEl.setText(truncateDescription(subagent.description));
 
   // Status text
   const statusTextEl = headerEl.createDiv({ cls: 'claudian-subagent-status-text' });

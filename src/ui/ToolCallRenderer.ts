@@ -13,6 +13,7 @@ const TOOL_ICONS: Record<string, string> = {
   'Grep': 'search',
   'LS': 'list',
   'TodoWrite': 'list-checks',
+  'WebSearch': 'globe',
 };
 
 /**
@@ -48,6 +49,10 @@ export function getToolLabel(name: string, input: Record<string, unknown>): stri
       return `Glob: ${input.pattern || 'files'}`;
     case 'Grep':
       return `Grep: ${input.pattern || 'pattern'}`;
+    case 'WebSearch': {
+      const query = (input.query as string) || 'search';
+      return `WebSearch: ${query.length > 40 ? query.substring(0, 40) + '...' : query}`;
+    }
     case 'LS':
       return `LS: ${shortenPath(input.path as string) || '.'}`;
     case 'TodoWrite': {
@@ -87,6 +92,8 @@ export function formatToolInput(name: string, input: Record<string, unknown>): s
     case 'Glob':
     case 'Grep':
       return (input.pattern as string) || JSON.stringify(input, null, 2);
+    case 'WebSearch':
+      return (input.query as string) || JSON.stringify(input, null, 2);
     default:
       return JSON.stringify(input, null, 2);
   }
