@@ -21,6 +21,7 @@ src/
 ├── types.ts             # Shared type definitions (StreamChunk, ToolCallInfo, etc.)
 ├── utils.ts             # Utility functions (getVaultPath, env var parsing, model detection)
 ├── AsyncSubagentManager.ts # Async subagent state machine (Task → AgentOutputTool)
+├── InlineEditService.ts # Lightweight Claude query service for inline text editing
 └── ui/                  # Modular UI components
     ├── index.ts              # Barrel export for all UI components
     ├── ApprovalModal.ts      # Permission approval dialog (Modal)
@@ -31,7 +32,8 @@ src/
     ├── ThinkingBlockRenderer.ts # Extended thinking block UI with timer
     ├── TodoListRenderer.ts   # Todo list UI for TodoWrite tool
     ├── SubagentRenderer.ts   # Subagent (Task tool) collapsible UI with nested tools
-    └── EnvSnippetManager.ts  # Environment variable snippet management
+    ├── EnvSnippetManager.ts  # Environment variable snippet management
+    └── InlineEditModal.ts    # Inline edit modal with diff preview
 ```
 
 ### UI Component Responsibilities
@@ -48,6 +50,7 @@ src/
 | `TodoListRenderer` | Todo list display for TodoWrite tool calls |
 | `SubagentRenderer` | Subagent (Task tool) UI for sync + async (nested tools vs. background polling, label shown on completion) |
 | `EnvSnippetManager` | Environment variable snippet save/restore |
+| `InlineEditModal` | Inline text editing with instruction input, @mentions, and inline diff preview |
 
 ## Key Technologies
 
@@ -421,6 +424,74 @@ Or drag an image and type:
 What's wrong with this error screenshot?
 ```
 
+## Inline Edit
+
+Interact with selected text directly in your notes - ask questions or request edits - without using the sidebar chat.
+
+### How to Use
+
+1. **Select text** in any note
+2. **Press hotkey** (configurable via Settings → Hotkeys → "Claudian: Inline edit")
+3. **Enter request** - either a question ("what does this do?") or edit instruction ("fix grammar")
+4. **View response** - questions get conversational answers, edits show inline diff
+5. **For edits**: Accept (Enter) or Reject (Esc) the changes
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **Inline input** | Input appears directly in the document above selection |
+| **Questions & edits** | Ask about selected text or request modifications |
+| **Word-level diff** | Precise diff showing exactly what changed (for edits) |
+| **Multi-turn conversation** | Agent can ask clarifying questions |
+| **Read-only tools** | Agent can read files for context but cannot modify them |
+
+### Tool Access
+
+The inline edit agent has access to **read-only tools only**:
+
+| Tool | Purpose |
+|------|---------|
+| `Read` | Read the current note or related files for context |
+| `Grep` | Search for patterns across files |
+| `Glob` | Find files by name pattern |
+| `LS` | List directory contents |
+
+Write tools (`Write`, `Edit`, `Bash`, etc.) are blocked via `allowedTools` whitelist and a `PreToolUse` safety hook.
+
+### Prompt Structure
+
+The request sent to Claude:
+```
+File: {path/to/note.md}
+
+---
+{selected text}
+---
+
+Request: {your question or instruction}
+```
+
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| Custom (configurable) | Open inline edit for selected text |
+| `Enter` | Submit request / Accept changes |
+| `Escape` | Cancel / Reject changes |
+
+### Configuring Hotkeys
+
+1. Go to **Settings → Hotkeys**
+2. Search for "Claudian: Inline edit"
+3. Click the **+** button and press your desired key combination
+
+### Notes
+
+- Inline edits are **separate from the main chat** - they don't appear in conversation history
+- Uses the same model and thinking budget configured in settings
+- Agent uses `<replacement>` tags for edits (triggers diff), or responds conversationally for questions
+
 ## Permission Modes
 
 | Mode | Description |
@@ -635,6 +706,21 @@ Permanently approved actions are stored and can be managed in Settings → Appro
 - `.claudian-image-modal-overlay` - Full-size image modal backdrop
 - `.claudian-image-modal` - Full-size image modal container
 - `.claudian-image-modal-close` - Modal close button
+
+### Inline Edit (CM6 Widget)
+- `.claudian-inline-selection` - Selection highlight (uses `--text-selection`)
+- `.claudian-inline-input-container` - Main container (transparent bg)
+- `.claudian-inline-agent-reply` - Agent clarification message box (shown during conversation)
+- `.claudian-inline-input-wrap` - Input wrapper (relative positioned)
+- `.claudian-inline-input` - Text input (transparent, no focus highlight)
+- `.claudian-inline-spinner` - Loading spinner (Claude orange)
+- `.claudian-inline-diff-replace` - Diff container replacing selection
+- `.claudian-diff-del` - Deleted text styling (red strikethrough)
+- `.claudian-diff-ins` - Inserted text styling (green highlight)
+- `.claudian-inline-diff-buttons` - Accept/reject button container
+- `.claudian-inline-diff-btn` - Base button class
+- `.claudian-inline-diff-btn.reject` - Reject button
+- `.claudian-inline-diff-btn.accept` - Accept button
 
 ## Notes
 - when ask to generate a md file about the finding, implementation of your work, put the file in dev/

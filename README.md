@@ -4,27 +4,16 @@ An Obsidian plugin that embeds Claude Agent (using Claude Agent SDK) as a sideba
 
 ## Features
 
-- **Sidebar chat interface**: Talk to Claude without leaving Obsidian
-- **Full Claude Code capabilities**: Read, write, edit files, run bash commands
-- **Vault-aware**: Claude operates with your vault as the working directory
-- **File context awareness**: Auto-attach focused note, or use `@` to mention files
-- **Image support**: Send images via drag-and-drop, paste, or file path for vision analysis
-- **Excluded tags**: Prevent notes with specific tags from auto-loading as context
-- **Streaming responses**: See Claude's responses in real-time
-- **Extended thinking**: Watch Claude's reasoning process with live timer display
-- **Model selection**: Switch between Haiku, Sonnet, and Opus models (or custom models via environment variables)
-- **Custom environment variables**: Configure API providers, custom models, and SDK settings
-- **Thinking budget control**: Adjust thinking token budget (Off/Low/Medium/High)
-- **Tool call visualization**: Collapsible UI showing tool inputs and results (like Claude Code CLI)
-- **Subagent visualization**: Collapsible UI for Task tool calls showing nested tool usage with tree-style indentation
-- **Async subagent tracking**: Background Task/AgentOutputTool flow with periodic non-blocking checks, label revealed on completion/error, no spinner noise while running
-- **Chat history persistence**: Conversations saved across sessions with easy switching
-- **Session resume**: Continue previous conversations with full context
-- **Permission modes**: Yolo (no prompts) or Safe (per-action approval with memory)
-- **Safety blocklist**: Block dangerous commands even in Yolo mode
-- **Vault confinement**: All tools (including Bash paths) are restricted to the vault with symlink-safe checks
-- **Cancel streaming**: Press Escape to stop a response mid-stream
-- **Edited files indicator**: Border highlight on attached edited files, separate “Edited:” chips for non-attached edits, SHA-256 revert detection to auto-clear on delete/rename/revert, auto-dismiss on focus, and click-to-open tabs (session-scoped)
+- **Full Agentic Capabilities**: Leverage Claude Code's power to read, write, and edit files, and execute bash commands, all within your Obsidian vault.
+- **Context-Aware**: Automatically attach the focused note, mention files with `@`, and exclude notes by tag for precise context management.
+- **Vision Support**: Analyze images by sending them via drag-and-drop, paste, or file path.
+- **Inline Edit**: Edit selected text directly in notes with word-level diff preview and read-only tool access for context.
+- **Dynamic Responses**: Experience real-time streaming, observe Claude's extended reasoning process, and cancel responses mid-stream.
+- **Advanced Model Control**: Select between Haiku, Sonnet, and Opus, configure custom models via environment variables, and fine-tune thinking budget.
+- **Transparent Tooling**: Visualize tool calls, subagent activity, and track asynchronous subagent operations with detailed UI feedback.
+- **Persistent Sessions**: Save and resume conversations with full context across sessions.
+- **Robust Security**: Implement permission modes (Yolo/Safe), a safety blocklist, and vault confinement with symlink-safe checks.
+- **Intuitive File Management**: See indicators for edited files, with smart detection, auto-dismissal, and quick access.
 
 ## Requirements
 
@@ -105,6 +94,23 @@ Standard markdown images with URLs require download first (WebFetch doesn't supp
 ![diagram](https://example.com/arch.png)  →  Claude downloads with curl, then reads locally
 ```
 
+### Inline Edit
+
+Edit selected text directly in your notes without opening the sidebar chat.
+
+1. **Select text** in any note
+2. **Press hotkey** (configure via Settings → Hotkeys → "Claudian: Inline edit")
+3. **Enter instructions** (e.g., "make concise", "fix grammar", "translate to French")
+4. **Review the diff** - word-level changes shown inline
+5. **Accept (Enter) or Reject (Esc)**
+
+**Features:**
+- **@ mentions**: Reference other notes for context
+- **Read-only tools**: Agent can read files for context but cannot modify them
+- **Inline diff**: Precise word-level diff with red strikethrough (deletions) and green highlight (insertions)
+
+The inline edit agent has access to `Read`, `Grep`, `Glob`, and `LS` tools for gathering context, but write tools are blocked.
+
 ### Example prompts
 
 - "List all notes in this vault"
@@ -161,6 +167,7 @@ src/
 ├── imageCache.ts        # Image caching utilities
 ├── types.ts             # Type definitions
 ├── utils.ts             # Utility functions (env var parsing, model detection)
+├── InlineEditService.ts # Lightweight Claude service for inline editing (read-only tools)
 └── ui/                  # Modular UI components
     ├── index.ts              # Barrel export
     ├── ApprovalModal.ts      # Permission approval dialog
@@ -171,7 +178,8 @@ src/
     ├── ThinkingBlockRenderer.ts # Extended thinking UI
     ├── TodoListRenderer.ts   # Todo list UI for task tracking
     ├── SubagentRenderer.ts   # Subagent (Task tool) UI with nested tools
-    └── EnvSnippetManager.ts  # Environment variable snippets
+    ├── EnvSnippetManager.ts  # Environment variable snippets
+    └── InlineEditModal.ts    # Inline edit UI (CM6 decorations, diff view)
 ```
 
 ## Roadmap
@@ -191,7 +199,9 @@ src/
 - [x] Image support (drag/drop, paste, path detection, embedded images)
 - [x] Subagent (Task tool) visualization with nested tool tracking
 - [x] Async subagent support (run_in_background=true)
+- [x] Inline edit feature (read-only tools, word-level diff)
 - [ ] Skills, Hooks, MCP and other advanced features
+- [ ] Diff view in chat panel
 
 ## License
 

@@ -15,6 +15,49 @@ export class ClaudianSettingTab extends PluginSettingTab {
     containerEl.empty();
     containerEl.addClass('claudian-settings');
 
+    // Hotkeys section
+    new Setting(containerEl).setName('Hotkeys').setHeading();
+
+    new Setting(containerEl)
+      .setName('Inline edit hotkey')
+      .setDesc('Configure the keyboard shortcut for inline editing selected text')
+      .addButton((button) =>
+        button
+          .setButtonText('Configure hotkey')
+          .onClick(() => {
+            // Open Obsidian's hotkey settings, filtered to our command
+            (this.app as any).setting.open();
+            (this.app as any).setting.openTabById('hotkeys');
+            // Slight delay to ensure the tab is loaded
+            setTimeout(() => {
+              const searchEl = document.querySelector('.hotkey-search-container input') as HTMLInputElement;
+              if (searchEl) {
+                searchEl.value = 'Claudian: Inline edit';
+                searchEl.dispatchEvent(new Event('input'));
+              }
+            }, 100);
+          })
+      );
+
+    new Setting(containerEl)
+      .setName('Open chat hotkey')
+      .setDesc('Configure the keyboard shortcut for opening the Claudian chat panel')
+      .addButton((button) =>
+        button
+          .setButtonText('Configure hotkey')
+          .onClick(() => {
+            (this.app as any).setting.open();
+            (this.app as any).setting.openTabById('hotkeys');
+            setTimeout(() => {
+              const searchEl = document.querySelector('.hotkey-search-container input') as HTMLInputElement;
+              if (searchEl) {
+                searchEl.value = 'Claudian: Open chat';
+                searchEl.dispatchEvent(new Event('input'));
+              }
+            }, 100);
+          })
+      );
+
     // Customization section
     new Setting(containerEl).setName('Customization').setHeading();
 

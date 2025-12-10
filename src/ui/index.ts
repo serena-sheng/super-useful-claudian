@@ -74,3 +74,9 @@ export {
   renderStoredAsyncSubagent,
   type AsyncSubagentState,
 } from './SubagentRenderer';
+
+// Inline edit modal
+export {
+  InlineEditModal,
+  type InlineEditDecision,
+} from './InlineEditModal';

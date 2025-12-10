@@ -1,4 +1,4 @@
-import { Plugin, Notice } from 'obsidian';
+import { Plugin, Notice, MarkdownView, Editor } from 'obsidian';
 import { ClaudianView } from './ClaudianView';
 import { ClaudianService } from './ClaudianService';
 import { ClaudianSettingTab } from './ClaudianSettings';
@@ -12,6 +12,7 @@ import {
 } from './types';
 import { getCurrentModelFromEnvironment, getModelsFromEnvironment, parseEnvironmentVariables } from './utils';
 import { deleteCachedImages } from './imageCache';
+import { InlineEditModal } from './ui/InlineEditModal';
 
 export default class ClaudianPlugin extends Plugin {
   settings: ClaudianSettings;
@@ -46,6 +47,30 @@ export default class ClaudianPlugin extends Plugin {
       name: 'Open chat view',
       callback: () => {
         this.activateView();
+      },
+    });
+
+    // Add inline edit command (Cmd+I / Ctrl+I)
+    this.addCommand({
+      id: 'inline-edit',
+      name: 'Inline edit selected text',
+      editorCallback: async (editor: Editor, view: MarkdownView) => {
+        const selectedText = editor.getSelection();
+
+        if (!selectedText.trim()) {
+          new Notice('Select text to edit');
+          return;
+        }
+
+        const notePath = view.file?.path || 'unknown';
+
+        // Open inline edit modal
+        const modal = new InlineEditModal(this.app, this, selectedText, notePath);
+        const result = await modal.openAndWait();
+
+        if (result.decision === 'accept' && result.editedText !== undefined) {
+          new Notice('Edit applied');
+        }
       },
     });
 
