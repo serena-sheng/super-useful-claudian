@@ -1,5 +1,7 @@
 # Claudian
 
+![Preview](Preview.png)
+
 An Obsidian plugin that embeds Claude Agent (using Claude Agent SDK) as a sidebar chat interface. Your vault becomes Claude's working directory, giving it full agentic capabilities: file read/write, bash commands, and multi-step workflows.
 
 ## Features

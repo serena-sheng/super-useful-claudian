@@ -728,5 +728,6 @@ Permanently approved actions are stored and can be managed in Settings → Appro
 - `.claudian-inline-diff-btn.accept` - Accept button
 
 ## Notes
+- Test Driven Development
 - when ask to generate a md file about the finding, implementation of your work, put the file in dev/
 - when ask to update docs, update development note in dev/ , CLAUDE.md and README.md

@@ -215,6 +215,17 @@ export class FileContextManager {
     }
 
     this.editedFilesThisSession.add(filePath);
+
+    // If the edited file is currently focused, immediately dismiss the indicator
+    const activeFile = this.app.workspace.getActiveFile();
+    if (activeFile) {
+      const activePath = this.normalizePathForVault(activeFile.path);
+      if (activePath === filePath) {
+        this.dismissEditedFile(filePath);
+        return;
+      }
+    }
+
     this.updateEditedFilesIndicator();
     this.updateFileIndicator();
   }

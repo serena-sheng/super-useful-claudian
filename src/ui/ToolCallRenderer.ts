@@ -34,11 +34,11 @@ export function setToolIcon(el: HTMLElement, name: string) {
 export function getToolLabel(name: string, input: Record<string, unknown>): string {
   switch (name) {
     case 'Read':
-      return `Read ${shortenPath(input.file_path as string) || 'file'}`;
+      return `Read: ${shortenPath(input.file_path as string) || 'file'}`;
     case 'Write':
-      return `Write ${shortenPath(input.file_path as string) || 'file'}`;
+      return `Write: ${shortenPath(input.file_path as string) || 'file'}`;
     case 'Edit':
-      return `Edit ${shortenPath(input.file_path as string) || 'file'}`;
+      return `Edit: ${shortenPath(input.file_path as string) || 'file'}`;
     case 'Bash': {
       const cmd = (input.command as string) || 'command';
       return `Bash: ${cmd.length > 40 ? cmd.substring(0, 40) + '...' : cmd}`;
@@ -136,6 +136,14 @@ export function renderWebSearchResult(container: HTMLElement, result: string, ma
   }
 
   return true;
+}
+
+/** Render Read tool result showing line count. */
+export function renderReadResult(container: HTMLElement, result: string): void {
+  container.empty();
+  const lines = result.split('\n').filter(line => line.trim() !== '');
+  const item = container.createSpan({ cls: 'claudian-tool-result-item' });
+  item.setText(`${lines.length} lines read`);
 }
 
 /** Render generic result as DOM elements. Strips line number prefixes. */
@@ -283,11 +291,13 @@ export function updateToolCallResult(
   // Update result text (max 3 lines)
   const resultText = toolEl.querySelector('.claudian-tool-result-text') as HTMLElement;
   if (resultText && toolCall.result) {
-    // Try special rendering for WebSearch, otherwise use generic line renderer
+    // Try special rendering for WebSearch/Read, otherwise use generic line renderer
     if (toolCall.name === 'WebSearch') {
       if (!renderWebSearchResult(resultText, toolCall.result, 3)) {
         renderResultLines(resultText, toolCall.result, 3);
       }
+    } else if (toolCall.name === 'Read') {
+      renderReadResult(resultText, toolCall.result);
     } else {
       renderResultLines(resultText, toolCall.result, 3);
     }
@@ -336,11 +346,13 @@ export function renderStoredToolCall(parentEl: HTMLElement, toolCall: ToolCallIn
   branch.setText('└─');
   const resultText = resultRow.createSpan({ cls: 'claudian-tool-result-text' });
   if (toolCall.result) {
-    // Try special rendering for WebSearch, otherwise use generic line renderer
+    // Try special rendering for WebSearch/Read, otherwise use generic line renderer
     if (toolCall.name === 'WebSearch') {
       if (!renderWebSearchResult(resultText, toolCall.result, 3)) {
         renderResultLines(resultText, toolCall.result, 3);
       }
+    } else if (toolCall.name === 'Read') {
+      renderReadResult(resultText, toolCall.result);
     } else {
       renderResultLines(resultText, toolCall.result, 3);
     }
