@@ -10,6 +10,12 @@ const createManager = () => {
 };
 
 describe('AsyncSubagentManager', () => {
+  it('detects async task flag correctly', () => {
+    const { manager } = createManager();
+    expect(manager.isAsyncTask({ run_in_background: true })).toBe(true);
+    expect(manager.isAsyncTask({ run_in_background: false })).toBe(false);
+  });
+
   it('transitions from pending to running when agent_id is parsed', () => {
     const { manager, updates } = createManager();
 
@@ -27,6 +33,7 @@ describe('AsyncSubagentManager', () => {
 
   it('moves to error when Task tool_result parsing fails', () => {
     const { manager, updates } = createManager();
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
     manager.createAsyncSubagent('task-parse-fail', { description: 'No id', run_in_background: true });
     manager.handleTaskToolResult('task-parse-fail', 'no agent id present');
@@ -35,6 +42,7 @@ describe('AsyncSubagentManager', () => {
     const last = updates[updates.length - 1];
     expect(last.asyncStatus).toBe('error');
     expect(last.result).toContain('Failed to parse agent_id');
+    warnSpy.mockRestore();
   });
 
   it('moves to error when Task tool_result itself is an error', () => {
@@ -138,5 +146,198 @@ describe('AsyncSubagentManager', () => {
       expect(subagent.result).toContain('Conversation ended');
     });
     expect(manager.hasActiveAsync()).toBe(false);
+  });
+
+  it('warns and ignores Task results for unknown tasks', () => {
+    const { manager } = createManager();
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    manager.handleTaskToolResult('missing-task', 'agent_id: x');
+
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('warns when AgentOutputTool is missing agentId', () => {
+    const { manager } = createManager();
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    manager.handleAgentOutputToolUse({
+      id: 'output-1',
+      name: 'AgentOutputTool',
+      input: {},
+      status: 'running',
+      isExpanded: false,
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith('AgentOutputTool called without agentId');
+    warnSpy.mockRestore();
+  });
+
+  it('warns when AgentOutputTool references unknown agent', () => {
+    const { manager } = createManager();
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    manager.handleAgentOutputToolUse({
+      id: 'output-unknown',
+      name: 'AgentOutputTool',
+      input: { agent_id: 'agent-x' },
+      status: 'running',
+      isExpanded: false,
+    });
+
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('returns undefined on invalid AgentOutputTool state transition', () => {
+    const { manager } = createManager();
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    manager.createAsyncSubagent('task-done', { description: 'Background', run_in_background: true });
+    manager.handleTaskToolResult('task-done', JSON.stringify({ agent_id: 'agent-done' }));
+
+    manager.handleAgentOutputToolUse({
+      id: 'output-any',
+      name: 'AgentOutputTool',
+      input: { agent_id: 'agent-done' },
+      status: 'running',
+      isExpanded: false,
+    });
+
+    // Manually mark completed to force invalid transition
+    const sub = manager.getByAgentId('agent-done')!;
+    sub.asyncStatus = 'completed';
+
+    const res = manager.handleAgentOutputToolResult('output-any', '{"retrieval_status":"success"}', false);
+    expect(res).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('treats plain text not_ready as still running', () => {
+    const { manager } = createManager();
+    manager.createAsyncSubagent('task-plain', { description: 'Background', run_in_background: true });
+    manager.handleTaskToolResult('task-plain', JSON.stringify({ agent_id: 'agent-plain' }));
+
+    const toolCall: ToolCallInfo = {
+      id: 'output-plain',
+      name: 'AgentOutputTool',
+      input: { agent_id: 'agent-plain' },
+      status: 'running',
+      isExpanded: false,
+    };
+    manager.handleAgentOutputToolUse(toolCall);
+
+    const running = manager.handleAgentOutputToolResult('output-plain', 'not ready', false);
+    expect(running?.asyncStatus).toBe('running');
+  });
+
+  it('extracts first agent result when agentId is missing', () => {
+    const { manager } = createManager();
+    manager.createAsyncSubagent('task-first', { description: 'Background', run_in_background: true });
+    manager.handleTaskToolResult('task-first', JSON.stringify({ agent_id: 'agent-first' }));
+
+    const toolCall: ToolCallInfo = {
+      id: 'output-first',
+      name: 'AgentOutputTool',
+      input: { agent_id: 'agent-first' },
+      status: 'running',
+      isExpanded: false,
+    };
+    manager.handleAgentOutputToolUse(toolCall);
+
+    const completed = manager.handleAgentOutputToolResult(
+      'output-first',
+      JSON.stringify({ retrieval_status: 'success', agents: { other: { status: 'completed', result: 'ok' } } }),
+      false
+    );
+
+    expect(completed?.result).toBe('ok');
+  });
+
+  it('infers agentId from AgentOutputTool result when not linked', () => {
+    const { manager } = createManager();
+    manager.createAsyncSubagent('task-infer', { description: 'Background', run_in_background: true });
+    manager.handleTaskToolResult('task-infer', JSON.stringify({ agent_id: 'agent-infer' }));
+
+    const result = JSON.stringify({
+      retrieval_status: 'success',
+      agents: { 'agent-infer': { status: 'completed', result: 'ok' } },
+    });
+
+    const completed = manager.handleAgentOutputToolResult('unlinked', result, false);
+    expect(completed?.asyncStatus).toBe('completed');
+    expect(completed?.result).toBe('ok');
+  });
+
+  it('handles JSON envelope forms in still-running detection', () => {
+    const { manager } = createManager();
+
+    const arrayEnvelope = JSON.stringify([
+      { text: JSON.stringify({ retrieval_status: 'not_ready', agents: {} }) },
+    ]);
+    expect((manager as any).isStillRunningResult(arrayEnvelope, false)).toBe(true);
+
+    const objectEnvelope = JSON.stringify({
+      text: JSON.stringify({ retrieval_status: 'running', agents: {} }),
+    });
+    expect((manager as any).isStillRunningResult(objectEnvelope, false)).toBe(true);
+
+    expect((manager as any).isStillRunningResult('   ', false)).toBe(false);
+    expect((manager as any).isStillRunningResult('whatever', true)).toBe(false);
+    expect((manager as any).isStillRunningResult(JSON.stringify({ retrieval_status: 'success' }), false)).toBe(false);
+    expect((manager as any).isStillRunningResult(JSON.stringify({ retrieval_status: 'unknown' }), false)).toBe(false);
+    expect((manager as any).isStillRunningResult('plain output', false)).toBe(false);
+  });
+
+  it('unwraps envelopes in extractAgentResult', () => {
+    const { manager } = createManager();
+
+    const payloadArray = JSON.stringify([
+      { text: JSON.stringify({ agents: { a: { result: 'R' } } }) },
+    ]);
+    expect((manager as any).extractAgentResult(payloadArray, 'a')).toBe('R');
+
+    const payloadObject = JSON.stringify({
+      text: JSON.stringify({ agents: { a: { status: 'completed' } } }),
+    });
+    expect((manager as any).extractAgentResult(payloadObject, 'a')).toContain('completed');
+
+    const fallback = JSON.stringify({ agents: { first: { status: 'completed' } } });
+    expect((manager as any).extractAgentResult(fallback, 'missing')).toContain('completed');
+
+    const noAgents = JSON.stringify({ foo: 'bar' });
+    expect((manager as any).extractAgentResult(noAgents, 'x')).toBe(noAgents);
+  });
+
+  it('gets running subagent by task id after transition', () => {
+    const { manager } = createManager();
+    manager.createAsyncSubagent('task-map', { description: 'Background', run_in_background: true });
+    manager.handleTaskToolResult('task-map', JSON.stringify({ agent_id: 'agent-map' }));
+
+    expect(manager.getByTaskId('task-map')?.agentId).toBe('agent-map');
+  });
+
+  it('parses agent id from multiple JSON shapes', () => {
+    const { manager } = createManager();
+    expect((manager as any).parseAgentId(JSON.stringify({ agentId: 'camel' }))).toBe('camel');
+    expect((manager as any).parseAgentId(JSON.stringify({ data: { agent_id: 'nested' } }))).toBe('nested');
+    expect((manager as any).parseAgentId(JSON.stringify({ id: 'idfield' }))).toBe('idfield');
+
+    // Use escaped keys to bypass regex and exercise JSON parse path
+    expect((manager as any).parseAgentId('{"agent\\u005fid":"escaped"}')).toBe('escaped');
+    expect((manager as any).parseAgentId('{"data": {"agent\\u005fid": "nested2"}}')).toBe('nested2');
+
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    expect((manager as any).parseAgentId('{"foo": "bar"}')).toBeNull();
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('clears all state', () => {
+    const { manager } = createManager();
+    manager.createAsyncSubagent('task-clear', { description: 'Background', run_in_background: true });
+    manager.clear();
+    expect(manager.getAllActive()).toHaveLength(0);
   });
 });

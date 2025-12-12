@@ -1,4 +1,5 @@
 import { DEFAULT_SETTINGS, VIEW_TYPE_CLAUDIAN } from '../src/types';
+import * as imageCache from '../src/imageCache';
 
 // Mock fs for ClaudianService
 jest.mock('fs');
@@ -174,6 +175,19 @@ describe('ClaudianPlugin', () => {
 
       expect(plugin.settings).toEqual(DEFAULT_SETTINGS);
     });
+
+    it('should reconcile model from environment and persist when changed', async () => {
+      (plugin.loadData as jest.Mock).mockResolvedValue({
+        environmentVariables: 'ANTHROPIC_MODEL=custom-model',
+        lastEnvHash: '',
+      });
+
+      const saveSpy = jest.spyOn(plugin, 'saveSettings');
+      await plugin.loadSettings();
+
+      expect(plugin.settings.model).toBe('custom-model');
+      expect(saveSpy).toHaveBeenCalled();
+    });
   });
 
   describe('saveSettings', () => {
@@ -195,6 +209,22 @@ describe('ClaudianPlugin', () => {
       // Also verify the structure includes activeConversationId (can be null or string)
       const savedData = (plugin.saveData as jest.Mock).mock.calls[0][0];
       expect(savedData).toHaveProperty('activeConversationId');
+    });
+  });
+
+  describe('applyEnvironmentVariables', () => {
+    it('toggles restart notification state based on runtime env', async () => {
+      await plugin.onload();
+      (plugin as any).runtimeEnvironmentVariables = 'A=1';
+
+      await plugin.applyEnvironmentVariables('A=2');
+      expect((plugin as any).hasNotifiedEnvChange).toBe(true);
+
+      await plugin.applyEnvironmentVariables('A=3');
+      expect((plugin as any).hasNotifiedEnvChange).toBe(true);
+
+      await plugin.applyEnvironmentVariables('A=1');
+      expect((plugin as any).hasNotifiedEnvChange).toBe(false);
     });
   });
 
@@ -347,6 +377,46 @@ describe('ClaudianPlugin', () => {
 
       // Should switch to conv1
       expect(plugin.getActiveConversation()?.id).toBe(conv1.id);
+    });
+  });
+
+  describe('cleanupConversationImages', () => {
+    it('deletes cached images not used elsewhere', async () => {
+      await plugin.onload();
+      const deleteSpy = jest.spyOn(imageCache, 'deleteCachedImages').mockImplementation(() => {});
+
+      const convA: any = {
+        id: 'a',
+        title: 'A',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        sessionId: null,
+        messages: [
+          { id: 'm1', role: 'user', content: '', timestamp: 0, images: [
+            { id: 'i1', name: 'x', mediaType: 'image/png', cachePath: 'path1', size: 1, source: 'file' },
+            { id: 'i2', name: 'y', mediaType: 'image/png', cachePath: 'path2', size: 1, source: 'file' },
+          ] },
+        ],
+      };
+
+      const convB: any = {
+        id: 'b',
+        title: 'B',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        sessionId: null,
+        messages: [
+          { id: 'm2', role: 'user', content: '', timestamp: 0, images: [
+            { id: 'i3', name: 'z', mediaType: 'image/png', cachePath: 'path1', size: 1, source: 'file' },
+          ] },
+        ],
+      };
+
+      (plugin as any).conversations = [convA, convB];
+      (plugin as any).cleanupConversationImages(convA);
+
+      expect(deleteSpy).toHaveBeenCalledWith(plugin.app, ['path2']);
+      deleteSpy.mockRestore();
     });
   });
 

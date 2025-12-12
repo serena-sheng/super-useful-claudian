@@ -8,11 +8,8 @@
 import { query, type Options, type HookCallbackMatcher } from '@anthropic-ai/claude-agent-sdk';
 import type ClaudianPlugin from './main';
 import { THINKING_BUDGETS } from './types';
-import { getVaultPath, parseEnvironmentVariables } from './utils';
+import { getVaultPath, parseEnvironmentVariables, findClaudeCLIPath, isPathWithinVault as isPathWithinVaultUtil } from './utils';
 import { getInlineEditSystemPrompt } from './systemPrompt';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
 
 export interface InlineEditRequest {
   selectedText: string;
@@ -46,22 +43,7 @@ export class InlineEditService {
   }
 
   private findClaudeCLI(): string | null {
-    const homeDir = os.homedir();
-    const commonPaths = [
-      path.join(homeDir, '.claude', 'local', 'claude'),
-      path.join(homeDir, '.local', 'bin', 'claude'),
-      '/usr/local/bin/claude',
-      '/opt/homebrew/bin/claude',
-      path.join(homeDir, 'bin', 'claude'),
-    ];
-
-    for (const p of commonPaths) {
-      if (fs.existsSync(p)) {
-        return p;
-      }
-    }
-
-    return null;
+    return findClaudeCLIPath();
   }
 
   /** Edits text according to instructions (initial request). */
@@ -112,7 +94,10 @@ export class InlineEditService {
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       hooks: {
-        PreToolUse: [this.createReadOnlyHook()],
+        PreToolUse: [
+          this.createReadOnlyHook(),
+          this.createVaultRestrictionHook(vaultPath),
+        ],
       },
     };
 
@@ -215,6 +200,55 @@ export class InlineEditService {
         },
       ],
     };
+  }
+
+  /** Creates PreToolUse hook to restrict file tools to the vault. */
+  private createVaultRestrictionHook(vaultPath: string): HookCallbackMatcher {
+    const fileTools = ['Read', 'Glob', 'Grep', 'LS'];
+
+    return {
+      hooks: [
+        async (hookInput) => {
+          const input = hookInput as {
+            tool_name: string;
+            tool_input: Record<string, unknown>;
+          };
+
+          const toolName = input.tool_name;
+          if (!fileTools.includes(toolName)) {
+            return { continue: true };
+          }
+
+          const filePath = this.getPathFromToolInput(toolName, input.tool_input);
+          if (filePath && !isPathWithinVaultUtil(filePath, vaultPath)) {
+            return {
+              continue: false,
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse' as const,
+                permissionDecision: 'deny' as const,
+                permissionDecisionReason: `Access denied: Path "${filePath}" is outside the vault. Inline edit is restricted to vault directory only.`,
+              },
+            };
+          }
+
+          return { continue: true };
+        },
+      ],
+    };
+  }
+
+  private getPathFromToolInput(toolName: string, toolInput: Record<string, unknown>): string | null {
+    switch (toolName) {
+      case 'Read':
+        return (toolInput.file_path as string) || null;
+      case 'Glob':
+      case 'Grep':
+        return (toolInput.path as string) || (toolInput.pattern as string) || null;
+      case 'LS':
+        return (toolInput.path as string) || null;
+      default:
+        return null;
+    }
   }
 
   private extractTextFromMessage(message: any): string | null {

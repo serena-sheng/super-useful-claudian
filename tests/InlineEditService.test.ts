@@ -99,6 +99,53 @@ describe('InlineEditService', () => {
     });
   });
 
+  describe('vault restriction hook', () => {
+    beforeEach(() => {
+      const normalizePath = (p: string) => {
+        const path = require('path');
+        return path.resolve(p);
+      };
+      (fs.realpathSync as any) = jest.fn(normalizePath);
+      if (fs.realpathSync) {
+        (fs.realpathSync as any).native = jest.fn(normalizePath);
+      }
+    });
+
+    it('should block Read outside vault', async () => {
+      const hook = (service as any).createVaultRestrictionHook('/test/vault/path');
+      const res = await hook.hooks[0](
+        { tool_name: 'Read', tool_input: { file_path: '/etc/passwd' } },
+        'tool-1',
+        {}
+      );
+
+      expect(res.continue).toBe(false);
+      expect(res.hookSpecificOutput.permissionDecisionReason).toContain('outside the vault');
+    });
+
+    it('should allow Read inside vault', async () => {
+      const hook = (service as any).createVaultRestrictionHook('/test/vault/path');
+      const res = await hook.hooks[0](
+        { tool_name: 'Read', tool_input: { file_path: '/test/vault/path/notes/a.md' } },
+        'tool-2',
+        {}
+      );
+
+      expect(res.continue).toBe(true);
+    });
+
+    it('should block Glob escaping pattern', async () => {
+      const hook = (service as any).createVaultRestrictionHook('/test/vault/path');
+      const res = await hook.hooks[0](
+        { tool_name: 'Glob', tool_input: { pattern: '../**/*.md' } },
+        'tool-3',
+        {}
+      );
+
+      expect(res.continue).toBe(false);
+    });
+  });
+
   describe('buildPrompt', () => {
     it('should build prompt with correct format', () => {
       const request: InlineEditRequest = {
@@ -571,6 +618,43 @@ describe('InlineEditService', () => {
       const text = (service as any).extractTextFromMessage(message);
 
       expect(text).toBeNull();
+    });
+  });
+
+  describe('error handling', () => {
+    beforeEach(() => {
+      (fs.existsSync as jest.Mock).mockReturnValue(true);
+    });
+
+    it('should surface SDK query errors', async () => {
+      const sdk = require('@anthropic-ai/claude-agent-sdk');
+      const spy = jest.spyOn(sdk, 'query').mockImplementation(() => {
+        throw new Error('boom');
+      });
+
+      const result = await service.editText({
+        selectedText: 'text',
+        instruction: 'edit',
+        notePath: 'note.md',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('boom');
+      spy.mockRestore();
+    });
+
+    it('returns null path for unknown tool input', () => {
+      expect((service as any).getPathFromToolInput('Unknown', {})).toBeNull();
+    });
+
+    it('allows non-file tools in vault restriction hook', async () => {
+      const hook = (service as any).createVaultRestrictionHook('/test/vault/path');
+      const res = await hook.hooks[0]({ tool_name: 'WebSearch', tool_input: {} }, 't', {});
+      expect(res.continue).toBe(true);
+    });
+
+    it('extracts LS path from tool input', () => {
+      expect((service as any).getPathFromToolInput('LS', { path: 'notes' })).toBe('notes');
     });
   });
 });

@@ -5,6 +5,9 @@
  */
 
 import type { App } from 'obsidian';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 /** Returns today's date in readable and ISO format for the system prompt. */
 export function getTodayDate(): string {
@@ -26,6 +29,52 @@ export function getVaultPath(app: App): string | null {
     return (adapter as any).basePath;
   }
   return null;
+}
+
+/** Finds Claude Code CLI executable in common install locations. */
+export function findClaudeCLIPath(): string | null {
+  const homeDir = os.homedir();
+  const commonPaths = [
+    path.join(homeDir, '.claude', 'local', 'claude'),
+    path.join(homeDir, '.local', 'bin', 'claude'),
+    '/usr/local/bin/claude',
+    '/opt/homebrew/bin/claude',
+    path.join(homeDir, 'bin', 'claude'),
+  ];
+
+  for (const p of commonPaths) {
+    if (fs.existsSync(p)) {
+      return p;
+    }
+  }
+
+  return null;
+}
+
+/** Best-effort realpath that falls back to path.resolve for non-existent targets. */
+function resolveRealPath(p: string): string {
+  try {
+    return (fs.realpathSync.native ?? fs.realpathSync)(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+/** Checks whether a candidate path is within the vault. */
+export function isPathWithinVault(candidatePath: string, vaultPath: string): boolean {
+  const vaultReal = resolveRealPath(vaultPath);
+
+  const expandedPath = candidatePath.startsWith('~/')
+    ? path.join(os.homedir(), candidatePath.slice(2))
+    : candidatePath;
+
+  const absCandidate = path.isAbsolute(expandedPath)
+    ? expandedPath
+    : path.resolve(vaultPath, expandedPath);
+
+  const resolvedCandidate = resolveRealPath(absCandidate);
+
+  return resolvedCandidate === vaultReal || resolvedCandidate.startsWith(vaultReal + path.sep);
 }
 
 /** Parses KEY=VALUE environment variables from text. Supports comments (#) and empty lines. */

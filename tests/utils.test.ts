@@ -3,7 +3,11 @@ import {
   parseEnvironmentVariables,
   getModelsFromEnvironment,
   getCurrentModelFromEnvironment,
+  findClaudeCLIPath,
+  isPathWithinVault,
 } from '../src/utils';
+import * as fs from 'fs';
+import * as os from 'os';
 
 describe('utils.ts', () => {
   describe('getVaultPath', () => {
@@ -147,6 +151,15 @@ describe('utils.ts', () => {
       });
     });
 
+    it('should skip lines with = at start (no key)', () => {
+      const input = '=value\nKEY=valid\n =also-no-key';
+      const result = parseEnvironmentVariables(input);
+
+      expect(result).toEqual({
+        KEY: 'valid',
+      });
+    });
+
     it('should return empty object for empty input', () => {
       expect(parseEnvironmentVariables('')).toEqual({});
       expect(parseEnvironmentVariables('   ')).toEqual({});
@@ -216,6 +229,14 @@ describe('utils.ts', () => {
       expect(result[0].label).toBe('claude-3-opus');
     });
 
+    it('should fallback to full value when slash-split yields empty', () => {
+      const envVars = { ANTHROPIC_MODEL: 'trailing-slash/' };
+      const result = getModelsFromEnvironment(envVars);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].label).toBe('trailing-slash/');
+    });
+
     it('should sort models by priority (model > opus > sonnet > haiku)', () => {
       const envVars = {
         ANTHROPIC_DEFAULT_HAIKU_MODEL: 'haiku-model',
@@ -281,6 +302,67 @@ describe('utils.ts', () => {
       const result = getCurrentModelFromEnvironment({});
 
       expect(result).toBeNull();
+    });
+  });
+
+  describe('findClaudeCLIPath', () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('should return first matching Claude CLI path', () => {
+      jest.spyOn(os, 'homedir').mockReturnValue('/home/test');
+      jest.spyOn(fs, 'existsSync').mockImplementation((p: any) => p === '/home/test/.local/bin/claude');
+
+      expect(findClaudeCLIPath()).toBe('/home/test/.local/bin/claude');
+    });
+
+    it('should return null when Claude CLI is not found', () => {
+      jest.spyOn(os, 'homedir').mockReturnValue('/home/test');
+      jest.spyOn(fs, 'existsSync').mockReturnValue(false as any);
+
+      expect(findClaudeCLIPath()).toBeNull();
+    });
+  });
+
+  describe('isPathWithinVault', () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('should allow relative paths within vault', () => {
+      expect(isPathWithinVault('notes/a.md', '/vault')).toBe(true);
+    });
+
+    it('should block path traversal escaping vault', () => {
+      expect(isPathWithinVault('../secrets.txt', '/vault')).toBe(false);
+    });
+
+    it('should allow absolute paths inside vault', () => {
+      expect(isPathWithinVault('/vault/notes/a.md', '/vault')).toBe(true);
+    });
+
+    it('should block absolute paths outside vault', () => {
+      expect(isPathWithinVault('/etc/passwd', '/vault')).toBe(false);
+    });
+
+    it('should expand tilde and still enforce vault boundary', () => {
+      jest.spyOn(os, 'homedir').mockReturnValue('/home/test');
+      expect(isPathWithinVault('~/vault/notes/a.md', '/vault')).toBe(false);
+    });
+
+    it('should allow exact vault path', () => {
+      expect(isPathWithinVault('/vault', '/vault')).toBe(true);
+      expect(isPathWithinVault('.', '/vault')).toBe(true);
+    });
+
+    it('should handle non-existent paths via fallback resolution', () => {
+      // When fs.realpathSync throws (file doesn't exist), path.resolve is used
+      jest.spyOn(fs, 'realpathSync').mockImplementation(() => {
+        throw new Error('ENOENT');
+      });
+      // Even with mock throwing, function should still work via fallback
+      expect(isPathWithinVault('nonexistent/path.md', '/vault')).toBe(true);
     });
   });
 });

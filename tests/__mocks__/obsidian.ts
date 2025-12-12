@@ -137,6 +137,10 @@ export const MarkdownRenderer = {
 
 export const setIcon = jest.fn();
 
+export class Notice {
+  constructor(_message: string) {}
+}
+
 // TFile class for instanceof checks
 export class TFile {
   path: string;

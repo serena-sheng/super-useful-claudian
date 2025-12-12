@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { ensureImageCacheDir, saveImageToCache, readCachedImageBase64, deleteCachedImages } from '../src/imageCache';
+import { ensureImageCacheDir, saveImageToCache, readCachedImageBase64, deleteCachedImages, getCacheAbsolutePath } from '../src/imageCache';
 import { ImageMediaType } from '../src/types';
 
 function createMockApp(vaultPath: string) {
@@ -67,5 +67,31 @@ describe('imageCache', () => {
 
     deleteCachedImages(app, [cache!.relPath]);
     expect(fs.existsSync(absPath)).toBe(false);
+  });
+
+  it('blocks cache path traversal outside cache root', () => {
+    const abs = getCacheAbsolutePath(app, '.claudian-cache/images/../evil.png');
+    expect(abs).toBeNull();
+  });
+
+  it('uses media type extension fallback when no preferred name', () => {
+    const buffer = Buffer.from('jpeg-image');
+    const cache = saveImageToCache(app, buffer, 'image/jpeg');
+    expect(cache?.relPath.endsWith('.jpg')).toBe(true);
+  });
+
+  it('returns null when vault path is unavailable', () => {
+    const noVaultApp = createMockApp('') as any;
+    noVaultApp.vault.adapter = {};
+
+    expect(ensureImageCacheDir(noVaultApp)).toBeNull();
+    expect(saveImageToCache(noVaultApp, Buffer.from('x'), 'image/png')).toBeNull();
+    expect(readCachedImageBase64(noVaultApp, '.claudian-cache/images/a.png')).toBeNull();
+    expect(getCacheAbsolutePath(noVaultApp, '.claudian-cache/images/a.png')).toBeNull();
+  });
+
+  it('rejects invalid cache-relative paths', () => {
+    expect(getCacheAbsolutePath(app, '/abs.png')).toBeNull();
+    expect(getCacheAbsolutePath(app, 'other.png')).toBeNull();
   });
 });

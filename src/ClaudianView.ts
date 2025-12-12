@@ -904,18 +904,21 @@ export class ClaudianView extends ItemView {
     const closeBtn = modal.createDiv({ cls: 'claudian-image-modal-close' });
     closeBtn.setText('\u00D7');
 
-    const close = () => overlay.remove();
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        close();
+      }
+    };
+
+    const close = () => {
+      document.removeEventListener('keydown', handleEsc);
+      overlay.remove();
+    };
+
     closeBtn.addEventListener('click', close);
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) close();
     });
-
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        close();
-        document.removeEventListener('keydown', handleEsc);
-      }
-    };
     document.addEventListener('keydown', handleEsc);
   }
 

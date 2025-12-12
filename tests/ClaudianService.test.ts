@@ -783,6 +783,40 @@ describe('ClaudianService', () => {
       expect(blockedChunk?.content).toContain('outside the vault');
     });
 
+    it('should block Glob tool with escaping pattern', async () => {
+      setMockMessages([
+        { type: 'system', subtype: 'init', session_id: 'test-session' },
+        createAssistantWithToolUse('Glob', { pattern: '../**/*.md' }, 'glob-escape'),
+        { type: 'result' },
+      ]);
+
+      const chunks: any[] = [];
+      for await (const chunk of service.query('search files')) {
+        chunks.push(chunk);
+      }
+
+      const blockedChunk = chunks.find((c) => c.type === 'blocked');
+      expect(blockedChunk).toBeDefined();
+      expect(blockedChunk?.content).toContain('outside the vault');
+    });
+
+    it('should block Grep tool with absolute pattern', async () => {
+      setMockMessages([
+        { type: 'system', subtype: 'init', session_id: 'test-session' },
+        createAssistantWithToolUse('Grep', { pattern: '/etc/passwd' }, 'grep-abs'),
+        { type: 'result' },
+      ]);
+
+      const chunks: any[] = [];
+      for await (const chunk of service.query('grep outside')) {
+        chunks.push(chunk);
+      }
+
+      const blockedChunk = chunks.find((c) => c.type === 'blocked');
+      expect(blockedChunk).toBeDefined();
+      expect(blockedChunk?.content).toContain('outside the vault');
+    });
+
     it('should block tilde expansion paths outside vault', async () => {
       setMockMessages([
         { type: 'system', subtype: 'init', session_id: 'test-session' },
@@ -1214,6 +1248,366 @@ describe('ClaudianService', () => {
       expect(prompts[1]).toContain('Context files: [note.md]');
       expect(chunks.some((c) => c.type === 'text' && c.content === 'Recovered')).toBe(true);
       expect(service.getSessionId()).toBeNull();
+    });
+  });
+
+  describe('image prompt and hydration', () => {
+    beforeEach(() => {
+      (fs.existsSync as jest.Mock).mockReturnValue(true);
+      (service as any).resolvedClaudePath = '/mock/claude';
+    });
+
+    it('should return plain prompt when no valid images', () => {
+      const prompt = (service as any).buildPromptWithImages('hello', []);
+      expect(prompt).toBe('hello');
+    });
+
+    it('should build async generator with image blocks', async () => {
+      const images = [
+        { id: 'img-1', name: 'a.png', mediaType: 'image/png', data: 'AAA', size: 3, source: 'file' },
+        { id: 'img-2', name: 'b.png', mediaType: 'image/png', data: 'BBB', size: 3, source: 'file' },
+      ];
+
+      const gen = (service as any).buildPromptWithImages('hi', images) as AsyncGenerator<any>;
+      const messages: any[] = [];
+      for await (const m of gen) messages.push(m);
+
+      expect(messages).toHaveLength(1);
+      expect(messages[0].type).toBe('user');
+      expect(messages[0].message.content[0].type).toBe('image');
+      expect(messages[0].message.content[2].type).toBe('text');
+    });
+
+    it('should hydrate images using existing data, cache, and file paths', async () => {
+      const imageCache = await import('../src/imageCache');
+      jest.spyOn(imageCache, 'readCachedImageBase64').mockReturnValue('CACHE');
+
+      (fs.existsSync as jest.Mock).mockImplementation((p: any) => p === '/test/vault/path/c.png');
+      (fs.readFileSync as jest.Mock).mockReturnValue(Buffer.from('file-bytes'));
+
+      const images = [
+        { id: 'img-1', name: 'a.png', mediaType: 'image/png', data: 'DATA', size: 1, source: 'file' },
+        { id: 'img-2', name: 'b.png', mediaType: 'image/png', cachePath: 'cache.png', size: 1, source: 'file' },
+        { id: 'img-3', name: 'c.png', mediaType: 'image/png', filePath: 'c.png', size: 1, source: 'file' },
+      ];
+
+      const hydrated = await (service as any).hydrateImagesData(images, '/test/vault/path');
+
+      expect(hydrated?.[0].data).toBe('DATA');
+      expect(hydrated?.[1].data).toBe('CACHE');
+      expect(hydrated?.[2].data).toBe(Buffer.from('file-bytes').toString('base64'));
+    });
+  });
+
+  describe('query options construction', () => {
+    beforeEach(() => {
+      (fs.existsSync as jest.Mock).mockReturnValue(true);
+    });
+
+    it('should set yolo mode options', async () => {
+      mockPlugin = createMockPlugin({ permissionMode: 'yolo', thinkingBudget: 'off' });
+      service = new ClaudianService(mockPlugin);
+      (service as any).resolvedClaudePath = '/mock/claude';
+
+      setMockMessages([
+        { type: 'system', subtype: 'init', session_id: 'test-session' },
+        { type: 'assistant', message: { content: [{ type: 'text', text: 'Hi' }] } },
+        { type: 'result' },
+      ]);
+
+      for await (const _ of service.query('hello')) {
+        // drain
+      }
+
+      const options = getLastOptions();
+      expect(options?.permissionMode).toBe('bypassPermissions');
+      expect(options?.allowDangerouslySkipPermissions).toBe(true);
+    });
+
+    it('should set safe mode, resume, and thinking tokens', async () => {
+      mockPlugin = createMockPlugin({ permissionMode: 'normal', thinkingBudget: 'high' });
+      service = new ClaudianService(mockPlugin);
+      (service as any).resolvedClaudePath = '/mock/claude';
+      service.setSessionId('resume-id');
+
+      setMockMessages([
+        { type: 'system', subtype: 'init', session_id: 'new-session' },
+        { type: 'assistant', message: { content: [{ type: 'text', text: 'Hi' }] } },
+        { type: 'result' },
+      ]);
+
+      for await (const _ of service.query('hello')) {
+        // drain
+      }
+
+      const options = getLastOptions();
+      expect(options?.permissionMode).toBe('default');
+      expect(options?.resume).toBe('resume-id');
+      expect(options?.maxThinkingTokens).toBe(16000);
+      expect(typeof options?.canUseTool).toBe('function');
+    });
+  });
+
+  describe('transformSDKMessage additional branches', () => {
+    it('should transform tool_result blocks inside user content', () => {
+      const sdkMessage: any = {
+        type: 'user',
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'tool-1', content: 'out', is_error: true },
+          ],
+        },
+      };
+
+      const chunks = Array.from((service as any).transformSDKMessage(sdkMessage));
+      expect(chunks[0]).toEqual(expect.objectContaining({ type: 'tool_result', id: 'tool-1', isError: true }));
+    });
+
+    it('should transform stream_event tool_use and text blocks', () => {
+      const toolUseMsg: any = {
+        type: 'stream_event',
+        event: { type: 'content_block_start', content_block: { type: 'tool_use', id: 't1', name: 'Read', input: {} } },
+      };
+      const textStartMsg: any = {
+        type: 'stream_event',
+        event: { type: 'content_block_start', content_block: { type: 'text', text: 'hello' } },
+      };
+      const textDeltaMsg: any = {
+        type: 'stream_event',
+        event: { type: 'content_block_delta', delta: { type: 'text_delta', text: ' world' } },
+      };
+
+      const toolChunks = Array.from((service as any).transformSDKMessage(toolUseMsg));
+      const textChunks = [
+        ...Array.from((service as any).transformSDKMessage(textStartMsg)),
+        ...Array.from((service as any).transformSDKMessage(textDeltaMsg)),
+      ];
+
+      expect(toolChunks[0]).toEqual(expect.objectContaining({ type: 'tool_use', id: 't1', name: 'Read' }));
+      expect(textChunks.map((c) => c.content).join('')).toBe('hello world');
+    });
+  });
+
+  describe('file hash hooks and diff data', () => {
+    beforeEach(() => {
+      (fs.existsSync as jest.Mock).mockReset();
+      (fs.statSync as jest.Mock).mockReset();
+      (fs.readFileSync as jest.Mock).mockReset();
+
+      mockPlugin = createMockPlugin({ permissionMode: 'yolo' });
+      mockPlugin.getView = jest.fn().mockReturnValue({
+        fileContextManager: {
+          markFileBeingEdited: jest.fn().mockResolvedValue(undefined),
+          trackEditedFile: jest.fn().mockResolvedValue(undefined),
+        },
+      });
+      service = new ClaudianService(mockPlugin);
+      (service as any).vaultPath = '/test/vault/path';
+    });
+
+    it('captures original content and computes diff for small file', async () => {
+      (fs.existsSync as jest.Mock).mockReturnValue(true);
+      (fs.statSync as jest.Mock).mockReturnValue({ size: 10 });
+      (fs.readFileSync as jest.Mock)
+        .mockReturnValueOnce('old')
+        .mockReturnValueOnce('new');
+
+      const preHook = (service as any).createFileHashPreHook();
+      const postHook = (service as any).createFileHashPostHook();
+
+      await preHook.hooks[0]({ tool_name: 'Write', tool_input: { file_path: 'note.md' } }, 'tool-1');
+      await postHook.hooks[0]({ tool_name: 'Write', tool_input: { file_path: 'note.md' }, tool_result: {} }, 'tool-1');
+
+      const diff = service.getDiffData('tool-1');
+      expect(diff).toEqual({ filePath: 'note.md', originalContent: 'old', newContent: 'new' });
+    });
+
+    it('skips diff when original file is too large', async () => {
+      (fs.existsSync as jest.Mock).mockReturnValue(true);
+      (fs.statSync as jest.Mock).mockReturnValue({ size: 200 * 1024 });
+
+      const preHook = (service as any).createFileHashPreHook();
+      const postHook = (service as any).createFileHashPostHook();
+
+      await preHook.hooks[0]({ tool_name: 'Edit', tool_input: { file_path: 'big.md' } }, 'tool-big');
+      await postHook.hooks[0]({ tool_name: 'Edit', tool_input: { file_path: 'big.md' }, tool_result: {} }, 'tool-big');
+
+      const diff = service.getDiffData('tool-big');
+      expect(diff).toEqual({ filePath: 'big.md', skippedReason: 'too_large' });
+    });
+
+    it('marks diff unavailable when edited file is missing', async () => {
+      (fs.existsSync as jest.Mock).mockReturnValue(false);
+      (fs.statSync as jest.Mock).mockReturnValue({ size: 10 });
+
+      const preHook = (service as any).createFileHashPreHook();
+      const postHook = (service as any).createFileHashPostHook();
+
+      await preHook.hooks[0]({ tool_name: 'Write', tool_input: { file_path: 'new.md' } }, 'tool-new');
+      await postHook.hooks[0]({ tool_name: 'Write', tool_input: { file_path: 'new.md' }, tool_result: {} }, 'tool-new');
+
+      const diff = service.getDiffData('tool-new');
+      expect(diff).toEqual({ filePath: 'new.md', skippedReason: 'unavailable' });
+    });
+  });
+
+  describe('remaining business branches', () => {
+    beforeEach(() => {
+      (fs.existsSync as jest.Mock).mockReturnValue(true);
+      (service as any).resolvedClaudePath = '/mock/claude';
+    });
+
+    it('yields error when session retry also fails', async () => {
+      jest.spyOn(service as any, 'queryViaSDK').mockImplementation(async function* () {
+        throw new Error('Session expired');
+      });
+
+      const history = [
+        { id: 'u1', role: 'user' as const, content: 'Hi', timestamp: 0 },
+      ];
+
+      const chunks: any[] = [];
+      for await (const c of service.query('Hi', undefined, history)) chunks.push(c);
+
+      const errorChunk = chunks.find((c) => c.type === 'error');
+      expect(errorChunk).toBeDefined();
+      expect(errorChunk.content).toContain('Session expired');
+    });
+
+    it('yields error for non-session failures', async () => {
+      jest.spyOn(service as any, 'queryViaSDK').mockImplementation(async function* () {
+        throw new Error('Network down');
+      });
+
+      const chunks: any[] = [];
+      for await (const c of service.query('Hi')) chunks.push(c);
+
+      expect(chunks.some((c) => c.type === 'error' && c.content.includes('Network down'))).toBe(true);
+    });
+
+    it('skips non-user messages and empty assistants in rebuilt context', () => {
+      const messages: any[] = [
+        { id: 'sys', role: 'system', content: 'ignore', timestamp: 0 },
+        { id: 'a1', role: 'assistant', content: '', timestamp: 0 },
+        { id: 'u1', role: 'user', content: 'Hello', timestamp: 0 },
+      ];
+
+      const context = (service as any).buildContextFromHistory(messages);
+      expect(context).toContain('User: Hello');
+      expect(context).not.toContain('system');
+    });
+
+    it('returns undefined when no user message exists', () => {
+      const last = (service as any).getLastUserMessage([
+        { id: 'a1', role: 'assistant', content: 'Hi', timestamp: 0 },
+      ]);
+      expect(last).toBeUndefined();
+    });
+
+    it('formats tool call without result', () => {
+      const line = (service as any).formatToolCallForContext({ id: 't', name: 'Read', input: {}, status: 'completed' });
+      expect(line).toBe('[Tool Read status=completed]');
+    });
+
+    it('handles image read errors and path resolution branches', async () => {
+      (fs.existsSync as jest.Mock).mockReturnValue(true);
+      (fs.readFileSync as jest.Mock).mockImplementation(() => { throw new Error('boom'); });
+
+      const base64 = await (service as any).loadImageBase64({ filePath: 'x.png' }, '/test/vault');
+      expect(base64).toBeNull();
+
+      expect((service as any).resolveImagePath('/abs.png', '/test/vault')).toBe('/abs.png');
+      expect((service as any).resolveImagePath('rel.png', null)).toBeNull();
+    });
+
+    it('yields error when SDK query throws inside queryViaSDK', async () => {
+      const sdk = require('@anthropic-ai/claude-agent-sdk');
+      const spy = jest.spyOn(sdk, 'query').mockImplementation(() => { throw new Error('boom'); });
+
+      const chunks: any[] = [];
+      for await (const c of service.query('Hi')) chunks.push(c);
+
+      expect(chunks.some((c) => c.type === 'error' && c.content.includes('boom'))).toBe(true);
+      spy.mockRestore();
+    });
+
+    it('allows pre-approved actions in safe mode callback', async () => {
+      mockPlugin = createMockPlugin({ permissionMode: 'normal', approvedActions: [
+        { toolName: 'Read', pattern: '/test/file.md', approvedAt: Date.now(), scope: 'always' },
+      ] });
+      service = new ClaudianService(mockPlugin);
+
+      const canUse = (service as any).createSafeModeCallback();
+      const res = await canUse('Read', { file_path: '/test/file.md' }, {});
+      expect(res.behavior).toBe('allow');
+    });
+
+    it('returns continue for non-file tools in vault hook and null for unknown paths', async () => {
+      (service as any).vaultPath = '/test/vault/path';
+      const hook = (service as any).createVaultRestrictionHook();
+      const res = await hook.hooks[0]({ tool_name: 'WebSearch', tool_input: {} }, 't1', {});
+      expect(res.continue).toBe(true);
+
+      expect((service as any).getPathFromToolInput('WebSearch', {})).toBeNull();
+    });
+
+    it('covers NotebookEdit and default patterns/descriptions', () => {
+      expect((service as any).getActionPattern('NotebookEdit', { notebook_path: 'nb.ipynb' })).toBe('nb.ipynb');
+      expect((service as any).getActionPattern('Other', { foo: 'bar' })).toContain('foo');
+      expect((service as any).getActionDescription('Other', { foo: 'bar' })).toContain('foo');
+    });
+
+    it('stores null original content when pre-hook stat fails', async () => {
+      mockPlugin = createMockPlugin({ permissionMode: 'yolo' });
+      service = new ClaudianService(mockPlugin);
+      (service as any).vaultPath = '/test/vault/path';
+
+      (fs.existsSync as jest.Mock).mockReturnValue(true);
+      (fs.statSync as jest.Mock).mockImplementation(() => { throw new Error('boom'); });
+
+      const preHook = (service as any).createFileHashPreHook();
+      await preHook.hooks[0]({ tool_name: 'Write', tool_input: { file_path: 'bad.md' } }, 'tool-bad');
+
+      expect((service as any).originalContents.get('tool-bad')?.content).toBeNull();
+    });
+
+    it('skips diff when post-hook lacks original entry or hits read error', async () => {
+      mockPlugin = createMockPlugin({ permissionMode: 'yolo' });
+      service = new ClaudianService(mockPlugin);
+      (service as any).vaultPath = '/test/vault/path';
+
+      (fs.existsSync as jest.Mock).mockReturnValue(true);
+      (fs.statSync as jest.Mock).mockReturnValue({ size: 10 });
+      (fs.readFileSync as jest.Mock).mockReturnValueOnce('new');
+
+      const postHook = (service as any).createFileHashPostHook();
+      await postHook.hooks[0]({ tool_name: 'Write', tool_input: { file_path: 'no-orig.md' }, tool_result: {} }, 'tool-no-orig');
+      expect(service.getDiffData('tool-no-orig')).toEqual({ filePath: 'no-orig.md', skippedReason: 'unavailable' });
+
+      // Now force read error in post-hook
+      (service as any).originalContents.set('tool-read-err', { filePath: 'err.md', content: '' });
+      (fs.readFileSync as jest.Mock).mockImplementation(() => { throw new Error('boom'); });
+
+      await postHook.hooks[0]({ tool_name: 'Write', tool_input: { file_path: 'err.md' }, tool_result: {} }, 'tool-read-err');
+      expect(service.getDiffData('tool-read-err')).toEqual({ filePath: 'err.md', skippedReason: 'unavailable' });
+    });
+
+    it('marks too_large when post-hook sees large new file', async () => {
+      mockPlugin = createMockPlugin({ permissionMode: 'yolo' });
+      service = new ClaudianService(mockPlugin);
+      (service as any).vaultPath = '/test/vault/path';
+
+      (fs.existsSync as jest.Mock).mockReturnValue(false);
+      const preHook = (service as any).createFileHashPreHook();
+      await preHook.hooks[0]({ tool_name: 'Write', tool_input: { file_path: 'large.md' } }, 'tool-large');
+
+      (fs.existsSync as jest.Mock).mockReturnValue(true);
+      (fs.statSync as jest.Mock).mockReturnValue({ size: 200 * 1024 });
+
+      const postHook = (service as any).createFileHashPostHook();
+      await postHook.hooks[0]({ tool_name: 'Write', tool_input: { file_path: 'large.md' }, tool_result: {} }, 'tool-large');
+
+      expect(service.getDiffData('tool-large')).toEqual({ filePath: 'large.md', skippedReason: 'too_large' });
     });
   });
 });

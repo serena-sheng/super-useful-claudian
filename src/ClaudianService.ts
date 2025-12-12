@@ -21,7 +21,7 @@ import {
   ToolDiffData,
 } from './types';
 import { buildSystemPrompt } from './systemPrompt';
-import { getVaultPath, parseEnvironmentVariables } from './utils';
+import { getVaultPath, parseEnvironmentVariables, findClaudeCLIPath, isPathWithinVault as isPathWithinVaultUtil } from './utils';
 import { readCachedImageBase64 } from './imageCache';
 
 const MAX_DIFF_SIZE = 100 * 1024;
@@ -65,22 +65,7 @@ export class ClaudianService {
   }
 
   private findClaudeCLI(): string | null {
-    const homeDir = os.homedir();
-    const commonPaths = [
-      path.join(homeDir, '.claude', 'local', 'claude'),
-      path.join(homeDir, '.local', 'bin', 'claude'),
-      '/usr/local/bin/claude',
-      '/opt/homebrew/bin/claude',
-      path.join(homeDir, 'bin', 'claude'),
-    ];
-
-    for (const p of commonPaths) {
-      if (fs.existsSync(p)) {
-        return p;
-      }
-    }
-
-    return null;
+    return findClaudeCLIPath();
   }
 
   /** Sends a query to Claude and streams the response. */
@@ -728,6 +713,7 @@ export class ClaudianService {
         return (toolInput.file_path as string) || (toolInput.notebook_path as string) || null;
       case 'Glob':
       case 'Grep':
+        return (toolInput.path as string) || (toolInput.pattern as string) || null;
       case 'LS':
         return (toolInput.path as string) || null;
       default:
@@ -741,29 +727,7 @@ export class ClaudianService {
   private isPathWithinVault(filePath: string): boolean {
     if (!this.vaultPath) return true; // No restriction if vault path not set
 
-    const vaultReal = this.resolveRealPath(this.vaultPath);
-    const expandedPath = filePath.startsWith('~/')
-      ? path.join(os.homedir(), filePath.slice(2))
-      : filePath;
-    const candidate = path.isAbsolute(expandedPath)
-      ? expandedPath
-      : path.resolve(this.vaultPath, expandedPath);
-    const resolvedPath = this.resolveRealPath(candidate);
-
-    // Check if the path starts with the vault path (or is exactly the vault)
-    return resolvedPath === vaultReal ||
-           resolvedPath.startsWith(vaultReal + path.sep);
-  }
-
-  /**
-   * Best-effort realpath that falls back to path.resolve for non-existent targets
-   */
-  private resolveRealPath(p: string): string {
-    try {
-      return (fs.realpathSync.native ?? fs.realpathSync)(p);
-    } catch {
-      return path.resolve(p);
-    }
+    return isPathWithinVaultUtil(filePath, this.vaultPath);
   }
 
   /**
@@ -851,7 +815,7 @@ export class ClaudianService {
         if (decision === 'allow-always') {
           await this.approveAction(toolName, input, 'always');
         } else if (decision === 'allow') {
-          this.approveAction(toolName, input, 'session');
+          await this.approveAction(toolName, input, 'session');
         }
 
         return { behavior: 'allow', updatedInput: input };
