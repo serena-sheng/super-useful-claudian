@@ -53,6 +53,7 @@ export class ClaudianService {
   private plugin: ClaudianPlugin;
   private abortController: AbortController | null = null;
   private sessionId: string | null = null;
+  private wasInterrupted = false;
   private resolvedClaudePath: string | null = null;
   private approvalCallback: ApprovalCallback | null = null;
   private sessionApprovedActions: ApprovedAction[] = [];
@@ -89,8 +90,19 @@ export class ClaudianService {
 
     const hydratedImages = await this.hydrateImagesData(images, vaultPath);
 
+    // After interruption, session is broken - rebuild context proactively
+    let queryPrompt = prompt;
+    if (this.wasInterrupted && conversationHistory && conversationHistory.length > 0) {
+      const historyContext = this.buildContextFromHistory(conversationHistory);
+      if (historyContext) {
+        queryPrompt = `${historyContext}\n\nUser: ${prompt}`;
+      }
+      this.sessionId = null; // Force fresh session
+      this.wasInterrupted = false;
+    }
+
     try {
-      yield* this.queryViaSDK(prompt, vaultPath, hydratedImages);
+      yield* this.queryViaSDK(queryPrompt, vaultPath, hydratedImages);
     } catch (error) {
       if (this.isSessionExpiredError(error) && conversationHistory && conversationHistory.length > 0) {
         this.sessionId = null;
@@ -166,13 +178,14 @@ export class ClaudianService {
     return parts.join('\n\n');
   }
 
-  /** Checks if an error indicates session expiration. */
+  /** Checks if an error indicates session needs recovery. */
   private isSessionExpiredError(error: unknown): boolean {
     const msg = error instanceof Error ? error.message.toLowerCase() : '';
     return msg.includes('session expired') ||
            msg.includes('session not found') ||
            msg.includes('invalid session') ||
            msg.includes('session invalid') ||
+           msg.includes('process exited with code') ||
            (msg.includes('session') && msg.includes('expired')) ||
            (msg.includes('resume') && (msg.includes('failed') || msg.includes('error')));
   }
@@ -568,6 +581,7 @@ export class ClaudianService {
   cancel() {
     if (this.abortController) {
       this.abortController.abort();
+      this.wasInterrupted = true;
     }
   }
 
@@ -577,6 +591,7 @@ export class ClaudianService {
    */
   resetSession() {
     this.sessionId = null;
+    this.wasInterrupted = false;
     // Clear session-scoped approved actions
     this.sessionApprovedActions = [];
     // Clear diff-related state

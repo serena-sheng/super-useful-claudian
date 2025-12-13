@@ -384,9 +384,11 @@ export class ClaudianView extends ItemView {
 
     this.showThinkingIndicator(contentEl);
 
+    let wasInterrupted = false;
     try {
       for await (const chunk of this.plugin.agentService.query(promptToSend, imagesForMessage, this.messages)) {
         if (this.cancelRequested) {
+          wasInterrupted = true;
           break;
         }
         await this.handleStreamChunk(chunk, assistantMsg);
@@ -395,6 +397,9 @@ export class ClaudianView extends ItemView {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       this.appendText(`\n\n**Error:** ${errorMsg}`);
     } finally {
+      if (wasInterrupted) {
+        await this.appendText('\n\n<span class="claudian-interrupted">Interrupted</span> <span class="claudian-interrupted-hint">· What should Claudian do instead?</span>');
+      }
       this.hideThinkingIndicator();
       this.isStreaming = false;
       this.cancelRequested = false;

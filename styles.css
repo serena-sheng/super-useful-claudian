@@ -483,6 +483,15 @@
   color: var(--color-orange);
 }
 
+/* Interrupted message */
+.claudian-interrupted {
+  color: var(--color-red);
+}
+
+.claudian-interrupted-hint {
+  color: var(--text-muted);
+}
+
 /* Spinner animation */
 .claudian-spinner {
   width: 14px;
