@@ -5,9 +5,11 @@ import {
   getCurrentModelFromEnvironment,
   findClaudeCLIPath,
   isPathWithinVault,
+  isPathInAllowedExportPaths,
 } from '../src/utils';
 import * as fs from 'fs';
 import * as os from 'os';
+import * as path from 'path';
 
 describe('utils.ts', () => {
   describe('getVaultPath', () => {
@@ -325,6 +327,33 @@ describe('utils.ts', () => {
     });
   });
 
+  describe('isPathInAllowedExportPaths', () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('should return false when allowed export paths is empty', () => {
+      expect(isPathInAllowedExportPaths('/tmp/out.md', [], '/vault')).toBe(false);
+    });
+
+    it('should allow candidate path within allowed export directory', () => {
+      const realpathSpy = jest.spyOn(fs, 'realpathSync').mockImplementation((p: any) => path.resolve(String(p)) as any);
+      (fs.realpathSync as any).native = realpathSpy;
+
+      expect(isPathInAllowedExportPaths('/tmp/out.md', ['/tmp'], '/vault')).toBe(true);
+      expect(isPathInAllowedExportPaths('/var/out.md', ['/tmp'], '/vault')).toBe(false);
+    });
+
+    it('should expand tilde for export paths and candidate paths', () => {
+      jest.spyOn(os, 'homedir').mockReturnValue('/home/test');
+      const realpathSpy = jest.spyOn(fs, 'realpathSync').mockImplementation((p: any) => path.resolve(String(p)) as any);
+      (fs.realpathSync as any).native = realpathSpy;
+
+      expect(isPathInAllowedExportPaths('~/Desktop/out.md', ['~/Desktop'], '/vault')).toBe(true);
+      expect(isPathInAllowedExportPaths('~/Downloads/out.md', ['~/Desktop'], '/vault')).toBe(false);
+    });
+  });
+
   describe('isPathWithinVault', () => {
     afterEach(() => {
       jest.restoreAllMocks();
@@ -363,6 +392,24 @@ describe('utils.ts', () => {
       });
       // Even with mock throwing, function should still work via fallback
       expect(isPathWithinVault('nonexistent/path.md', '/vault')).toBe(true);
+    });
+
+    it('should block symlink escapes for non-existent targets', () => {
+      jest.spyOn(fs, 'existsSync').mockImplementation((p: any) => {
+        const s = String(p);
+        return s === '/' || s === '/vault' || s === '/vault/export';
+      });
+
+      const realpathSpy = jest.spyOn(fs, 'realpathSync').mockImplementation((p: any) => {
+        const s = String(p);
+        if (s === '/') return '/';
+        if (s === '/vault') return '/vault';
+        if (s === '/vault/export') return '/tmp/export';
+        throw new Error('ENOENT');
+      });
+      (fs.realpathSync as any).native = realpathSpy;
+
+      expect(isPathWithinVault('export/newfile.txt', '/vault')).toBe(false);
     });
   });
 });

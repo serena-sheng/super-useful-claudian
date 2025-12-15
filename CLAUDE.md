@@ -220,6 +220,7 @@ interface ClaudianSettings {
   excludedTags: string[];        // Tags that exclude files from auto-loading context
   environmentVariables: string;  // Custom env vars in KEY=VALUE format (one per line)
   envSnippets: EnvSnippet[];     // Saved environment variable configurations
+  allowedExportPaths: string[];  // Paths outside vault where files can be exported
 }
 
 type ClaudeModel = string;  // Default models or custom model strings
@@ -545,9 +546,36 @@ Request: {your instruction}
 
 ### Security Restrictions (Both Modes)
 
-**Vault Restriction**: Agent can ONLY access files within the vault directory. Paths are normalized via `realpath` (symlink-safe) and Bash commands are scanned for path-like tokens; attempts to touch files outside the vault are blocked automatically.
+**Vault Restriction**: Agent can ONLY access files within the vault directory. Paths are normalized via `realpath` (symlink-safe) and Bash commands are scanned for path-like tokens; attempts to touch files outside the vault are blocked automatically. Exception: Export write operations to configured allowed export paths are permitted (write-only).
 
 **Command Blocklist**: Dangerous bash commands are blocked even in YOLO mode.
+
+### Allowed Export Paths
+
+By default, the agent is restricted to the vault directory. You can configure a small set of external paths where files may be exported (written).
+
+**Configuration**: Settings → Claudian → Safety → Allowed export paths
+
+Enter one path per line. Supports `~` for the home directory:
+
+```
+~/Desktop
+~/Downloads
+/tmp
+```
+
+**Default**: `~/Desktop` and `~/Downloads`
+
+**Behavior**:
+- **Write/Edit/NotebookEdit** writes to these paths are allowed
+- **Read/Glob/Grep/LS** remain vault-only
+- **Bash** only allows these paths as write targets (e.g., `-o/--output`, `>` redirects, destination args for `cp/mv/rsync`); reads/listing in these paths are blocked
+
+**Use Case**: Export notes to Desktop as `.docx`, `.pdf`, or other formats via shell commands:
+
+```bash
+pandoc ./note.md -o ~/Desktop/note.docx
+```
 
 ### Approval Memory
 

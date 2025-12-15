@@ -21,7 +21,7 @@ import {
   ToolDiffData,
 } from './types';
 import { buildSystemPrompt } from './systemPrompt';
-import { getVaultPath, parseEnvironmentVariables, findClaudeCLIPath, isPathWithinVault as isPathWithinVaultUtil } from './utils';
+import { getVaultPath, parseEnvironmentVariables, findClaudeCLIPath, isPathWithinVault as isPathWithinVaultUtil, isPathInAllowedExportPaths } from './utils';
 import { readCachedImageBase64 } from './imageCache';
 
 const MAX_DIFF_SIZE = 100 * 1024;
@@ -353,6 +353,7 @@ export class ClaudianService {
     const systemPrompt = buildSystemPrompt({
       mediaFolder: this.plugin.settings.mediaFolder,
       customPrompt: this.plugin.settings.systemPrompt,
+      allowedExportPaths: this.plugin.settings.allowedExportPaths,
     });
 
     const options: Options = {
@@ -673,14 +674,18 @@ export class ClaudianService {
           // Bash: inspect command for paths that escape the vault
           if (toolName === 'Bash') {
             const command = (input.tool_input?.command as string) || '';
-            const outsidePath = this.findOutsideVaultPathInCommand(command);
-            if (outsidePath) {
+            const violation = this.findBashCommandPathViolation(command);
+            if (violation) {
+              const reason =
+                violation.type === 'export_path_read'
+                  ? `Access denied: Command path "${violation.path}" is in an allowed export directory, but export paths are write-only.`
+                  : `Access denied: Command path "${violation.path}" is outside the vault. Agent is restricted to vault directory only.`;
               return {
                 continue: false,
                 hookSpecificOutput: {
                   hookEventName: 'PreToolUse' as const,
                   permissionDecision: 'deny' as const,
-                  permissionDecisionReason: `Access denied: Command path "${outsidePath}" is outside the vault. Agent is restricted to vault directory only.`,
+                  permissionDecisionReason: reason,
                 },
               };
             }
@@ -696,6 +701,11 @@ export class ClaudianService {
           const filePath = this.getPathFromToolInput(toolName, input.tool_input);
 
           if (filePath && !this.isPathWithinVault(filePath)) {
+            // Allow write operations to allowed export paths
+            if (editTools.includes(toolName) && this.isAllowedExportPath(filePath)) {
+              return { continue: true };
+            }
+
             // BUG FIX #5: Clean up edit state when blocking Write/Edit/NotebookEdit
             if (editTools.includes(toolName)) {
               this.plugin.getView()?.fileContextManager?.cancelFileEdit(toolName, input.tool_input);
@@ -746,20 +756,294 @@ export class ClaudianService {
   }
 
   /**
-   * Find the first command path that escapes the vault, if any
+   * Check if a path is within the allowed export paths
    */
-  private findOutsideVaultPathInCommand(command: string): string | null {
+  private isAllowedExportPath(filePath: string): boolean {
+    if (!this.vaultPath) return false;
+
+    const allowedPaths = this.plugin.settings.allowedExportPaths;
+    return isPathInAllowedExportPaths(filePath, allowedPaths, this.vaultPath);
+  }
+
+  /**
+   * Find the first command path that escapes the vault, if any
+   * Allows write-target paths that are in the allowed export paths
+   */
+  private findBashCommandPathViolation(command: string):
+    | { type: 'outside_vault'; path: string }
+    | { type: 'export_path_read'; path: string }
+    | null {
     if (!command || !this.vaultPath) return null;
 
-    const candidates = this.extractPathCandidates(command);
-    for (const candidate of candidates) {
-      const normalized = candidate.startsWith('~/')
-        ? path.join(os.homedir(), candidate.slice(2))
-        : candidate;
+    const tokens = this.tokenizeBashCommand(command);
+    const segments = this.splitBashTokensIntoSegments(tokens);
 
-      if (!this.isPathWithinVault(normalized)) {
-        return candidate;
+    for (const segment of segments) {
+      const violation = this.findBashPathViolationInSegment(segment);
+      if (violation) {
+        return violation;
       }
+    }
+
+    return null;
+  }
+
+  /**
+   * Split a bash command into tokens.
+   * This is a best-effort tokenizer (quotes/backticks are handled; full bash parsing is out of scope).
+   */
+  private tokenizeBashCommand(command: string): string[] {
+    const tokens: string[] = [];
+    const tokenRegex = /(['"`])(.*?)\1|[^\s]+/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = tokenRegex.exec(command)) !== null) {
+      const token = match[2] ?? match[0];
+      const cleaned = token.trim();
+      if (!cleaned) continue;
+      tokens.push(cleaned);
+    }
+
+    return tokens;
+  }
+
+  /**
+   * Split tokens into segments by common bash operators.
+   * Each segment is treated as an independent command for output-target heuristics.
+   */
+  private splitBashTokensIntoSegments(tokens: string[]): string[][] {
+    const separators = new Set(['&&', '||', ';', '|']);
+    const segments: string[][] = [];
+    let current: string[] = [];
+
+    for (const token of tokens) {
+      if (separators.has(token)) {
+        if (current.length > 0) {
+          segments.push(current);
+          current = [];
+        }
+        continue;
+      }
+      current.push(token);
+    }
+
+    if (current.length > 0) {
+      segments.push(current);
+    }
+
+    return segments;
+  }
+
+  private getBashSegmentCommandName(segment: string[]): { cmdName: string; cmdIndex: number } {
+    const wrappers = new Set(['command', 'env', 'sudo']);
+    let cmdIndex = 0;
+    while (cmdIndex < segment.length && wrappers.has(segment[cmdIndex])) {
+      cmdIndex += 1;
+    }
+
+    const rawCmd = segment[cmdIndex] || '';
+    const cmdName = path.basename(rawCmd);
+    return { cmdName, cmdIndex };
+  }
+
+  private isBashOutputRedirectOperator(token: string): boolean {
+    return token === '>' || token === '>>' || token === '1>' || token === '1>>' || token === '2>' || token === '2>>' || token === '&>' || token === '&>>' || token === '>|';
+  }
+
+  private isBashInputRedirectOperator(token: string): boolean {
+    return token === '<' || token === '<<' || token === '0<' || token === '0<<';
+  }
+
+  private isBashOutputOptionExpectingValue(token: string): boolean {
+    return token === '-o' || token === '--output' || token === '--out' || token === '--outfile' || token === '--output-file';
+  }
+
+  private cleanPathToken(raw: string): string | null {
+    let token = raw.trim();
+    if (!token) return null;
+
+    // Strip surrounding quotes/backticks if present.
+    if (
+      (token.startsWith('"') && token.endsWith('"')) ||
+      (token.startsWith("'") && token.endsWith("'")) ||
+      (token.startsWith('`') && token.endsWith('`'))
+    ) {
+      token = token.slice(1, -1).trim();
+    }
+
+    // Trim common delimiters from shells / subshells.
+    while (token.startsWith('(') || token.startsWith('[') || token.startsWith('{')) {
+      token = token.slice(1).trim();
+    }
+    while (
+      token.endsWith(')') ||
+      token.endsWith(']') ||
+      token.endsWith('}') ||
+      token.endsWith(';') ||
+      token.endsWith(',')
+    ) {
+      token = token.slice(0, -1).trim();
+    }
+
+    if (!token) return null;
+    if (token === '.' || token === '/') return null;
+    return token;
+  }
+
+  private isPathLikeToken(token: string): boolean {
+    const cleaned = token.trim();
+    if (!cleaned) return false;
+    if (cleaned === '.' || cleaned === '/' || cleaned === '--') return false;
+
+    return (
+      cleaned.startsWith('~/') ||
+      cleaned.startsWith('./') ||
+      cleaned.startsWith('../') ||
+      cleaned.startsWith('..') ||
+      cleaned.startsWith('/') ||
+      cleaned.includes('/') ||
+      cleaned.includes('\\')
+    );
+  }
+
+  private checkBashPathAccess(candidate: string, access: 'read' | 'write'):
+    | { type: 'outside_vault'; path: string }
+    | { type: 'export_path_read'; path: string }
+    | null {
+    const cleaned = this.cleanPathToken(candidate);
+    if (!cleaned) return null;
+
+    const normalized = cleaned.startsWith('~/')
+      ? path.join(os.homedir(), cleaned.slice(2))
+      : cleaned;
+
+    if (this.isPathWithinVault(normalized)) {
+      return null;
+    }
+
+    if (this.isAllowedExportPath(normalized)) {
+      if (access === 'write') {
+        return null;
+      }
+      return { type: 'export_path_read', path: cleaned };
+    }
+
+    return { type: 'outside_vault', path: cleaned };
+  }
+
+  private findBashPathViolationInSegment(segment: string[]):
+    | { type: 'outside_vault'; path: string }
+    | { type: 'export_path_read'; path: string }
+    | null {
+    if (segment.length === 0) return null;
+
+    const { cmdName, cmdIndex } = this.getBashSegmentCommandName(segment);
+
+    // Some commands have a clear destination argument that should be treated as a write target.
+    const destinationCommands = new Set(['cp', 'mv', 'rsync']);
+    let destinationTokenIndex: number | null = null;
+    if (destinationCommands.has(cmdName)) {
+      const pathArgIndices: number[] = [];
+      let seenDoubleDash = false;
+
+      for (let i = cmdIndex + 1; i < segment.length; i += 1) {
+        const token = segment[i];
+
+        if (!seenDoubleDash && token === '--') {
+          seenDoubleDash = true;
+          continue;
+        }
+
+        // Skip options (best-effort).
+        if (!seenDoubleDash && token.startsWith('-')) {
+          continue;
+        }
+
+        if (this.isPathLikeToken(token)) {
+          pathArgIndices.push(i);
+        }
+      }
+
+      if (pathArgIndices.length > 0) {
+        destinationTokenIndex = pathArgIndices[pathArgIndices.length - 1];
+      }
+    }
+
+    let expectWriteNext = false;
+
+    for (let i = 0; i < segment.length; i += 1) {
+      const token = segment[i];
+
+      // Standalone redirection operators.
+      if (this.isBashOutputRedirectOperator(token)) {
+        expectWriteNext = true;
+        continue;
+      }
+      if (this.isBashInputRedirectOperator(token)) {
+        expectWriteNext = false;
+        continue;
+      }
+
+      // Standalone output options.
+      if (this.isBashOutputOptionExpectingValue(token)) {
+        expectWriteNext = true;
+        continue;
+      }
+
+      // Embedded redirection operators, e.g. ">/tmp/out", "2>>~/Desktop/log".
+      const embeddedOutputRedirect = token.match(/^(?:&>>|&>|\d*>>|\d*>\||\d*>|>>|>\||>)(.+)$/);
+      if (embeddedOutputRedirect) {
+        const violation = this.checkBashPathAccess(embeddedOutputRedirect[1], 'write');
+        if (violation) return violation;
+        continue;
+      }
+
+      const embeddedInputRedirect = token.match(/^(?:\d*<<|\d*<|<<|<)(.+)$/);
+      if (embeddedInputRedirect) {
+        const violation = this.checkBashPathAccess(embeddedInputRedirect[1], 'read');
+        if (violation) return violation;
+        continue;
+      }
+
+      // Embedded output options, e.g. "--output=/tmp/out", "-o/tmp/out", "-o~/Desktop/out".
+      const embeddedLongOutput = token.match(/^--(?:output|out|outfile|output-file)=(.+)$/);
+      if (embeddedLongOutput) {
+        const violation = this.checkBashPathAccess(embeddedLongOutput[1], 'write');
+        if (violation) return violation;
+        continue;
+      }
+
+      const embeddedShortOutput = token.match(/^-o(.+)$/);
+      if (embeddedShortOutput) {
+        const violation = this.checkBashPathAccess(embeddedShortOutput[1], 'write');
+        if (violation) return violation;
+        continue;
+      }
+
+      // Generic KEY=VALUE where VALUE looks like a path.
+      // We treat this as a read access since it is ambiguous and can be used to smuggle paths.
+      const eqIndex = token.indexOf('=');
+      if (eqIndex > 0) {
+        const key = token.slice(0, eqIndex);
+        const value = token.slice(eqIndex + 1);
+        if (key.startsWith('-') && this.isPathLikeToken(value)) {
+          const violation = this.checkBashPathAccess(value, 'read');
+          if (violation) return violation;
+        }
+      }
+
+      if (!this.isPathLikeToken(token)) {
+        expectWriteNext = false;
+        continue;
+      }
+
+      const access: 'read' | 'write' =
+        i === destinationTokenIndex || expectWriteNext ? 'write' : 'read';
+
+      const violation = this.checkBashPathAccess(token, access);
+      if (violation) return violation;
+
+      expectWriteNext = false;
     }
 
     return null;
@@ -769,23 +1053,17 @@ export class ClaudianService {
    * Naive tokenizer to pull out path-like segments from a bash command
    */
   private extractPathCandidates(command: string): string[] {
-    const candidates = new Set<string>();
-    const tokenRegex = /(['"`])(.*?)\1|[^\s]+/g;
-    let match: RegExpExecArray | null;
+    const candidates: string[] = [];
+    const seen = new Set<string>();
 
-    while ((match = tokenRegex.exec(command)) !== null) {
-      const token = match[2] ?? match[0];
-      const cleaned = token.trim();
-      if (!cleaned) continue;
-      if (cleaned === '.' || cleaned === '/') continue;
-
-      // Consider tokens with path separators or explicit traversal as path-like
-      if (cleaned.includes(path.sep) || cleaned.startsWith('..') || cleaned.startsWith('~/')) {
-        candidates.add(cleaned);
-      }
+    for (const token of this.tokenizeBashCommand(command)) {
+      if (!this.isPathLikeToken(token)) continue;
+      if (seen.has(token)) continue;
+      seen.add(token);
+      candidates.push(token);
     }
 
-    return Array.from(candidates);
+    return candidates;
   }
 
   /**

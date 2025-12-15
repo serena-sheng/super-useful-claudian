@@ -63,6 +63,7 @@ export interface ClaudianSettings {
   environmentVariables: string;
   envSnippets: EnvSnippet[];
   systemPrompt: string;
+  allowedExportPaths: string[];
 }
 
 /** Saved environment variable configuration. */
@@ -94,6 +95,7 @@ export const DEFAULT_SETTINGS: ClaudianSettings = {
   environmentVariables: '',
   envSnippets: [],
   systemPrompt: '',
+  allowedExportPaths: ['~/Desktop', '~/Downloads'],
 };
 
 /** Persisted conversation with messages and session state. */

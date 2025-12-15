@@ -172,6 +172,24 @@ export class ClaudianSettingTab extends PluginSettingTab {
         text.inputEl.cols = 40;
       });
 
+    new Setting(containerEl)
+      .setName('Allowed export paths')
+      .setDesc('Paths outside the vault where files can be exported (one per line). Supports ~ for home directory.')
+      .addTextArea((text) => {
+        text
+          .setPlaceholder('~/Desktop\n~/Downloads\n/tmp')
+          .setValue(this.plugin.settings.allowedExportPaths.join('\n'))
+          .onChange(async (value) => {
+            this.plugin.settings.allowedExportPaths = value
+              .split('\n')
+              .map((s) => s.trim())
+              .filter((s) => s.length > 0);
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.rows = 4;
+        text.inputEl.cols = 40;
+      });
+
     const approvedDesc = containerEl.createDiv({ cls: 'claudian-approved-desc' });
     approvedDesc.createEl('p', {
       text: 'Actions that have been permanently approved (via "Always Allow"). These will not require approval in Safe mode.',

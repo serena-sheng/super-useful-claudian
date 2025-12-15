@@ -697,6 +697,24 @@ describe('ClaudianService', () => {
       expect(blockedChunk?.content).toContain('outside the vault');
     });
 
+    it('should allow Write tool writing to allowed export path', async () => {
+      mockPlugin.settings.allowedExportPaths = ['/tmp'];
+
+      setMockMessages([
+        { type: 'system', subtype: 'init', session_id: 'test-session' },
+        createAssistantWithToolUse('Write', { file_path: '/tmp/export.md', content: 'exported' }, 'write-export'),
+        { type: 'result' },
+      ]);
+
+      const chunks: any[] = [];
+      for await (const chunk of service.query('export file')) {
+        chunks.push(chunk);
+      }
+
+      const blockedChunk = chunks.find((c) => c.type === 'blocked');
+      expect(blockedChunk).toBeUndefined();
+    });
+
     it('should block Edit tool editing outside vault', async () => {
       setMockMessages([
         { type: 'system', subtype: 'init', session_id: 'test-session' },
@@ -729,6 +747,80 @@ describe('ClaudianService', () => {
       const blockedChunk = chunks.find((c) => c.type === 'blocked');
       expect(blockedChunk).toBeDefined();
       expect(blockedChunk?.content).toContain('outside the vault');
+    });
+
+    it('should allow Bash command writing to allowed export path via redirection', async () => {
+      mockPlugin.settings.allowedExportPaths = ['/tmp'];
+
+      setMockMessages([
+        { type: 'system', subtype: 'init', session_id: 'test-session' },
+        createAssistantWithToolUse('Bash', { command: 'cat ./notes/file.md > /tmp/out.md' }, 'bash-export'),
+        { type: 'result' },
+      ]);
+
+      const chunks: any[] = [];
+      for await (const chunk of service.query('export via bash')) {
+        chunks.push(chunk);
+      }
+
+      const blockedChunk = chunks.find((c) => c.type === 'blocked');
+      expect(blockedChunk).toBeUndefined();
+    });
+
+    it('should allow Bash command writing to allowed export path via -o', async () => {
+      mockPlugin.settings.allowedExportPaths = ['/tmp'];
+
+      setMockMessages([
+        { type: 'system', subtype: 'init', session_id: 'test-session' },
+        createAssistantWithToolUse('Bash', { command: 'pandoc ./notes/file.md -o /tmp/out.docx' }, 'bash-export-o'),
+        { type: 'result' },
+      ]);
+
+      const chunks: any[] = [];
+      for await (const chunk of service.query('export via pandoc')) {
+        chunks.push(chunk);
+      }
+
+      const blockedChunk = chunks.find((c) => c.type === 'blocked');
+      expect(blockedChunk).toBeUndefined();
+    });
+
+    it('should block Bash command reading from allowed export path (write-only)', async () => {
+      mockPlugin.settings.allowedExportPaths = ['/tmp'];
+
+      setMockMessages([
+        { type: 'system', subtype: 'init', session_id: 'test-session' },
+        createAssistantWithToolUse('Bash', { command: 'cat /tmp/out.md' }, 'bash-export-read'),
+        { type: 'result' },
+      ]);
+
+      const chunks: any[] = [];
+      for await (const chunk of service.query('read export')) {
+        chunks.push(chunk);
+      }
+
+      const blockedChunk = chunks.find((c) => c.type === 'blocked');
+      expect(blockedChunk).toBeDefined();
+      expect(blockedChunk?.content).toContain('write-only');
+    });
+
+    it('should block Bash command copying from allowed export path into vault (write-only)', async () => {
+      mockPlugin.settings.allowedExportPaths = ['/tmp'];
+
+      setMockMessages([
+        { type: 'system', subtype: 'init', session_id: 'test-session' },
+        createAssistantWithToolUse('Bash', { command: 'cp /tmp/out.md ./notes/out.md' }, 'bash-export-cp'),
+        { type: 'result' },
+      ]);
+
+      const chunks: any[] = [];
+      for await (const chunk of service.query('copy export')) {
+        chunks.push(chunk);
+      }
+
+      const blockedChunk = chunks.find((c) => c.type === 'blocked');
+      expect(blockedChunk).toBeDefined();
+      expect(blockedChunk?.content).toContain('write-only');
     });
 
     it('should allow Bash commands with paths inside vault', async () => {

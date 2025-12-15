@@ -103,6 +103,7 @@ Interact with text directly in your notes - ask questions, request edits, or ins
 
 - **Enable command blocklist**: Block dangerous bash commands (default: on)
 - **Blocked commands**: Patterns to block (supports regex)
+- **Allowed export paths**: Paths outside the vault where files can be exported (default: `~/Desktop`, `~/Downloads`)
 - **Show tool usage**: Display file operations in chat
 - **Excluded tags**: Tags that prevent notes from auto-loading (e.g., `sensitive`, `private`)
 - **Media folder**: Configure where vault stores attachments for embedded image support (e.g., `attachments`)
@@ -114,6 +115,7 @@ Interact with text directly in your notes - ask questions, request edits, or ins
 ### Safety and permissions
 
 - **Vault restriction**: File tools and Bash commands are limited to the Obsidian vault. Paths are resolved with `realpath` to prevent symlink escapes; attempts outside the vault are blocked.
+- **Export paths exception**: Write operations to configured export paths (e.g., `~/Desktop`) are allowed for export workflows (e.g., `pandoc` generating `.docx`). Export paths are treated as write-only: `Read/Glob/Grep/LS` remain vault-only, and `Bash` only allows export paths as write targets (e.g., `-o/--output`, `>`).
 - **Approvals**:
   - Safe mode shows an approval modal per tool call.
   - Bash approvals require an exact command match.

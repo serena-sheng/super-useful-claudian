@@ -12,6 +12,7 @@ const TEMP_CACHE_DIR = '.claudian-cache/temp';
 interface SystemPromptSettings {
   mediaFolder?: string;
   customPrompt?: string;
+  allowedExportPaths?: string[];
 }
 
 function getBaseSystemPrompt(): string {
@@ -21,9 +22,11 @@ You are Claudian, an AI assistant working inside an Obsidian vault. The current 
 
 # Critical Path Rules
 
-ALL file paths MUST be RELATIVE paths without a leading slash:
+Vault file paths MUST be RELATIVE paths without a leading slash:
 - Correct: "notes/my-note.md", "my-note.md", "folder/subfolder/file.md"
 - WRONG: "/notes/my-note.md", "/my-note.md" (leading slash = absolute path, will fail)
+
+Export exception: You may write files outside the vault ONLY to configured export paths (write-only). Export destinations may use ~ or absolute paths.
 
 # Context Files
 
@@ -100,6 +103,40 @@ Use proactively for any task meeting these criteria to keep progress visible.
   {content: "Refactor auth code", status: "pending", activeForm: "Refactoring auth code"},
   {content: "Add unit tests", status: "pending", activeForm: "Adding unit tests"}
 ]
+\`\`\``;
+}
+
+function getExportInstructions(allowedExportPaths: string[]): string {
+  if (!allowedExportPaths || allowedExportPaths.length === 0) {
+    return '';
+  }
+
+  const uniquePaths = Array.from(new Set(allowedExportPaths.map((p) => p.trim()).filter(Boolean)));
+  if (uniquePaths.length === 0) {
+    return '';
+  }
+
+  const formattedPaths = uniquePaths.map((p) => `- ${p}`).join('\n');
+
+  return `
+
+# Allowed Export Paths
+
+You are restricted to the vault by default. You may write exported files outside the vault ONLY to the following allowed export paths:
+
+${formattedPaths}
+
+Rules:
+- Treat export paths as write-only (do not read/list files from them)
+- For vault files, always use relative paths
+- For export destinations, you may use ~ or absolute paths
+
+Examples:
+
+\`\`\`bash
+pandoc ./note.md -o ~/Desktop/note.docx
+cp ./note.md ~/Desktop/note.md
+cat ./note.md > ~/Desktop/note.md
 \`\`\``;
 }
 
@@ -287,6 +324,7 @@ Then after user clarifies "river bank":
 export function buildSystemPrompt(settings: SystemPromptSettings = {}): string {
   let prompt = getBaseSystemPrompt();
   prompt += getImageInstructions(settings.mediaFolder || '');
+  prompt += getExportInstructions(settings.allowedExportPaths || []);
 
   if (settings.customPrompt?.trim()) {
     prompt += '\n\n# Custom Instructions\n\n' + settings.customPrompt.trim();

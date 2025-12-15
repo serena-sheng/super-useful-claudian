@@ -29,6 +29,14 @@ describe('systemPrompt', () => {
       expect(prompt).toContain('# Critical Path Rules');
       expect(prompt).toContain('# Context Files');
     });
+
+    it('should include allowed export paths instructions when configured', () => {
+      const prompt = buildSystemPrompt({ allowedExportPaths: ['~/Desktop', '/tmp'] });
+      expect(prompt).toContain('# Allowed Export Paths');
+      expect(prompt).toContain('- ~/Desktop');
+      expect(prompt).toContain('- /tmp');
+      expect(prompt).toContain('write-only');
+    });
   });
 
   describe('media folder instructions', () => {
@@ -94,4 +102,3 @@ describe('systemPrompt', () => {
     });
   });
 });
-

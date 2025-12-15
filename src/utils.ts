@@ -51,12 +51,42 @@ export function findClaudeCLIPath(): string | null {
   return null;
 }
 
-/** Best-effort realpath that falls back to path.resolve for non-existent targets. */
+/**
+ * Best-effort realpath that stays symlink-aware even when the target does not exist.
+ *
+ * If the full path doesn't exist, resolve the nearest existing ancestor via realpath
+ * and then re-append the remaining path segments.
+ */
 function resolveRealPath(p: string): string {
+  const realpathFn = (fs.realpathSync.native ?? fs.realpathSync) as (path: fs.PathLike) => string;
+
   try {
-    return (fs.realpathSync.native ?? fs.realpathSync)(p);
+    return realpathFn(p);
   } catch {
-    return path.resolve(p);
+    const absolute = path.resolve(p);
+    let current = absolute;
+    const suffix: string[] = [];
+
+    while (true) {
+      try {
+        if (fs.existsSync(current)) {
+          const resolvedExisting = realpathFn(current);
+          return suffix.length > 0
+            ? path.join(resolvedExisting, ...suffix.reverse())
+            : resolvedExisting;
+        }
+      } catch {
+        // Ignore and keep walking up the directory tree.
+      }
+
+      const parent = path.dirname(current);
+      if (parent === current) {
+        return absolute;
+      }
+
+      suffix.push(path.basename(current));
+      current = parent;
+    }
   }
 }
 
@@ -75,6 +105,47 @@ export function isPathWithinVault(candidatePath: string, vaultPath: string): boo
   const resolvedCandidate = resolveRealPath(absCandidate);
 
   return resolvedCandidate === vaultReal || resolvedCandidate.startsWith(vaultReal + path.sep);
+}
+
+/** Checks whether a candidate path is within any of the allowed export paths. */
+export function isPathInAllowedExportPaths(
+  candidatePath: string,
+  allowedExportPaths: string[],
+  vaultPath: string
+): boolean {
+  if (!allowedExportPaths || allowedExportPaths.length === 0) {
+    return false;
+  }
+
+  // Expand and resolve the candidate path
+  const expandedCandidate = candidatePath.startsWith('~/')
+    ? path.join(os.homedir(), candidatePath.slice(2))
+    : candidatePath;
+
+  const absCandidate = path.isAbsolute(expandedCandidate)
+    ? expandedCandidate
+    : path.resolve(vaultPath, expandedCandidate);
+
+  const resolvedCandidate = resolveRealPath(absCandidate);
+
+  // Check if candidate is within any allowed export path
+  for (const exportPath of allowedExportPaths) {
+    const expandedExport = exportPath.startsWith('~/')
+      ? path.join(os.homedir(), exportPath.slice(2))
+      : exportPath;
+
+    const resolvedExport = resolveRealPath(expandedExport);
+
+    // Check if candidate equals or is within the export path
+    if (
+      resolvedCandidate === resolvedExport ||
+      resolvedCandidate.startsWith(resolvedExport + path.sep)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /** Parses KEY=VALUE environment variables from text. Supports comments (#) and empty lines. */
