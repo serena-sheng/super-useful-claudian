@@ -244,6 +244,26 @@
   gap: 12px;
 }
 
+/* Welcome message - claude.ai style */
+.claudian-welcome {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 20px;
+  min-height: 200px;
+}
+
+.claudian-welcome-greeting {
+  font-family: 'Copernicus', 'Tiempos Headline', 'Tiempos', Georgia, 'Times New Roman', serif;
+  font-size: 28px;
+  font-weight: 300;
+  color: var(--text-muted);
+  letter-spacing: -0.01em;
+}
+
 /* Individual messages */
 .claudian-message {
   padding: 10px 14px;
@@ -253,7 +273,7 @@
 }
 
 .claudian-message-user {
-  background: var(--interactive-accent);
+  background: black;
   color: var(--text-on-accent);
   align-self: flex-end;
   border-bottom-right-radius: 4px;

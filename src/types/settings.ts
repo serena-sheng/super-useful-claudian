@@ -36,6 +36,7 @@ export interface SlashCommand {
 
 /** Plugin settings persisted to disk. */
 export interface ClaudianSettings {
+  userName: string;
   enableBlocklist: boolean;
   blockedCommands: string[];
   showToolUse: boolean;
@@ -58,6 +59,7 @@ export interface ClaudianSettings {
 
 /** Default plugin settings. */
 export const DEFAULT_SETTINGS: ClaudianSettings = {
+  userName: '',
   enableBlocklist: true,
   blockedCommands: [
     'rm -rf',

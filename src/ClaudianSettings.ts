@@ -71,6 +71,19 @@ export class ClaudianSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName('Customization').setHeading();
 
     new Setting(containerEl)
+      .setName('What should Claudian call you?')
+      .setDesc('Your name for personalized greetings (leave empty for generic greetings)')
+      .addText((text) =>
+        text
+          .setPlaceholder('Enter your name')
+          .setValue(this.plugin.settings.userName)
+          .onChange(async (value) => {
+            this.plugin.settings.userName = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
       .setName('Show tool usage')
       .setDesc('Display when Claude reads, writes, or edits files')
       .addToggle((toggle) =>

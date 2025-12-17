@@ -97,6 +97,7 @@ export class ClaudianView extends ItemView {
   private instructionRefineService: InstructionRefineService | null = null;
   private inputWrapper: HTMLElement | null = null;
   private cancelRequested = false;
+  private welcomeEl: HTMLElement | null = null;
 
   private static readonly FLAVOR_TEXTS = [
     'Thinking...',
@@ -189,6 +190,10 @@ export class ClaudianView extends ItemView {
 
     this.messagesEl = container.createDiv({ cls: 'claudian-messages' });
 
+    // Welcome message - shown when no messages
+    this.welcomeEl = this.messagesEl.createDiv({ cls: 'claudian-welcome' });
+    this.welcomeEl.createDiv({ cls: 'claudian-welcome-greeting', text: this.getGreeting() });
+
     const inputContainerEl = container.createDiv({ cls: 'claudian-input-container' });
 
     this.inputWrapper = inputContainerEl.createDiv({ cls: 'claudian-input-wrapper' });
@@ -196,7 +201,7 @@ export class ClaudianView extends ItemView {
     this.inputEl = this.inputWrapper.createEl('textarea', {
       cls: 'claudian-input',
       attr: {
-        placeholder: 'Ask Claudian anything...\n\n(Enter to send, Shift+Enter for newline)',
+        placeholder: 'How can I help you today?',
         rows: '3',
       },
     });
@@ -371,6 +376,11 @@ export class ClaudianView extends ItemView {
     this.inputEl.value = '';
     this.isStreaming = true;
     this.cancelRequested = false;
+
+    // Hide welcome message when sending first message
+    if (this.welcomeEl) {
+      this.welcomeEl.style.display = 'none';
+    }
 
     this.fileContextManager?.startSession();
 
@@ -1190,6 +1200,10 @@ export class ClaudianView extends ItemView {
     this.messages = [];
     this.messagesEl.empty();
 
+    // Recreate welcome element after clearing messages
+    this.welcomeEl = this.messagesEl.createDiv({ cls: 'claudian-welcome' });
+    this.welcomeEl.createDiv({ cls: 'claudian-welcome-greeting', text: this.getGreeting() });
+
     this.inputEl.value = '';
 
     this.fileContextManager?.resetForNewConversation();
@@ -1221,6 +1235,7 @@ export class ClaudianView extends ItemView {
     }
 
     this.renderMessages();
+    this.updateWelcomeVisibility();
   }
 
   private async onConversationSelect(id: string) {
@@ -1267,10 +1282,15 @@ export class ClaudianView extends ItemView {
   private renderMessages() {
     this.messagesEl.empty();
 
+    // Recreate welcome element after clearing
+    this.welcomeEl = this.messagesEl.createDiv({ cls: 'claudian-welcome' });
+    this.welcomeEl.createDiv({ cls: 'claudian-welcome-greeting', text: this.getGreeting() });
+
     for (const msg of this.messages) {
       this.renderStoredMessage(msg);
     }
 
+    this.updateWelcomeVisibility();
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
   }
 
@@ -1506,6 +1526,91 @@ export class ClaudianView extends ItemView {
 
   private generateId(): string {
     return `msg-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+  }
+
+  private getGreeting(): string {
+    const now = new Date();
+    const hour = now.getHours();
+    const day = now.getDay(); // 0 = Sunday, 6 = Saturday
+    const name = this.plugin.settings.userName?.trim();
+
+    // Day-specific greetings
+    const dayGreetings: Record<number, string[]> = name
+      ? {
+          0: [`Happy Sunday, ${name}`, 'Sunday session?', 'Welcome to the weekend'],
+          1: [`Happy Monday, ${name}`, `Back at it, ${name}`],
+          2: [`Happy Tuesday, ${name}`],
+          3: [`Happy Wednesday, ${name}`],
+          4: [`Happy Thursday, ${name}`],
+          5: [`Happy Friday, ${name}`, `That Friday feeling, ${name}`],
+          6: [`Happy Saturday, ${name}`, `Welcome to the weekend, ${name}`],
+        }
+      : {
+          0: ['Happy Sunday', 'Sunday session?', 'Welcome to the weekend'],
+          1: ['Happy Monday', 'Back at it!'],
+          2: ['Happy Tuesday'],
+          3: ['Happy Wednesday'],
+          4: ['Happy Thursday'],
+          5: ['Happy Friday', 'That Friday feeling'],
+          6: ['Happy Saturday!', 'Welcome to the weekend'],
+        };
+
+    // Time-specific greetings
+    const getTimeGreetings = (): string[] => {
+      if (hour >= 5 && hour < 12) {
+        return name
+          ? [`Good morning, ${name}`, 'Coffee and Claudian time?']
+          : ['Good morning', 'Coffee and Claudian time?'];
+      } else if (hour >= 12 && hour < 18) {
+        return name
+          ? [`Good afternoon, ${name}`, `Hey there, ${name}`, `How's it going, ${name}?`]
+          : ['Good afternoon', 'Hey there', "How's it going?"];
+      } else if (hour >= 18 && hour < 22) {
+        return name
+          ? [`Good evening, ${name}`, `Evening, ${name}`, `How was your day, ${name}?`]
+          : ['Good evening', 'Evening', "How was your day?"];
+      } else {
+        return name
+          ? ['Hello, night owl', `Evening, ${name}`]
+          : ['Hello, night owl', 'Evening'];
+      }
+    };
+
+    // General greetings
+    const generalGreetings = name
+      ? [
+          `Hey there, ${name}`,
+          `Hi ${name}, how are you?`,
+          `How's it going, ${name}?`,
+          `Welcome Back!, ${name}`,
+          `What's new, ${name}?`,
+          `${name} returns!`,
+        ]
+      : [
+          'Hey there',
+          'Hi, how are you?',
+          "How's it going?",
+          'Welcome Back!',
+          "What's new?",
+        ];
+
+    // Combine day + time + general greetings, pick randomly
+    const allGreetings = [
+      ...(dayGreetings[day] || []),
+      ...getTimeGreetings(),
+      ...generalGreetings,
+    ];
+
+    return allGreetings[Math.floor(Math.random() * allGreetings.length)];
+  }
+
+  private updateWelcomeVisibility(): void {
+    if (!this.welcomeEl) return;
+    if (this.messages.length === 0) {
+      this.welcomeEl.style.display = '';
+    } else {
+      this.welcomeEl.style.display = 'none';
+    }
   }
 
   // ============================================
