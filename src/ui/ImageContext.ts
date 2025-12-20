@@ -73,6 +73,15 @@ export class ImageContextManager {
     this.updateImagePreview();
   }
 
+  /** Sets images directly (used for queued messages). */
+  setImages(images: ImageAttachment[]) {
+    this.attachedImages.clear();
+    for (const image of images) {
+      this.attachedImages.set(image.id, image);
+    }
+    this.updateImagePreview();
+  }
+
   /** Adds an image from a file path. Returns true if successful. */
   async addImageFromPath(imagePath: string): Promise<boolean> {
     try {

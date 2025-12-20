@@ -98,6 +98,8 @@ export class ClaudianView extends ItemView {
   private inputWrapper: HTMLElement | null = null;
   private cancelRequested = false;
   private welcomeEl: HTMLElement | null = null;
+  private queuedMessage: { content: string; images?: ImageAttachment[] } | null = null;
+  private queueIndicatorEl: HTMLElement | null = null;
 
   private static readonly FLAVOR_TEXTS = [
     'Thinking...',
@@ -370,8 +372,29 @@ export class ClaudianView extends ItemView {
 
   private async sendMessage() {
     let content = this.inputEl.value.trim();
-    if (!content && !this.imageContextManager?.hasImages()) return;
-    if (this.isStreaming) return;
+    const hasImages = this.imageContextManager?.hasImages() ?? false;
+    if (!content && !hasImages) return;
+
+    // If agent is working, queue the message instead of dropping it
+    if (this.isStreaming) {
+      const images = hasImages ? [...(this.imageContextManager?.getAttachedImages() || [])] : undefined;
+
+      // Append to existing queued message if any
+      if (this.queuedMessage) {
+        this.queuedMessage.content += '\n\n' + content;
+        // Merge images if any
+        if (images && images.length > 0) {
+          this.queuedMessage.images = [...(this.queuedMessage.images || []), ...images];
+        }
+      } else {
+        this.queuedMessage = { content, images };
+      }
+
+      this.inputEl.value = '';
+      this.imageContextManager?.clearImages();
+      this.updateQueueIndicator();
+      return;
+    }
 
     this.inputEl.value = '';
     this.isStreaming = true;
@@ -517,7 +540,57 @@ export class ClaudianView extends ItemView {
       this.activeSubagents.clear();
 
       await this.saveCurrentConversation();
+
+      // Process queued message if any
+      this.processQueuedMessage();
     }
+  }
+
+  /** Updates the queue indicator UI to show/hide queued message status. */
+  private updateQueueIndicator(): void {
+    if (!this.queueIndicatorEl) return;
+
+    if (this.queuedMessage) {
+      const rawContent = this.queuedMessage.content.trim();
+      const preview = rawContent.length > 40
+        ? rawContent.slice(0, 40) + '...'
+        : rawContent;
+      const hasImages = (this.queuedMessage.images?.length ?? 0) > 0;
+      let display = preview;
+
+      if (hasImages) {
+        display = display ? `${display} [images]` : '[images]';
+      }
+
+      this.queueIndicatorEl.setText(`⌙ Queued: ${display}`);
+      this.queueIndicatorEl.style.display = 'block';
+    } else {
+      this.queueIndicatorEl.style.display = 'none';
+    }
+  }
+
+  /** Clears the queued message. */
+  private clearQueuedMessage(): void {
+    this.queuedMessage = null;
+    this.updateQueueIndicator();
+  }
+
+  /** Processes the queued message by setting it as input and triggering send. */
+  private processQueuedMessage(): void {
+    if (!this.queuedMessage) return;
+
+    const { content, images } = this.queuedMessage;
+    this.queuedMessage = null;
+    this.updateQueueIndicator();
+
+    // Set the content and images, then send
+    this.inputEl.value = content;
+    if (images && images.length > 0) {
+      this.imageContextManager?.setImages(images);
+    }
+
+    // Use setTimeout to ensure the UI updates before sending
+    setTimeout(() => this.sendMessage(), 0);
   }
 
   /** Handles instruction mode submission - opens modal immediately and refines. */
@@ -622,6 +695,7 @@ export class ClaudianView extends ItemView {
     if (this.thinkingEl) {
       // Re-append to ensure it's at the bottom
       parentEl.appendChild(this.thinkingEl);
+      this.updateQueueIndicator();
       return;
     }
 
@@ -630,11 +704,16 @@ export class ClaudianView extends ItemView {
     const randomText = texts[Math.floor(Math.random() * texts.length)];
     this.thinkingEl.createSpan({ text: randomText });
     this.thinkingEl.createSpan({ text: ' (esc to interrupt)', cls: 'claudian-thinking-hint' });
+
+    // Queue indicator line (initially hidden)
+    this.queueIndicatorEl = this.thinkingEl.createDiv({ cls: 'claudian-queue-indicator' });
+    this.updateQueueIndicator();
   }
 
   private cancelStreaming() {
     if (!this.isStreaming) return;
     this.cancelRequested = true;
+    this.clearQueuedMessage();
     this.plugin.agentService.cancel();
     this.hideThinkingIndicator();
   }
@@ -1225,6 +1304,7 @@ export class ClaudianView extends ItemView {
     this.fileContextManager?.autoAttachActiveFile();
 
     this.imageContextManager?.clearImages();
+    this.clearQueuedMessage();
   }
 
   private async loadActiveConversation() {
@@ -1269,6 +1349,7 @@ export class ClaudianView extends ItemView {
     this.messages = [...conversation.messages];
 
     this.inputEl.value = '';
+    this.clearQueuedMessage();
 
     this.fileContextManager?.resetForLoadedConversation(this.messages.length > 0);
 
@@ -1663,5 +1744,6 @@ export class ClaudianView extends ItemView {
       this.thinkingEl.remove();
       this.thinkingEl = null;
     }
+    this.queueIndicatorEl = null;
   }
 }

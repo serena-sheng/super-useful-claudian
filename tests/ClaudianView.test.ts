@@ -1399,3 +1399,267 @@ describe('FileContextManager - Session State', () => {
     });
   });
 });
+
+describe('ClaudianView - Message Queue', () => {
+  let view: ClaudianView;
+  let mockPlugin: any;
+  let mockLeaf: any;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPlugin = createMockPlugin();
+    mockLeaf = createMockLeaf();
+    view = new ClaudianView(mockLeaf, mockPlugin);
+
+    // Set up required elements
+    (view as any).messagesEl = createMockElement('div');
+    (view as any).messagesEl.scrollTop = 0;
+    (view as any).messagesEl.scrollHeight = 0;
+
+    const inputEl = createMockElement('textarea');
+    inputEl.value = '';
+    (view as any).inputEl = inputEl;
+
+    const containerEl = createMockElement('div');
+    (view as any).queueIndicatorEl = containerEl.createDiv({ cls: 'claudian-queue-indicator' });
+    (view as any).queueIndicatorEl.style = { display: 'none' };
+
+    // Create mock image context manager
+    (view as any).imageContextManager = {
+      hasImages: jest.fn().mockReturnValue(false),
+      getAttachedImages: jest.fn().mockReturnValue([]),
+      clearImages: jest.fn(),
+      setImages: jest.fn(),
+    };
+
+    // Create mock file context manager
+    (view as any).fileContextManager = {
+      startSession: jest.fn(),
+      resetForNewConversation: jest.fn(),
+      autoAttachActiveFile: jest.fn(),
+      resetForLoadedConversation: jest.fn(),
+      setAttachedFiles: jest.fn(),
+      getAttachedFiles: jest.fn().mockReturnValue(new Set()),
+      hasFilesChanged: jest.fn().mockReturnValue(false),
+      markFilesSent: jest.fn(),
+    };
+
+    // Initialize messages and conversation
+    (view as any).messages = [];
+    (view as any).currentConversationId = 'test-conv';
+  });
+
+  describe('Queuing messages while streaming', () => {
+    it('should queue message when isStreaming is true', () => {
+      (view as any).isStreaming = true;
+      (view as any).inputEl.value = 'queued message';
+
+      (view as any).sendMessage();
+
+      expect((view as any).queuedMessage).toEqual({
+        content: 'queued message',
+        images: undefined,
+      });
+      expect((view as any).inputEl.value).toBe('');
+    });
+
+    it('should queue message with images when streaming', () => {
+      (view as any).isStreaming = true;
+      (view as any).inputEl.value = 'queued with images';
+      const mockImages = [{ id: 'img1', name: 'test.png' }];
+      (view as any).imageContextManager.hasImages.mockReturnValue(true);
+      (view as any).imageContextManager.getAttachedImages.mockReturnValue(mockImages);
+
+      (view as any).sendMessage();
+
+      expect((view as any).queuedMessage).toEqual({
+        content: 'queued with images',
+        images: mockImages,
+      });
+      expect((view as any).imageContextManager.clearImages).toHaveBeenCalled();
+    });
+
+    it('should append new message to existing queued message', () => {
+      (view as any).isStreaming = true;
+      (view as any).inputEl.value = 'first message';
+      (view as any).sendMessage();
+
+      (view as any).inputEl.value = 'second message';
+      (view as any).sendMessage();
+
+      expect((view as any).queuedMessage.content).toBe('first message\n\nsecond message');
+    });
+
+    it('should merge images when appending to queue', () => {
+      (view as any).isStreaming = true;
+
+      // First message with image
+      (view as any).inputEl.value = 'first';
+      (view as any).imageContextManager.hasImages.mockReturnValue(true);
+      (view as any).imageContextManager.getAttachedImages.mockReturnValue([{ id: 'img1' }]);
+      (view as any).sendMessage();
+
+      // Second message with another image
+      (view as any).inputEl.value = 'second';
+      (view as any).imageContextManager.hasImages.mockReturnValue(true);
+      (view as any).imageContextManager.getAttachedImages.mockReturnValue([{ id: 'img2' }]);
+      (view as any).sendMessage();
+
+      expect((view as any).queuedMessage.images).toHaveLength(2);
+      expect((view as any).queuedMessage.images[0].id).toBe('img1');
+      expect((view as any).queuedMessage.images[1].id).toBe('img2');
+    });
+
+    it('should not queue empty message', () => {
+      (view as any).isStreaming = true;
+      (view as any).inputEl.value = '';
+      (view as any).imageContextManager.hasImages.mockReturnValue(false);
+
+      (view as any).sendMessage();
+
+      expect((view as any).queuedMessage).toBeNull();
+    });
+  });
+
+  describe('Queue indicator UI', () => {
+    it('should show queue indicator when message is queued', () => {
+      (view as any).queuedMessage = { content: 'test message', images: undefined };
+
+      (view as any).updateQueueIndicator();
+
+      expect((view as any).queueIndicatorEl.style.display).toBe('block');
+      expect((view as any).queueIndicatorEl.textContent).toContain('⌙ Queued: test message');
+      expect((view as any).queueIndicatorEl.textContent).not.toContain('[images]');
+    });
+
+    it('should hide queue indicator when no message is queued', () => {
+      (view as any).queuedMessage = null;
+
+      (view as any).updateQueueIndicator();
+
+      expect((view as any).queueIndicatorEl.style.display).toBe('none');
+    });
+
+    it('should truncate long message preview in indicator', () => {
+      const longMessage = 'a'.repeat(100);
+      (view as any).queuedMessage = { content: longMessage, images: undefined };
+
+      (view as any).updateQueueIndicator();
+
+      expect((view as any).queueIndicatorEl.textContent).toContain('...');
+      expect((view as any).queueIndicatorEl.textContent.length).toBeLessThan(60);
+    });
+
+    it('should include [images] when queue message has images', () => {
+      const mockImages = [{ id: 'img1', name: 'test.png' }];
+      (view as any).queuedMessage = { content: 'queued content', images: mockImages };
+
+      (view as any).updateQueueIndicator();
+
+      expect((view as any).queueIndicatorEl.textContent).toContain('queued content');
+      expect((view as any).queueIndicatorEl.textContent).toContain('[images]');
+    });
+
+    it('should show [images] when queue message has only images', () => {
+      const mockImages = [{ id: 'img1', name: 'test.png' }];
+      (view as any).queuedMessage = { content: '', images: mockImages };
+
+      (view as any).updateQueueIndicator();
+
+      expect((view as any).queueIndicatorEl.textContent).toBe('⌙ Queued: [images]');
+    });
+  });
+
+  describe('Clearing queued message', () => {
+    it('should clear queued message and update indicator', () => {
+      (view as any).queuedMessage = { content: 'test', images: undefined };
+
+      (view as any).clearQueuedMessage();
+
+      expect((view as any).queuedMessage).toBeNull();
+      expect((view as any).queueIndicatorEl.style.display).toBe('none');
+    });
+  });
+
+  describe('Processing queued message', () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('should process queued message by setting input and triggering send', () => {
+      (view as any).queuedMessage = { content: 'queued content', images: undefined };
+      const sendMessageSpy = jest.spyOn(view as any, 'sendMessage').mockImplementation(() => {});
+
+      (view as any).processQueuedMessage();
+      jest.runAllTimers();
+
+      expect((view as any).inputEl.value).toBe('queued content');
+      expect((view as any).queuedMessage).toBeNull();
+      expect(sendMessageSpy).toHaveBeenCalled();
+    });
+
+    it('should restore images when processing queued message', () => {
+      const mockImages = [{ id: 'img1', name: 'test.png' }];
+      (view as any).queuedMessage = { content: 'with images', images: mockImages };
+      jest.spyOn(view as any, 'sendMessage').mockImplementation(() => {});
+
+      (view as any).processQueuedMessage();
+      jest.runAllTimers();
+
+      expect((view as any).imageContextManager.setImages).toHaveBeenCalledWith(mockImages);
+    });
+
+    it('should do nothing when no message is queued', () => {
+      (view as any).queuedMessage = null;
+      const sendMessageSpy = jest.spyOn(view as any, 'sendMessage').mockImplementation(() => {});
+
+      (view as any).processQueuedMessage();
+      jest.runAllTimers();
+
+      expect(sendMessageSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Queue cleared on conversation changes', () => {
+    it('should clear queue on new conversation', async () => {
+      (view as any).queuedMessage = { content: 'test', images: undefined };
+      (view as any).isStreaming = false;
+      (view as any).welcomeEl = null;
+
+      await (view as any).createNewConversation();
+
+      expect((view as any).queuedMessage).toBeNull();
+    });
+
+    it('should clear queue on conversation switch', async () => {
+      (view as any).queuedMessage = { content: 'test', images: undefined };
+      (view as any).isStreaming = false;
+      (view as any).currentConversationId = 'conv-1';
+      mockPlugin.switchConversation.mockResolvedValue({
+        id: 'conv-2',
+        messages: [],
+        sessionId: null,
+      });
+
+      await (view as any).onConversationSelect('conv-2');
+
+      expect((view as any).queuedMessage).toBeNull();
+    });
+
+    it('should clear queue on cancel (Escape)', () => {
+      (view as any).queuedMessage = { content: 'test', images: undefined };
+      (view as any).isStreaming = true;
+      const mockThinkingEl = createMockElement('div');
+      mockThinkingEl.remove = jest.fn();
+      (view as any).thinkingEl = mockThinkingEl;
+
+      (view as any).cancelStreaming();
+
+      expect((view as any).queuedMessage).toBeNull();
+    });
+  });
+});

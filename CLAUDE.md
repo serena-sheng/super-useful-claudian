@@ -195,7 +195,7 @@ All classes use `.claudian-` prefix. Key patterns:
 
 - Test Driven Development
 - Generated docs go in `dev/`
-- Run `npm run lint`, `npm run build`, `npm run test` before committing
+- Run typecheck, `npm run lint`, `npm run build`, `npm run test` before committing
 
 ## Dependencies
 
