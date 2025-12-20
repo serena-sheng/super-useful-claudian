@@ -57,9 +57,6 @@ export class AsyncSubagentManager {
   public handleTaskToolResult(taskToolId: string, result: string, isError?: boolean): void {
     const subagent = this.pendingAsyncSubagents.get(taskToolId);
     if (!subagent) {
-      console.warn(
-        `handleTaskToolResult: Unknown task ${taskToolId}`
-      );
       return;
     }
 
@@ -103,13 +100,11 @@ export class AsyncSubagentManager {
   public handleAgentOutputToolUse(toolCall: ToolCallInfo): void {
     const agentId = this.extractAgentIdFromInput(toolCall.input);
     if (!agentId) {
-      console.warn('AgentOutputTool called without agentId');
       return;
     }
 
     const subagent = this.activeAsyncSubagents.get(agentId);
     if (!subagent) {
-      console.warn(`AgentOutputTool for unknown agent: ${agentId}`);
       return;
     }
 
@@ -145,9 +140,6 @@ export class AsyncSubagentManager {
 
     const validStates: AsyncSubagentStatus[] = ['running'];
     if (!validStates.includes(subagent.asyncStatus!)) {
-      console.warn(
-        `handleAgentOutputToolResult: Invalid transition ${subagent.asyncStatus} → final`
-      );
       return undefined;
     }
 
@@ -403,13 +395,10 @@ export class AsyncSubagentManager {
       if (parsed.id && typeof parsed.id === 'string') {
         return parsed.id;
       }
-
-      console.warn('[AsyncSubagentManager] No agent_id field in parsed result:', parsed);
     } catch {
       // Not JSON
     }
 
-    console.warn('[AsyncSubagentManager] Failed to extract agent_id from:', result);
     return null;
   }
 

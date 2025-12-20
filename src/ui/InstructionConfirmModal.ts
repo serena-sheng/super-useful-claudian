@@ -298,8 +298,6 @@ export class InstructionClarificationModal extends Modal {
     _onCancel: () => void
   ) {
     super(app);
-    // This class is deprecated - use InstructionModal instead
-    console.warn('InstructionClarificationModal is deprecated. Use InstructionModal instead.');
   }
 
   onOpen() {}

@@ -92,8 +92,8 @@ export class ImageContextManager {
         this.callbacks.onImagesChanged();
         return true;
       }
-    } catch (error) {
-      console.error('Failed to load image from path:', error);
+    } catch {
+      // Failed to load image
     }
     return false;
   }
@@ -248,7 +248,6 @@ export class ImageContextManager {
 
   private async addImageFromFile(file: File, source: 'paste' | 'drop'): Promise<boolean> {
     if (file.size > MAX_IMAGE_SIZE) {
-      console.warn(`Image too large: ${file.size} bytes (max ${MAX_IMAGE_SIZE})`);
       return false;
     }
 
@@ -259,7 +258,6 @@ export class ImageContextManager {
       const { buffer, base64 } = await this.fileToBufferAndBase64(file);
       const cacheEntry = saveImageToCache(this.app, buffer, mediaType, file.name);
       if (!cacheEntry) {
-        console.warn('Failed to cache image');
         return false;
       }
 
@@ -277,8 +275,7 @@ export class ImageContextManager {
       this.updateImagePreview();
       this.callbacks.onImagesChanged();
       return true;
-    } catch (error) {
-      console.error('Failed to process image:', error);
+    } catch {
       return false;
     }
   }
@@ -286,7 +283,6 @@ export class ImageContextManager {
   private async loadImageFromPath(imagePath: string): Promise<ImageAttachment | null> {
     const mediaType = this.getMediaType(imagePath);
     if (!mediaType) {
-      console.warn('Unsupported image format:', imagePath);
       return null;
     }
 
@@ -324,7 +320,6 @@ export class ImageContextManager {
         if (file instanceof TFile) {
           const fileSize = (file as any).stat?.size ?? 0;
           if (fileSize > MAX_IMAGE_SIZE) {
-            console.warn(`Image too large: ${fileSize} bytes`);
             return null;
           }
 
@@ -341,13 +336,11 @@ export class ImageContextManager {
           };
         }
       }
-      console.warn('Image file not found:', imagePath);
       return null;
     }
 
     const stats = fs.statSync(fullPath);
     if (stats.size > MAX_IMAGE_SIZE) {
-      console.warn(`Image too large: ${stats.size} bytes`);
       return null;
     }
 
