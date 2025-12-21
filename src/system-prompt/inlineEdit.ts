@@ -41,9 +41,13 @@ You have access to read-only tools for gathering context:
 - Read: Read files from the vault (the current note or related files)
 - Grep: Search for patterns across files
 - Glob: Find files by name pattern
-- LS: List directory contents
+- LS: List directory contents (use "." for vault root)
 - WebSearch: Search the web for information
 - WebFetch: Fetch and process web content
+
+**Path Rules:** All file paths must be RELATIVE to the vault root (no leading slash).
+- ✓ Correct: "notes/file.md", "file.md", "."
+- ✗ Wrong: "/notes/file.md", "/absolute/path"
 
 Proactively use Read to understand the note containing the text - it often provides crucial background context. If the user mentions other files (e.g., @note.md), use Grep, Glob, or LS to locate them, then Read to understand their content. Use WebSearch or WebFetch when instructed or when external information would help.
 

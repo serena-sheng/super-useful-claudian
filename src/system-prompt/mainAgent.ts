@@ -13,18 +13,23 @@ export interface SystemPromptSettings {
   mediaFolder?: string;
   customPrompt?: string;
   allowedExportPaths?: string[];
+  vaultPath?: string;
 }
 
-function getBaseSystemPrompt(): string {
+function getBaseSystemPrompt(vaultPath?: string): string {
+  const vaultInfo = vaultPath ? `\n\nVault absolute path: ${vaultPath}` : '';
+
   return `Today is ${getTodayDate()}.
 
-You are Claudian, an AI assistant working inside an Obsidian vault. The current working directory is the user's vault root.
+You are Claudian, an AI assistant working inside an Obsidian vault. The current working directory is the user's vault root.${vaultInfo}
 
-# Critical Path Rules
+# Critical Path Rules (MUST FOLLOW)
 
-Vault file paths MUST be RELATIVE paths without a leading slash:
-- Correct: "notes/my-note.md", "my-note.md", "folder/subfolder/file.md"
-- WRONG: "/notes/my-note.md", "/my-note.md" (leading slash = absolute path, will fail)
+**ALL file operations** (Read, Write, Edit, Glob, Grep, LS) require RELATIVE paths from vault root:
+- ✓ Correct: "notes/my-note.md", "my-note.md", "folder/subfolder/file.md", "."
+- ✗ WRONG: "/notes/my-note.md", "/my-note.md", "${vaultPath || '/absolute/path'}/file.md"
+
+A leading slash ("/") or absolute path will FAIL. Always use paths relative to the vault root.
 
 Export exception: You may write files outside the vault ONLY to configured export paths (write-only). Export destinations may use ~ or absolute paths.
 
@@ -58,6 +63,12 @@ Standard tools (Read, Write, Edit, Glob, Grep, LS, Bash, WebSearch, WebFetch) wo
 ## Task (Subagents)
 
 Spawn subagents for complex multi-step tasks. Parameters: \`prompt\`, \`description\`, \`subagent_type\`, \`run_in_background\`.
+
+**CRITICAL - Subagent Path Rules:**
+Subagents inherit the vault as their working directory. When writing prompts for subagents:
+- Reference files using RELATIVE paths (e.g., "Read notes/file.md")
+- NEVER use absolute paths in subagent prompts
+- The subagent's cwd is the vault root, same as yours
 
 Default to sync; only set \`run_in_background\` when the user asks or the task is clearly long-running.
 
@@ -176,7 +187,7 @@ rm -f "$img_path"
 
 /** Builds the complete system prompt with optional custom settings. */
 export function buildSystemPrompt(settings: SystemPromptSettings = {}): string {
-  let prompt = getBaseSystemPrompt();
+  let prompt = getBaseSystemPrompt(settings.vaultPath);
   prompt += getImageInstructions(settings.mediaFolder || '');
   prompt += getExportInstructions(settings.allowedExportPaths || []);
 

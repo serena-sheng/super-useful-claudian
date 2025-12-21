@@ -380,6 +380,7 @@ export class ClaudianService {
       mediaFolder: this.plugin.settings.mediaFolder,
       customPrompt: this.plugin.settings.systemPrompt,
       allowedExportPaths: this.plugin.settings.allowedExportPaths,
+      vaultPath: cwd,
     });
 
     const options: Options = {
