@@ -52,6 +52,8 @@ export interface Conversation {
   title: string;
   createdAt: number;
   updatedAt: number;
+  /** Timestamp when the last agent response completed. */
+  lastResponseAt?: number;
   sessionId: string | null;
   messages: ChatMessage[];
   attachedFiles?: string[];
@@ -63,6 +65,8 @@ export interface ConversationMeta {
   title: string;
   createdAt: number;
   updatedAt: number;
+  /** Timestamp when the last agent response completed. */
+  lastResponseAt?: number;
   messageCount: number;
   preview: string;
 }

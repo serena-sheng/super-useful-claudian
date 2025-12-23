@@ -131,12 +131,32 @@ export default class ClaudianPlugin extends Plugin {
       this.activeConversationId = null;
     }
 
+    const backfilled = this.backfillConversationResponseTimestamps();
+
     this.runtimeEnvironmentVariables = this.settings.environmentVariables || '';
     const modelReset = this.reconcileModelWithEnvironment(this.runtimeEnvironmentVariables);
 
-    if (modelReset) {
+    if (modelReset || backfilled) {
       await this.saveSettings();
     }
+  }
+
+  private backfillConversationResponseTimestamps(): boolean {
+    let updated = false;
+    for (const conv of this.conversations) {
+      if (conv.lastResponseAt != null) continue;
+      if (!conv.messages || conv.messages.length === 0) continue;
+
+      for (let i = conv.messages.length - 1; i >= 0; i--) {
+        const msg = conv.messages[i];
+        if (msg.role === 'assistant') {
+          conv.lastResponseAt = msg.timestamp;
+          updated = true;
+          break;
+        }
+      }
+    }
+    return updated;
   }
 
   /** Persists settings and conversations to storage. */
@@ -355,6 +375,7 @@ export default class ClaudianPlugin extends Plugin {
       title: c.title,
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
+      lastResponseAt: c.lastResponseAt,
       messageCount: c.messages.length,
       preview: this.getConversationPreview(c),
     }));

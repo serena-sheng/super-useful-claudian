@@ -16,6 +16,7 @@ import { isWriteEditTool, TOOL_AGENT_OUTPUT, TOOL_BASH, TOOL_TASK, TOOL_TODO_WRI
 import {
   type ChatMessage,
   type ClaudeModel,
+  type Conversation,
   DEFAULT_CLAUDE_MODELS,
   DEFAULT_THINKING_BUDGET,
   type ImageAttachment,
@@ -612,7 +613,7 @@ export class ClaudianView extends ItemView {
       this.finalizeCurrentTextBlock(assistantMsg);
       this.activeSubagents.clear();
 
-      await this.saveCurrentConversation();
+      await this.saveCurrentConversation(true); // Update lastResponseAt on agent completion
 
       // Process queued message if any
       this.processQueuedMessage();
@@ -1458,18 +1459,22 @@ export class ClaudianView extends ItemView {
     this.historyDropdown?.removeClass('visible');
   }
 
-  private async saveCurrentConversation() {
+  private async saveCurrentConversation(updateLastResponse = false) {
     if (!this.currentConversationId) return;
 
     const sessionId = this.plugin.agentService.getSessionId();
     const attachedFiles = this.fileContextManager
       ? Array.from(this.fileContextManager.getAttachedFiles())
       : [];
-    await this.plugin.updateConversation(this.currentConversationId, {
+    const updates: Partial<Conversation> = {
       messages: this.getPersistedMessages(),
       sessionId: sessionId,
       attachedFiles: attachedFiles,
-    });
+    };
+    if (updateLastResponse) {
+      updates.lastResponseAt = Date.now();
+    }
+    await this.plugin.updateConversation(this.currentConversationId, updates);
   }
 
   private renderMessages() {
@@ -1608,11 +1613,11 @@ export class ClaudianView extends ItemView {
       return;
     }
 
-    // Sort: current session first, then by updatedAt descending
+    // Sort: current session first, then by lastResponseAt (fallback to createdAt) descending
     const conversations = [...allConversations].sort((a, b) => {
       if (a.id === this.currentConversationId) return -1;
       if (b.id === this.currentConversationId) return 1;
-      return b.updatedAt - a.updatedAt;
+      return (b.lastResponseAt ?? b.createdAt) - (a.lastResponseAt ?? a.createdAt);
     });
 
     for (const conv of conversations) {
@@ -1628,7 +1633,7 @@ export class ClaudianView extends ItemView {
       content.createDiv({ cls: 'claudian-history-item-title', text: conv.title });
       content.createDiv({
         cls: 'claudian-history-item-date',
-        text: isCurrent ? 'Current session' : this.formatDate(conv.updatedAt),
+        text: isCurrent ? 'Current session' : this.formatDate(conv.lastResponseAt ?? conv.createdAt),
       });
 
       if (!isCurrent) {
@@ -1720,7 +1725,7 @@ export class ClaudianView extends ItemView {
     const now = new Date();
 
     if (date.toDateString() === now.toDateString()) {
-      return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+      return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
     }
     return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   }
