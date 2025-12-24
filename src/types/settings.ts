@@ -54,6 +54,7 @@ export interface ClaudianSettings {
   envSnippets: EnvSnippet[];
   systemPrompt: string;
   allowedExportPaths: string[];
+  allowedContextPaths: string[];
   slashCommands: SlashCommand[];
 }
 
@@ -81,6 +82,7 @@ export const DEFAULT_SETTINGS: ClaudianSettings = {
   envSnippets: [],
   systemPrompt: '',
   allowedExportPaths: ['~/Desktop', '~/Downloads'],
+  allowedContextPaths: [],
   slashCommands: [],
 };
 

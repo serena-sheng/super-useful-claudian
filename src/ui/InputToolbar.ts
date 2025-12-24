@@ -19,6 +19,7 @@ export interface ToolbarSettings {
   model: ClaudeModel;
   thinkingBudget: ThinkingBudget;
   permissionMode: PermissionMode;
+  allowedContextPaths: string[];
 }
 
 /** Callback interface for toolbar changes. */
@@ -26,6 +27,7 @@ export interface ToolbarCallbacks {
   onModelChange: (model: ClaudeModel) => Promise<void>;
   onThinkingBudgetChange: (budget: ThinkingBudget) => Promise<void>;
   onPermissionModeChange: (mode: PermissionMode) => Promise<void>;
+  onContextPathsChange: (paths: string[]) => Promise<void>;
   getSettings: () => ToolbarSettings;
   getEnvironmentVariables?: () => string;
 }
@@ -86,9 +88,6 @@ export class ModelSelector {
 
     const labelEl = this.buttonEl.createSpan({ cls: 'claudian-model-label' });
     labelEl.setText(displayModel?.label || 'Unknown');
-
-    const chevronEl = this.buttonEl.createSpan({ cls: 'claudian-model-chevron' });
-    setIcon(chevronEl, 'chevron-up');
   }
 
   renderOptions() {
@@ -221,6 +220,148 @@ export class PermissionToggle {
   }
 }
 
+/** Context path selector component (folder icon). */
+export class ContextPathSelector {
+  private container: HTMLElement;
+  private iconEl: HTMLElement | null = null;
+  private badgeEl: HTMLElement | null = null;
+  private dropdownEl: HTMLElement | null = null;
+  private callbacks: ToolbarCallbacks;
+
+  constructor(parentEl: HTMLElement, callbacks: ToolbarCallbacks) {
+    this.callbacks = callbacks;
+    this.container = parentEl.createDiv({ cls: 'claudian-context-path-selector' });
+    this.render();
+  }
+
+  private render() {
+    this.container.empty();
+
+    const iconWrapper = this.container.createDiv({ cls: 'claudian-context-path-icon-wrapper' });
+
+    this.iconEl = iconWrapper.createDiv({ cls: 'claudian-context-path-icon' });
+    setIcon(this.iconEl, 'folder');
+
+    this.badgeEl = iconWrapper.createDiv({ cls: 'claudian-context-path-badge' });
+
+    this.updateDisplay();
+
+    // Click to open native folder picker
+    iconWrapper.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.openFolderPicker();
+    });
+
+    this.dropdownEl = this.container.createDiv({ cls: 'claudian-context-path-dropdown' });
+    this.renderDropdown();
+  }
+
+  private async openFolderPicker() {
+    try {
+      // Access Electron's dialog through remote
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { remote } = require('electron');
+      const result = await remote.dialog.showOpenDialog({
+        properties: ['openDirectory'],
+        title: 'Select Context Path (Read-Only)',
+      });
+
+      if (!result.canceled && result.filePaths.length > 0) {
+        const selectedPath = result.filePaths[0];
+        const paths = this.callbacks.getSettings().allowedContextPaths;
+
+        if (!paths.includes(selectedPath)) {
+          const newPaths = [...paths, selectedPath];
+          await this.callbacks.onContextPathsChange(newPaths);
+          this.updateDisplay();
+          this.renderDropdown();
+        }
+      }
+    } catch (err) {
+      console.error('Failed to open folder picker:', err);
+    }
+  }
+
+  private renderDropdown() {
+    if (!this.dropdownEl) return;
+    this.dropdownEl.empty();
+
+    const paths = this.callbacks.getSettings().allowedContextPaths;
+
+    // Header
+    const headerEl = this.dropdownEl.createDiv({ cls: 'claudian-context-path-header' });
+    headerEl.setText('Context Paths (Read-Only)');
+
+    // Path list
+    const listEl = this.dropdownEl.createDiv({ cls: 'claudian-context-path-list' });
+
+    if (paths.length === 0) {
+      const emptyEl = listEl.createDiv({ cls: 'claudian-context-path-empty' });
+      emptyEl.setText('Click folder icon to add');
+    } else {
+      for (const pathStr of paths) {
+        const itemEl = listEl.createDiv({ cls: 'claudian-context-path-item' });
+
+        const pathTextEl = itemEl.createSpan({ cls: 'claudian-context-path-text' });
+        // Show shortened path for display
+        const displayPath = this.shortenPath(pathStr);
+        pathTextEl.setText(displayPath);
+        pathTextEl.setAttribute('title', pathStr);
+
+        const removeBtn = itemEl.createSpan({ cls: 'claudian-context-path-remove' });
+        setIcon(removeBtn, 'x');
+        removeBtn.setAttribute('title', 'Remove path');
+        removeBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const newPaths = paths.filter(p => p !== pathStr);
+          await this.callbacks.onContextPathsChange(newPaths);
+          this.updateDisplay();
+          this.renderDropdown();
+        });
+      }
+    }
+  }
+
+  /** Shorten path for display (replace home dir with ~) */
+  private shortenPath(fullPath: string): string {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const os = require('os');
+      const homeDir = os.homedir();
+      if (fullPath.startsWith(homeDir)) {
+        return '~' + fullPath.slice(homeDir.length);
+      }
+    } catch {
+      // Ignore errors
+    }
+    return fullPath;
+  }
+
+  updateDisplay() {
+    if (!this.iconEl || !this.badgeEl) return;
+
+    const paths = this.callbacks.getSettings().allowedContextPaths;
+    const count = paths.length;
+
+    if (count > 0) {
+      this.iconEl.addClass('active');
+      this.iconEl.setAttribute('title', `${count} context path${count > 1 ? 's' : ''} (click to add more)`);
+
+      // Show badge only when more than 1 path
+      if (count > 1) {
+        this.badgeEl.setText(String(count));
+        this.badgeEl.addClass('visible');
+      } else {
+        this.badgeEl.removeClass('visible');
+      }
+    } else {
+      this.iconEl.removeClass('active');
+      this.iconEl.setAttribute('title', 'Add context paths (click)');
+      this.badgeEl.removeClass('visible');
+    }
+  }
+}
+
 /** Factory function to create all toolbar components. */
 export function createInputToolbar(
   parentEl: HTMLElement,
@@ -228,11 +369,13 @@ export function createInputToolbar(
 ): {
   modelSelector: ModelSelector;
   thinkingBudgetSelector: ThinkingBudgetSelector;
+  contextPathSelector: ContextPathSelector;
   permissionToggle: PermissionToggle;
 } {
   const modelSelector = new ModelSelector(parentEl, callbacks);
   const thinkingBudgetSelector = new ThinkingBudgetSelector(parentEl, callbacks);
+  const contextPathSelector = new ContextPathSelector(parentEl, callbacks);
   const permissionToggle = new PermissionToggle(parentEl, callbacks);
 
-  return { modelSelector, thinkingBudgetSelector, permissionToggle };
+  return { modelSelector, thinkingBudgetSelector, contextPathSelector, permissionToggle };
 }

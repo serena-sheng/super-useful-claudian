@@ -5,18 +5,19 @@
  * Extracted from ClaudianService for better testability and separation of concerns.
  */
 
-import * as os from 'os';
 import * as path from 'path';
+
+import type { PathAccessType } from '../utils';
 
 /** Result of a path violation check */
 export type PathViolation =
   | { type: 'outside_vault'; path: string }
-  | { type: 'export_path_read'; path: string };
+  | { type: 'export_path_read'; path: string }
+  | { type: 'context_path_write'; path: string };
 
-/** Context for path validation - allows dependency injection of vault checking */
+/** Context for path validation - allows dependency injection of access rules */
 export interface PathCheckContext {
-  isPathWithinVault: (filePath: string) => boolean;
-  isAllowedExportPath: (filePath: string) => boolean;
+  getPathAccessType: (filePath: string) => PathAccessType;
 }
 
 /**
@@ -145,7 +146,7 @@ export function isPathLikeToken(token: string): boolean {
 
 /**
  * Check if a path has valid access permissions.
- * Returns a violation if the path is outside vault and not an allowed export path.
+ * Returns a violation if the path is outside vault and not an allowed export/context path.
  */
 export function checkBashPathAccess(
   candidate: string,
@@ -155,19 +156,18 @@ export function checkBashPathAccess(
   const cleaned = cleanPathToken(candidate);
   if (!cleaned) return null;
 
-  const normalized = cleaned.startsWith('~/')
-    ? path.join(os.homedir(), cleaned.slice(2))
-    : cleaned;
+  const accessType = context.getPathAccessType(cleaned);
 
-  if (context.isPathWithinVault(normalized)) {
+  if (accessType === 'vault' || accessType === 'readwrite') {
     return null;
   }
 
-  if (context.isAllowedExportPath(normalized)) {
-    if (access === 'write') {
-      return null;
-    }
-    return { type: 'export_path_read', path: cleaned };
+  if (accessType === 'context') {
+    return access === 'read' ? null : { type: 'context_path_write', path: cleaned };
+  }
+
+  if (accessType === 'export') {
+    return access === 'write' ? null : { type: 'export_path_read', path: cleaned };
   }
 
   return { type: 'outside_vault', path: cleaned };

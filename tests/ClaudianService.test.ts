@@ -737,6 +737,65 @@ describe('ClaudianService', () => {
       expect(blockedChunk).toBeUndefined();
     });
 
+    it('should block Write tool writing to context path under export path', async () => {
+      mockPlugin.settings.allowedExportPaths = ['/tmp'];
+      mockPlugin.settings.allowedContextPaths = ['/tmp/workspace'];
+
+      setMockMessages([
+        { type: 'system', subtype: 'init', session_id: 'test-session' },
+        createAssistantWithToolUse('Write', { file_path: '/tmp/workspace/out.md', content: 'blocked' }, 'write-context'),
+        { type: 'result' },
+      ]);
+
+      const chunks: any[] = [];
+      for await (const chunk of service.query('write context')) {
+        chunks.push(chunk);
+      }
+
+      const blockedChunk = chunks.find((c) => c.type === 'blocked');
+      expect(blockedChunk).toBeDefined();
+      expect(blockedChunk?.content).toContain('read-only');
+    });
+
+    it('should allow Read tool reading from context path under export path', async () => {
+      mockPlugin.settings.allowedExportPaths = ['/tmp'];
+      mockPlugin.settings.allowedContextPaths = ['/tmp/workspace'];
+
+      setMockMessages([
+        { type: 'system', subtype: 'init', session_id: 'test-session' },
+        createAssistantWithToolUse('Read', { file_path: '/tmp/workspace/in.md' }, 'read-context'),
+        createUserWithToolResult('context contents', 'read-context'),
+        { type: 'result' },
+      ]);
+
+      const chunks: any[] = [];
+      for await (const chunk of service.query('read context')) {
+        chunks.push(chunk);
+      }
+
+      const blockedChunk = chunks.find((c) => c.type === 'blocked');
+      expect(blockedChunk).toBeUndefined();
+    });
+
+    it('should allow Write tool writing to exact overlap path', async () => {
+      mockPlugin.settings.allowedExportPaths = ['/tmp/shared'];
+      mockPlugin.settings.allowedContextPaths = ['/tmp/shared'];
+
+      setMockMessages([
+        { type: 'system', subtype: 'init', session_id: 'test-session' },
+        createAssistantWithToolUse('Write', { file_path: '/tmp/shared/out.md', content: 'allowed' }, 'write-overlap'),
+        { type: 'result' },
+      ]);
+
+      const chunks: any[] = [];
+      for await (const chunk of service.query('write overlap')) {
+        chunks.push(chunk);
+      }
+
+      const blockedChunk = chunks.find((c) => c.type === 'blocked');
+      expect(blockedChunk).toBeUndefined();
+    });
+
     it('should block Edit tool editing outside vault', async () => {
       setMockMessages([
         { type: 'system', subtype: 'init', session_id: 'test-session' },
@@ -787,6 +846,26 @@ describe('ClaudianService', () => {
 
       const blockedChunk = chunks.find((c) => c.type === 'blocked');
       expect(blockedChunk).toBeUndefined();
+    });
+
+    it('should block Bash command writing to context path under export path', async () => {
+      mockPlugin.settings.allowedExportPaths = ['/tmp'];
+      mockPlugin.settings.allowedContextPaths = ['/tmp/workspace'];
+
+      setMockMessages([
+        { type: 'system', subtype: 'init', session_id: 'test-session' },
+        createAssistantWithToolUse('Bash', { command: 'echo hi > /tmp/workspace/out.md' }, 'bash-context-write'),
+        { type: 'result' },
+      ]);
+
+      const chunks: any[] = [];
+      for await (const chunk of service.query('write context bash')) {
+        chunks.push(chunk);
+      }
+
+      const blockedChunk = chunks.find((c) => c.type === 'blocked');
+      expect(blockedChunk).toBeDefined();
+      expect(blockedChunk?.content).toContain('read-only');
     });
 
     it('should allow Bash command writing to allowed export path via -o', async () => {
@@ -1723,8 +1802,7 @@ describe('ClaudianService', () => {
     it('returns continue for non-file tools in vault hook and null for unknown paths', async () => {
       // Create vault restriction hook using the exported function
       const hook = createVaultRestrictionHook({
-        isPathWithinVault: () => true,
-        isAllowedExportPath: () => false,
+        getPathAccessType: () => 'vault',
       });
       const res = await hook.hooks[0]({ tool_name: 'WebSearch', tool_input: {} }, 't1', {});
       expect(res.continue).toBe(true);

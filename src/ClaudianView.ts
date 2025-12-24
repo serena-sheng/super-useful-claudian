@@ -27,7 +27,7 @@ import {
   type ToolCallInfo,
   VIEW_TYPE_CLAUDIAN,
 } from './types';
-import type { AsyncSubagentState, ModelSelector, PermissionToggle, SubagentState, ThinkingBlockState, ThinkingBudgetSelector, WriteEditState } from './ui';
+import type { AsyncSubagentState, ContextPathSelector, ModelSelector, PermissionToggle, SubagentState, ThinkingBlockState, ThinkingBudgetSelector, WriteEditState } from './ui';
 import {
   formatSlashCommandWarnings,
   hideSelectionHighlight,
@@ -94,6 +94,7 @@ export class ClaudianView extends ItemView {
   private imageContextManager: ImageContextManager | null = null;
   private modelSelector: ModelSelector | null = null;
   private thinkingBudgetSelector: ThinkingBudgetSelector | null = null;
+  private contextPathSelector: ContextPathSelector | null = null;
   private permissionToggle: PermissionToggle | null = null;
   private slashCommandManager: SlashCommandManager | null = null;
   private slashCommandDropdown: SlashCommandDropdown | null = null;
@@ -363,6 +364,7 @@ export class ClaudianView extends ItemView {
         model: this.plugin.settings.model,
         thinkingBudget: this.plugin.settings.thinkingBudget,
         permissionMode: this.plugin.settings.permissionMode,
+        allowedContextPaths: this.plugin.settings.allowedContextPaths,
       }),
       getEnvironmentVariables: () => this.plugin.getActiveEnvironmentVariables(),
       onModelChange: async (model: ClaudeModel) => {
@@ -389,9 +391,14 @@ export class ClaudianView extends ItemView {
         this.plugin.settings.permissionMode = mode;
         await this.plugin.saveSettings();
       },
+      onContextPathsChange: async (paths) => {
+        this.plugin.settings.allowedContextPaths = paths;
+        await this.plugin.saveSettings();
+      },
     });
     this.modelSelector = toolbarComponents.modelSelector;
     this.thinkingBudgetSelector = toolbarComponents.thinkingBudgetSelector;
+    this.contextPathSelector = toolbarComponents.contextPathSelector;
     this.permissionToggle = toolbarComponents.permissionToggle;
 
     this.inputEl.addEventListener('keydown', (e) => {

@@ -13,6 +13,7 @@ export interface SystemPromptSettings {
   mediaFolder?: string;
   customPrompt?: string;
   allowedExportPaths?: string[];
+  allowedContextPaths?: string[];
   vaultPath?: string;
   hasEditorContext?: boolean;
 }
@@ -178,6 +179,7 @@ ${formattedPaths}
 
 Rules:
 - Treat export paths as write-only (do not read/list files from them)
+- If a path appears in both export and context lists, it is read-write for that root
 - For vault files, always use relative paths
 - For export destinations, you may use ~ or absolute paths
 
@@ -187,6 +189,42 @@ Examples:
 pandoc ./note.md -o ~/Desktop/note.docx
 cp ./note.md ~/Desktop/note.md
 cat ./note.md > ~/Desktop/note.md
+\`\`\``;
+}
+
+function getContextPathInstructions(allowedContextPaths: string[]): string {
+  if (!allowedContextPaths || allowedContextPaths.length === 0) {
+    return '';
+  }
+
+  const uniquePaths = Array.from(new Set(allowedContextPaths.map((p) => p.trim()).filter(Boolean)));
+  if (uniquePaths.length === 0) {
+    return '';
+  }
+
+  const formattedPaths = uniquePaths.map((p) => `- ${p}`).join('\n');
+
+  return `
+
+## Allowed Context Paths
+
+You may read files from the following paths outside the vault for additional context:
+
+${formattedPaths}
+
+Rules:
+- These paths are READ-ONLY (do not write, edit, or create files in them)
+- If a path appears in both context and export lists, it is read-write for that root
+- Use absolute paths or ~ when referencing these directories
+- Read these files when they contain relevant context for the user's request
+
+Examples:
+
+\`\`\`
+# Reading from context paths
+Read file_path="~/data/reference.json"
+Glob pattern="~/data/**/*.md"
+Grep pattern="keyword" path="~/data/"
 \`\`\``;
 }
 
@@ -234,6 +272,7 @@ export function buildSystemPrompt(settings: SystemPromptSettings = {}): string {
 
   prompt += getImageInstructions(settings.mediaFolder || '');
   prompt += getExportInstructions(settings.allowedExportPaths || []);
+  prompt += getContextPathInstructions(settings.allowedContextPaths || []);
 
   if (settings.customPrompt?.trim()) {
     prompt += '\n\n## Custom Instructions\n\n' + settings.customPrompt.trim();

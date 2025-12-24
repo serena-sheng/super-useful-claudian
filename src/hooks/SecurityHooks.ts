@@ -11,6 +11,7 @@ import { findBashCommandPathViolation } from '../security/BashPathValidator';
 import { isCommandBlocked } from '../security/BlocklistChecker';
 import { getPathFromToolInput } from '../tools/toolInput';
 import { isEditTool, isFileTool, TOOL_BASH } from '../tools/toolNames';
+import type { PathAccessType } from '../utils';
 
 /** Context for blocklist checking. */
 export interface BlocklistContext {
@@ -20,8 +21,7 @@ export interface BlocklistContext {
 
 /** Context for vault restriction checking. */
 export interface VaultRestrictionContext {
-  isPathWithinVault: (filePath: string) => boolean;
-  isAllowedExportPath: (filePath: string) => boolean;
+  getPathAccessType: (filePath: string) => PathAccessType;
   onEditBlocked?: (toolName: string, toolInput: Record<string, unknown>) => void;
 }
 
@@ -75,15 +75,16 @@ export function createVaultRestrictionHook(context: VaultRestrictionContext): Ho
         if (toolName === TOOL_BASH) {
           const command = (input.tool_input?.command as string) || '';
           const pathCheckContext: PathCheckContext = {
-            isPathWithinVault: (p) => context.isPathWithinVault(p),
-            isAllowedExportPath: (p) => context.isAllowedExportPath(p),
+            getPathAccessType: (p) => context.getPathAccessType(p),
           };
           const violation = findBashCommandPathViolation(command, pathCheckContext);
           if (violation) {
             const reason =
               violation.type === 'export_path_read'
                 ? `Access denied: Command path "${violation.path}" is in an allowed export directory, but export paths are write-only.`
-                : `Access denied: Command path "${violation.path}" is outside the vault. Agent is restricted to vault directory only.`;
+                : violation.type === 'context_path_write'
+                  ? `Access denied: Command path "${violation.path}" is in an allowed context directory, but context paths are read-only.`
+                  : `Access denied: Command path "${violation.path}" is outside the vault. Agent is restricted to vault directory only.`;
             return {
               continue: false,
               hookSpecificOutput: {
@@ -104,13 +105,46 @@ export function createVaultRestrictionHook(context: VaultRestrictionContext): Ho
         // Get the path from tool input
         const filePath = getPathFromToolInput(toolName, input.tool_input);
 
-        if (filePath && !context.isPathWithinVault(filePath)) {
-          // Allow write operations to allowed export paths
-          if (isEditTool(toolName) && context.isAllowedExportPath(filePath)) {
+        if (filePath) {
+          const accessType = context.getPathAccessType(filePath);
+
+          if (accessType === 'vault' || accessType === 'readwrite') {
             return { continue: true };
           }
 
-          // Clean up edit state when blocking Write/Edit/NotebookEdit
+          if (!isEditTool(toolName) && accessType === 'context') {
+            return { continue: true };
+          }
+
+          if (isEditTool(toolName)) {
+            if (accessType === 'export') {
+              return { continue: true };
+            }
+
+            if (accessType === 'context') {
+              context.onEditBlocked?.(toolName, input.tool_input);
+              return {
+                continue: false,
+                hookSpecificOutput: {
+                  hookEventName: 'PreToolUse' as const,
+                  permissionDecision: 'deny' as const,
+                  permissionDecisionReason: `Access denied: Path "${filePath}" is in an allowed context directory, but context paths are read-only.`,
+                },
+              };
+            }
+          }
+
+          if (!isEditTool(toolName) && accessType === 'export') {
+            return {
+              continue: false,
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse' as const,
+                permissionDecision: 'deny' as const,
+                permissionDecisionReason: `Access denied: Path "${filePath}" is in an allowed export directory, but export paths are write-only.`,
+              },
+            };
+          }
+
           if (isEditTool(toolName)) {
             context.onEditBlocked?.(toolName, input.tool_input);
           }

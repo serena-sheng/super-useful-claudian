@@ -156,6 +156,118 @@ export function isPathInAllowedExportPaths(
   return false;
 }
 
+/** Checks whether a candidate path is within any of the allowed context paths (read-only). */
+export function isPathInAllowedContextPaths(
+  candidatePath: string,
+  allowedContextPaths: string[],
+  vaultPath: string
+): boolean {
+  if (!allowedContextPaths || allowedContextPaths.length === 0) {
+    return false;
+  }
+
+  // Expand and resolve the candidate path
+  const expandedCandidate = candidatePath.startsWith('~/')
+    ? path.join(os.homedir(), candidatePath.slice(2))
+    : candidatePath;
+
+  const absCandidate = path.isAbsolute(expandedCandidate)
+    ? expandedCandidate
+    : path.resolve(vaultPath, expandedCandidate);
+
+  const resolvedCandidate = resolveRealPath(absCandidate);
+
+  // Check if candidate is within any allowed context path
+  for (const contextPath of allowedContextPaths) {
+    const expandedContext = contextPath.startsWith('~/')
+      ? path.join(os.homedir(), contextPath.slice(2))
+      : contextPath;
+
+    const resolvedContext = resolveRealPath(expandedContext);
+
+    // Check if candidate equals or is within the context path
+    if (
+      resolvedCandidate === resolvedContext ||
+      resolvedCandidate.startsWith(resolvedContext + path.sep)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export type PathAccessType = 'vault' | 'readwrite' | 'context' | 'export' | 'none';
+
+/**
+ * Resolve access type for a candidate path with context/export overlap handling.
+ * The most specific matching root wins; exact context+export matches are read-write.
+ */
+export function getPathAccessType(
+  candidatePath: string,
+  allowedContextPaths: string[] | undefined,
+  allowedExportPaths: string[] | undefined,
+  vaultPath: string
+): PathAccessType {
+  if (!candidatePath) return 'none';
+
+  const vaultReal = resolveRealPath(vaultPath);
+
+  const expandedCandidate = candidatePath.startsWith('~/')
+    ? path.join(os.homedir(), candidatePath.slice(2))
+    : candidatePath;
+
+  const absCandidate = path.isAbsolute(expandedCandidate)
+    ? expandedCandidate
+    : path.resolve(vaultPath, expandedCandidate);
+
+  const resolvedCandidate = resolveRealPath(absCandidate);
+
+  if (resolvedCandidate === vaultReal || resolvedCandidate.startsWith(vaultReal + path.sep)) {
+    return 'vault';
+  }
+
+  const roots = new Map<string, { context: boolean; export: boolean }>();
+
+  const addRoot = (rawPath: string, kind: 'context' | 'export') => {
+    const trimmed = rawPath.trim();
+    if (!trimmed) return;
+    const expanded = trimmed.startsWith('~/')
+      ? path.join(os.homedir(), trimmed.slice(2))
+      : trimmed;
+    const resolved = resolveRealPath(expanded);
+    const existing = roots.get(resolved) ?? { context: false, export: false };
+    existing[kind] = true;
+    roots.set(resolved, existing);
+  };
+
+  for (const contextPath of allowedContextPaths ?? []) {
+    addRoot(contextPath, 'context');
+  }
+
+  for (const exportPath of allowedExportPaths ?? []) {
+    addRoot(exportPath, 'export');
+  }
+
+  let bestRoot: string | null = null;
+  let bestFlags: { context: boolean; export: boolean } | null = null;
+
+  for (const [root, flags] of roots) {
+    if (resolvedCandidate === root || resolvedCandidate.startsWith(root + path.sep)) {
+      if (!bestRoot || root.length > bestRoot.length) {
+        bestRoot = root;
+        bestFlags = flags;
+      }
+    }
+  }
+
+  if (!bestRoot || !bestFlags) return 'none';
+  if (bestFlags.context && bestFlags.export) return 'readwrite';
+  if (bestFlags.context) return 'context';
+  if (bestFlags.export) return 'export';
+  return 'none';
+}
+
 /** Parses KEY=VALUE environment variables from text. Supports comments (#) and empty lines. */
 export function parseEnvironmentVariables(input: string): Record<string, string> {
   const result: Record<string, string> = {};

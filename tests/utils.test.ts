@@ -7,6 +7,7 @@ import {
   findClaudeCLIPath,
   getCurrentModelFromEnvironment,
   getModelsFromEnvironment,
+  getPathAccessType,
   getVaultPath,
   isPathInAllowedExportPaths,
   isPathWithinVault,
@@ -421,6 +422,45 @@ describe('utils.ts', () => {
 
       expect(isPathInAllowedExportPaths('~/Desktop/out.md', ['~/Desktop'], '/vault')).toBe(true);
       expect(isPathInAllowedExportPaths('~/Downloads/out.md', ['~/Desktop'], '/vault')).toBe(false);
+    });
+  });
+
+  describe('getPathAccessType', () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    const stubRealpath = () => {
+      const realpathSpy = jest.spyOn(fs, 'realpathSync').mockImplementation((p: any) => path.resolve(String(p)) as any);
+      (fs.realpathSync as any).native = realpathSpy;
+    };
+
+    it('should return vault for paths inside vault', () => {
+      stubRealpath();
+      expect(getPathAccessType('notes/a.md', [], [], '/vault')).toBe('vault');
+    });
+
+    it('should treat exact overlap as read-write', () => {
+      stubRealpath();
+      expect(getPathAccessType('/tmp/shared/out.md', ['/tmp/shared'], ['/tmp/shared'], '/vault')).toBe('readwrite');
+    });
+
+    it('should prefer context over export for nested paths', () => {
+      stubRealpath();
+      const allowedExportPaths = ['/tmp'];
+      const allowedContextPaths = ['/tmp/workspace'];
+
+      expect(getPathAccessType('/tmp/workspace/file.md', allowedContextPaths, allowedExportPaths, '/vault')).toBe('context');
+      expect(getPathAccessType('/tmp/out.md', allowedContextPaths, allowedExportPaths, '/vault')).toBe('export');
+    });
+
+    it('should let a nested context override a read-write parent', () => {
+      stubRealpath();
+      const allowedExportPaths = ['/tmp/shared'];
+      const allowedContextPaths = ['/tmp/shared', '/tmp/shared/readonly'];
+
+      expect(getPathAccessType('/tmp/shared/readonly/file.md', allowedContextPaths, allowedExportPaths, '/vault')).toBe('context');
+      expect(getPathAccessType('/tmp/shared/file.md', allowedContextPaths, allowedExportPaths, '/vault')).toBe('readwrite');
     });
   });
 

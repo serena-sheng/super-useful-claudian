@@ -38,11 +38,11 @@ import {
   buildContextFromHistory,
   findClaudeCLIPath,
   getLastUserMessage,
+  getPathAccessType,
   getVaultPath,
-  isPathInAllowedExportPaths,
-  isPathWithinVault as isPathWithinVaultUtil,
   isSessionExpiredError,
   parseEnvironmentVariables,
+  type PathAccessType,
   stripContextFilesPrefix,
 } from './utils';
 
@@ -381,6 +381,7 @@ export class ClaudianService {
       mediaFolder: this.plugin.settings.mediaFolder,
       customPrompt: this.plugin.settings.systemPrompt,
       allowedExportPaths: this.plugin.settings.allowedExportPaths,
+      allowedContextPaths: this.plugin.settings.allowedContextPaths,
       vaultPath: cwd,
       hasEditorContext,
     });
@@ -405,8 +406,7 @@ export class ClaudianService {
     }));
 
     const vaultRestrictionHook = createVaultRestrictionHook({
-      isPathWithinVault: (p) => this.isPathWithinVault(p),
-      isAllowedExportPath: (p) => this.isAllowedExportPath(p),
+      getPathAccessType: (p) => this.getPathAccessType(p),
       onEditBlocked: (toolName, toolInput) => {
         this.fileEditTracker?.cancelFileEdit(toolName, toolInput);
       },
@@ -548,21 +548,14 @@ export class ClaudianService {
     this.diffStore.clear();
   }
 
-  /**
-   * Check if a path is within the vault directory.
-   */
-  private isPathWithinVault(filePath: string): boolean {
-    if (!this.vaultPath) return true;
-    return isPathWithinVaultUtil(filePath, this.vaultPath);
-  }
-
-  /**
-   * Check if a path is within the allowed export paths.
-   */
-  private isAllowedExportPath(filePath: string): boolean {
-    if (!this.vaultPath) return false;
-    const allowedPaths = this.plugin.settings.allowedExportPaths;
-    return isPathInAllowedExportPaths(filePath, allowedPaths, this.vaultPath);
+  private getPathAccessType(filePath: string): PathAccessType {
+    if (!this.vaultPath) return 'vault';
+    return getPathAccessType(
+      filePath,
+      this.plugin.settings.allowedContextPaths,
+      this.plugin.settings.allowedExportPaths,
+      this.vaultPath
+    );
   }
 
   /**

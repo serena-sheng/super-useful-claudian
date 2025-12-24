@@ -130,6 +130,7 @@ interface ClaudianSettings {
   envSnippets: EnvSnippet[];
   systemPrompt: string;
   allowedExportPaths: string[];      // Write-only paths outside vault
+  allowedContextPaths: string[];     // Read-only paths outside vault
   slashCommands: SlashCommand[];
 }
 ```
@@ -185,9 +186,10 @@ Reusable capability modules that Claude discovers and invokes automatically base
 | Safe | Require approval per action |
 
 **Restrictions (both modes)**:
-- Vault-only file access (symlink-safe via `realpath`)
+- Vault-only file access by default (symlink-safe via `realpath`)
 - Blocked commands: `rm -rf`, `chmod 777`, `chmod -R 777`
 - Export paths: Write-only to configured paths (default: `~/Desktop`, `~/Downloads`)
+- Context paths: Read-only access to configured paths outside vault (folder icon in input toolbar)
 
 ## CSS Classes
 
@@ -205,6 +207,7 @@ All classes use `.claudian-` prefix. Key patterns:
 | Images | `-image-preview`, `-image-chip`, `-drop-overlay` |
 | Inline edit | `-inline-input`, `-inline-diff-replace`, `-diff-del`, `-diff-ins` |
 | Selection | `-selection-indicator`, `-selection-highlight` |
+| Context paths | `-context-path-selector`, `-context-path-icon`, `-context-path-dropdown` |
 | Modals | `-approval-modal`, `-instruction-modal` |
 
 ## Development Notes

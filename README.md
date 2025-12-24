@@ -7,7 +7,7 @@ An Obsidian plugin that embeds Claude Agent (using Claude Agent SDK) as a sideba
 ## Features
 
 - **Full Agentic Capabilities**: Leverage Claude Code's power to read, write, and edit files, and execute bash commands, all within your Obsidian vault.
-- **Context-Aware**: Automatically attach the focused note, mention files with `@`, exclude notes by tag, and include editor selection as context for precise context management.
+- **Context-Aware**: Automatically attach the focused note, mention files with `@`, exclude notes by tag, include editor selection, and access external directories for additional context.
 - **Vision Support**: Analyze images by sending them via drag-and-drop, paste, or file path.
 - **Inline Edit**: Edit selected text or insert content at cursor position directly in notes with word-level diff preview and read-only tool access for context.
 - **Slash Commands**: Create reusable prompt templates triggered by `/command`, with argument placeholders, `@file` references, and optional inline bash substitutions.
@@ -93,6 +93,16 @@ Select text in any note, then click the chat input - your selection is automatic
 - **Automatic inclusion**: Selected text is sent with your message as `<editor_selection>` context
 - **Persistent context**: Selection stays active until cleared or replaced
 
+### Context Paths
+
+Grant Claude read-only access to directories outside your vault for additional context (e.g., reference data, shared resources, project files).
+
+- **Folder icon**: Click the folder icon in the input toolbar to add paths via native folder picker
+- **Visual feedback**: Icon glows when paths are configured; badge shows count when >1
+- **Hover dropdown**: View configured paths and remove with ✕
+- **Read-only access**: Claude can read files (`Read`, `Glob`, `Grep`, `LS`) and use bash read operations, but cannot write to these paths
+- **Office documents**: With appropriate tools installed (`pandoc`, `xlsx2csv`), Claude can extract text from `.docx`, `.xlsx`, `.pptx` files
+
 ### Image Context
 
 Send images to Claude via drag-and-drop, paste (Cmd/Ctrl+V), or file path in your message.
@@ -155,6 +165,7 @@ Compatible with [Claude Code's skill format](https://platform.claude.com/docs/en
 - **Enable command blocklist**: Block dangerous bash commands (default: on)
 - **Blocked commands**: Patterns to block (supports regex)
 - **Allowed export paths**: Paths outside the vault where files can be exported (default: `~/Desktop`, `~/Downloads`)
+- **Context paths**: Directories outside the vault that Claude can read for additional context (click folder icon in input toolbar)
 - **Show tool usage**: Display file operations in chat
 - **Excluded tags**: Tags that prevent notes from auto-loading (e.g., `sensitive`, `private`)
 - **Media folder**: Configure where vault stores attachments for embedded image support (e.g., `attachments`)
@@ -169,6 +180,7 @@ Compatible with [Claude Code's skill format](https://platform.claude.com/docs/en
 
 - **Vault restriction**: File tools and Bash commands are limited to the Obsidian vault. Paths are resolved with `realpath` to prevent symlink escapes; attempts outside the vault are blocked.
 - **Export paths exception**: Write operations to configured export paths (e.g., `~/Desktop`) are allowed for export workflows (e.g., `pandoc` generating `.docx`). Export paths are treated as write-only: `Read/Glob/Grep/LS` remain vault-only, and `Bash` only allows export paths as write targets (e.g., `-o/--output`, `>`).
+- **Context paths exception**: Read operations from configured context paths are allowed. Context paths are read-only: `Read/Glob/Grep/LS` work, `Bash` allows read operations (e.g., `cat`, `pandoc ... -t plain`), but all write operations are blocked.
 - **Approvals**:
   - Safe mode shows an approval modal per tool call.
   - Bash approvals require an exact command match.
@@ -273,6 +285,7 @@ src/
 - [x] Instruction mode (`#`) to save in custom system prompt
 - [x] Skills support (Claude Code compatible)
 - [x] Selection awareness in main chat (visual indicator + context)
+- [x] Context paths for read-only access to external directories
 - [ ] Hooks, MCP and other advanced features
 
 ## License

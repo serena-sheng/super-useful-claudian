@@ -29,6 +29,7 @@ export {
   InlineEditModal,
 } from './InlineEditModal';
 export {
+  ContextPathSelector,
   createInputToolbar,
   ModelSelector,
   PermissionToggle,
