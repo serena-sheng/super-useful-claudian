@@ -1,11 +1,12 @@
 {
   "name": "claudian",
-  "version": "1.0.6",
+  "version": "1.1.0",
   "description": "Claudian - Claude Code embedded in Obsidian sidebar",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "node esbuild.config.mjs production",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint \"{src,tests}/**/*.ts\"",
     "lint:fix": "npm run lint -- --fix",
     "test": "node scripts/run-jest.js",
