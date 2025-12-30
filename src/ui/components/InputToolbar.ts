@@ -2,7 +2,7 @@
  * Claudian - Input toolbar components (model selector, thinking budget, permission toggle).
  */
 
-import { setIcon } from 'obsidian';
+import { Notice, setIcon } from 'obsidian';
 
 import type {
   ClaudeModel,
@@ -15,6 +15,7 @@ import {
   THINKING_BUDGETS
 } from '../../core/types';
 import type { McpService } from '../../features/mcp/McpService';
+import { findConflictingPath } from '../../utils/contextPath';
 import { getModelsFromEnvironment, parseEnvironmentVariables } from '../../utils/env';
 
 /** Settings access interface for toolbar components. */
@@ -325,16 +326,42 @@ export class ContextPathSelector {
         const selectedPath = result.filePaths[0];
         const paths = this.callbacks.getSettings().allowedContextPaths;
 
-        if (!paths.includes(selectedPath)) {
-          const newPaths = [...paths, selectedPath];
-          await this.callbacks.onContextPathsChange(newPaths);
-          this.updateDisplay();
-          this.renderDropdown();
+        // Check for duplicate
+        if (paths.includes(selectedPath)) {
+          return;
         }
+
+        // Check for nested/overlapping paths
+        const conflict = findConflictingPath(selectedPath, paths);
+        if (conflict) {
+          // Show warning notice
+          this.showConflictNotice(selectedPath, conflict);
+          return;
+        }
+
+        const newPaths = [...paths, selectedPath];
+        await this.callbacks.onContextPathsChange(newPaths);
+        this.updateDisplay();
+        this.renderDropdown();
       }
     } catch (err) {
       console.error('Failed to open folder picker:', err);
     }
+  }
+
+  /** Shows a notice when a conflicting path is detected. */
+  private showConflictNotice(newPath: string, conflict: { path: string; type: 'parent' | 'child' }) {
+    const shortNew = this.shortenPath(newPath);
+    const shortExisting = this.shortenPath(conflict.path);
+
+    let message: string;
+    if (conflict.type === 'parent') {
+      message = `Cannot add "${shortNew}" - it's inside existing path "${shortExisting}"`;
+    } else {
+      message = `Cannot add "${shortNew}" - it contains existing path "${shortExisting}"`;
+    }
+
+    new Notice(message, 5000);
   }
 
   private renderDropdown() {
