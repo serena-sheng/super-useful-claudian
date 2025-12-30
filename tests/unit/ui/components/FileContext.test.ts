@@ -799,9 +799,9 @@ describe('FileContextManager - Context file @-mention dropdown', () => {
         callbacks
       );
 
-      // Type @ followed by search text
-      inputEl.value = '@app';
-      inputEl.selectionStart = 4;
+      // Use @folder/ pattern to show context files, then filter by name
+      inputEl.value = '@external/app';
+      inputEl.selectionStart = 13;
       manager.handleInputChange();
 
       // Check that dropdown is visible
@@ -836,9 +836,9 @@ describe('FileContextManager - Context file @-mention dropdown', () => {
         callbacks
       );
 
-      // Search by path segment
-      inputEl.value = '@src';
-      inputEl.selectionStart = 4;
+      // Use @folder/ pattern then search by path segment
+      inputEl.value = '@external/src';
+      inputEl.selectionStart = 13;
       manager.handleInputChange();
 
       const dropdown = containerEl.children.find(c => c.hasClass('claudian-mention-dropdown'));
@@ -867,9 +867,9 @@ describe('FileContextManager - Context file @-mention dropdown', () => {
         callbacks
       );
 
-      // Search with lowercase
-      inputEl.value = '@readme';
-      inputEl.selectionStart = 7;
+      // Use @folder/ pattern then search with lowercase
+      inputEl.value = '@external/readme';
+      inputEl.selectionStart = 16;
       manager.handleInputChange();
 
       const dropdown = containerEl.children.find(c => c.hasClass('claudian-mention-dropdown'));
@@ -897,14 +897,47 @@ describe('FileContextManager - Context file @-mention dropdown', () => {
         callbacks
       );
 
-      inputEl.value = '@nonexistent';
-      inputEl.selectionStart = 12;
+      // Use @folder/ pattern then search for nonexistent
+      inputEl.value = '@external/nonexistent';
+      inputEl.selectionStart = 21;
       manager.handleInputChange();
 
       const dropdown = containerEl.children.find(c => c.hasClass('claudian-mention-dropdown'));
       const emptyEl = dropdown!.children.find(c => c.hasClass('claudian-mention-empty'));
 
       expect(emptyEl).toBeDefined();
+
+      manager.destroy();
+    });
+  });
+
+  describe('Context folder disambiguation', () => {
+    it('should show parent/folder when context folders share the same name', () => {
+      const app = createMockApp();
+      app.vault.getMarkdownFiles.mockReturnValue([]);
+
+      const callbacks = createMockCallbacks(['/pathA/folder', '/pathB/folder']);
+      const manager = new FileContextManager(
+        app,
+        containerEl as any,
+        inputEl,
+        callbacks
+      );
+
+      inputEl.value = '@folder';
+      inputEl.selectionStart = 7;
+      manager.handleInputChange();
+
+      const dropdown = containerEl.children.find(c => c.hasClass('claudian-mention-dropdown'));
+      const items = dropdown!.children.filter(c => c.hasClass('claudian-mention-item'));
+      const folderNames = items
+        .filter(item => item.hasClass('context-folder'))
+        .flatMap(item => item.querySelectorAll('.claudian-mention-name-folder'))
+        .map(el => el.textContent);
+
+      expect(folderNames).toEqual(
+        expect.arrayContaining(['@pathA/folder/', '@pathB/folder/'])
+      );
 
       manager.destroy();
     });
@@ -930,8 +963,9 @@ describe('FileContextManager - Context file @-mention dropdown', () => {
         callbacks
       );
 
-      inputEl.value = '@test';
-      inputEl.selectionStart = 5;
+      // Use @folder/ pattern to trigger context file filter mode
+      inputEl.value = '@external/test';
+      inputEl.selectionStart = 14;
       manager.handleInputChange();
 
       const dropdown = containerEl.children.find(c => c.hasClass('claudian-mention-dropdown'));
@@ -965,27 +999,26 @@ describe('FileContextManager - Context file @-mention dropdown', () => {
         callbacks
       );
 
-      // Empty search to get all files
-      inputEl.value = '@';
-      inputEl.selectionStart = 1;
+      // Use @folder/ pattern to show all files from context
+      inputEl.value = '@external/';
+      inputEl.selectionStart = 10;
       manager.handleInputChange();
 
       const dropdown = containerEl.children.find(c => c.hasClass('claudian-mention-dropdown'));
       const items = dropdown!.children.filter(c => c.hasClass('claudian-mention-item'));
 
-      // Should have context folder filter + 3 context files = 4 items
-      // (context folder "external" is shown as a filter option)
-      expect(items.length).toBe(4);
+      // Should have 3 context files (no folder filter in filter mode)
+      expect(items.length).toBe(3);
 
       manager.destroy();
     });
 
-    it('should limit context files to 5', () => {
+    it('should limit context files to 10 in filter mode', () => {
       const app = createMockApp();
       app.vault.getMarkdownFiles.mockReturnValue([]);
 
       const contextFiles: ContextPathFile[] = [];
-      for (let i = 0; i < 10; i++) {
+      for (let i = 0; i < 15; i++) {
         contextFiles.push({
           path: `/external/file${i}.ts`,
           name: `file${i}.ts`,
@@ -1004,15 +1037,16 @@ describe('FileContextManager - Context file @-mention dropdown', () => {
         callbacks
       );
 
-      inputEl.value = '@file';
-      inputEl.selectionStart = 5;
+      // Use @folder/ pattern to trigger filter mode
+      inputEl.value = '@external/file';
+      inputEl.selectionStart = 14;
       manager.handleInputChange();
 
       const dropdown = containerEl.children.find(c => c.hasClass('claudian-mention-dropdown'));
       const contextItems = dropdown!.children.filter(c => c.hasClass('context-file'));
 
-      // Should be limited to 5 context files
-      expect(contextItems.length).toBe(5);
+      // Should be limited to 10 context files in filter mode
+      expect(contextItems.length).toBe(10);
 
       manager.destroy();
     });
@@ -1036,9 +1070,9 @@ describe('FileContextManager - Context file @-mention dropdown', () => {
         callbacks
       );
 
-      // Trigger mention dropdown
-      inputEl.value = '@app';
-      inputEl.selectionStart = 4;
+      // Use @folder/ pattern to show context files
+      inputEl.value = '@external/app';
+      inputEl.selectionStart = 13;
       manager.handleInputChange();
 
       // Simulate Enter key to select
@@ -1069,14 +1103,43 @@ describe('FileContextManager - Context file @-mention dropdown', () => {
         callbacks
       );
 
-      inputEl.value = '@my';
-      inputEl.selectionStart = 3;
+      // Use @folder/ pattern to show context files
+      inputEl.value = '@external/my';
+      inputEl.selectionStart = 12;
       manager.handleInputChange();
 
       manager.handleMentionKeydown({ key: 'Enter', preventDefault: jest.fn() } as any);
 
       // Input should now have the @folderName/filename format for context files
       expect(inputEl.value).toBe('@external/myfile.ts ');
+
+      manager.destroy();
+    });
+
+    it('should include relative path when selecting nested context files', () => {
+      const app = createMockApp();
+      app.vault.getMarkdownFiles.mockReturnValue([]);
+
+      const contextFiles: ContextPathFile[] = [
+        { path: '/external/workspace/subfolder/file.ts', name: 'file.ts', relativePath: 'subfolder/file.ts', contextRoot: '/external/workspace', mtime: 1000 },
+      ];
+      mockScanPaths.mockReturnValue(contextFiles);
+
+      const callbacks = createMockCallbacks(['/external/workspace']);
+      const manager = new FileContextManager(
+        app,
+        containerEl as any,
+        inputEl,
+        callbacks
+      );
+
+      inputEl.value = '@workspace/sub';
+      inputEl.selectionStart = 14;
+      manager.handleInputChange();
+
+      manager.handleMentionKeydown({ key: 'Enter', preventDefault: jest.fn() } as any);
+
+      expect(inputEl.value).toBe('@workspace/subfolder/file.ts ');
 
       manager.destroy();
     });
@@ -1098,8 +1161,9 @@ describe('FileContextManager - Context file @-mention dropdown', () => {
         callbacks
       );
 
-      inputEl.value = '@file';
-      inputEl.selectionStart = 5;
+      // Use @folder/ pattern to show context files
+      inputEl.value = '@external/file';
+      inputEl.selectionStart = 14;
       manager.handleInputChange();
 
       expect(manager.isMentionDropdownVisible()).toBe(true);
@@ -1130,14 +1194,45 @@ describe('FileContextManager - Context file @-mention dropdown', () => {
         callbacks
       );
 
-      inputEl.value = '@app';
-      inputEl.selectionStart = 4;
+      // Use @folder/ pattern to show context files
+      inputEl.value = '@external/app';
+      inputEl.selectionStart = 13;
       manager.handleInputChange();
 
       const dropdown = containerEl.children.find(c => c.hasClass('claudian-mention-dropdown'));
       const items = dropdown!.children.filter(c => c.hasClass('claudian-mention-item'));
 
       expect(items[0].hasClass('context-file')).toBe(true);
+
+      manager.destroy();
+    });
+
+    it('should show relative path for nested context files in dropdown', () => {
+      const app = createMockApp();
+      app.vault.getMarkdownFiles.mockReturnValue([]);
+
+      const contextFiles: ContextPathFile[] = [
+        { path: '/external/workspace/subfolder/file.ts', name: 'file.ts', relativePath: 'subfolder/file.ts', contextRoot: '/external/workspace', mtime: 1000 },
+      ];
+      mockScanPaths.mockReturnValue(contextFiles);
+
+      const callbacks = createMockCallbacks(['/external/workspace']);
+      const manager = new FileContextManager(
+        app,
+        containerEl as any,
+        inputEl,
+        callbacks
+      );
+
+      inputEl.value = '@workspace/sub';
+      inputEl.selectionStart = 14;
+      manager.handleInputChange();
+
+      const dropdown = containerEl.children.find(c => c.hasClass('claudian-mention-dropdown'));
+      const items = dropdown!.children.filter(c => c.hasClass('claudian-mention-item'));
+      const nameEls = items[0].querySelectorAll('.claudian-mention-name-context');
+
+      expect(nameEls[0].textContent).toBe('subfolder/file.ts');
 
       manager.destroy();
     });
@@ -1167,14 +1262,14 @@ describe('FileContextManager - Context file @-mention dropdown', () => {
       manager.destroy();
     });
 
-    it('should differentiate vault files from context files in dropdown', () => {
+    it('should show only vault files in initial dropdown (context files hidden)', () => {
       const app = createMockApp();
 
       // Add vault files
       const vaultFile = new MockTFile('notes/vaultfile.md');
       app.vault.getMarkdownFiles.mockReturnValue([vaultFile]);
 
-      // Add context files
+      // Add context files (should not appear in initial dropdown)
       const contextFiles: ContextPathFile[] = [
         { path: '/external/contextfile.ts', name: 'contextfile.ts', relativePath: 'contextfile.ts', contextRoot: '/external', mtime: 1000 },
       ];
@@ -1195,11 +1290,11 @@ describe('FileContextManager - Context file @-mention dropdown', () => {
       const dropdown = containerEl.children.find(c => c.hasClass('claudian-mention-dropdown'));
       const items = dropdown!.children.filter(c => c.hasClass('claudian-mention-item'));
 
-      // Should have both context and vault files
+      // Context files should NOT appear in initial dropdown
       const contextItems = items.filter(i => i.hasClass('context-file'));
-      const vaultItems = items.filter(i => !i.hasClass('context-file') && !i.hasClass('mcp-server'));
+      const vaultItems = items.filter(i => !i.hasClass('context-file') && !i.hasClass('mcp-server') && !i.hasClass('context-folder'));
 
-      expect(contextItems.length).toBe(1);
+      expect(contextItems.length).toBe(0);
       expect(vaultItems.length).toBe(1);
 
       manager.destroy();
@@ -1225,8 +1320,9 @@ describe('FileContextManager - Context file @-mention dropdown', () => {
         callbacks
       );
 
-      inputEl.value = '@file';
-      inputEl.selectionStart = 5;
+      // Use @folder/ pattern to show context files
+      inputEl.value = '@external/file';
+      inputEl.selectionStart = 14;
       manager.handleInputChange();
 
       // Navigate down
@@ -1259,8 +1355,9 @@ describe('FileContextManager - Context file @-mention dropdown', () => {
         callbacks
       );
 
-      inputEl.value = '@file';
-      inputEl.selectionStart = 5;
+      // Use @folder/ pattern to show context files
+      inputEl.value = '@external/file';
+      inputEl.selectionStart = 14;
       manager.handleInputChange();
 
       expect(manager.isMentionDropdownVisible()).toBe(true);
@@ -1308,7 +1405,7 @@ describe('FileContextManager - Context file @-mention dropdown', () => {
       manager.destroy();
     });
 
-    it('should default select first context file when no vault files match', () => {
+    it('should select context file when using @folder/ filter pattern', () => {
       const app = createMockApp();
       app.vault.getMarkdownFiles.mockReturnValue([]);
 
@@ -1325,8 +1422,9 @@ describe('FileContextManager - Context file @-mention dropdown', () => {
         callbacks
       );
 
-      inputEl.value = '@mycode';
-      inputEl.selectionStart = 7;
+      // Use @folder/ pattern to access context files
+      inputEl.value = '@external/mycode';
+      inputEl.selectionStart = 16;
       manager.handleInputChange();
 
       manager.handleMentionKeydown({ key: 'Enter', preventDefault: jest.fn() } as any);

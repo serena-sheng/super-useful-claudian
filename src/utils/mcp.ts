@@ -5,7 +5,7 @@ export interface SseEvent {
 
 export function extractMcpMentions(text: string, validNames: Set<string>): Set<string> {
   const mentions = new Set<string>();
-  const regex = /@([a-zA-Z0-9._-]+)/g;
+  const regex = /@([a-zA-Z0-9._-]+)(?!\/)/g;
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(text)) !== null) {

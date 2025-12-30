@@ -80,6 +80,10 @@ Use it like Claude Code—read, write, edit, search files in your vault.
 ### Context
 
 - **File**: Auto-attaches focused note; type `@` to attach other files
+- **@-mention dropdown**: Type `@` to see MCP servers, context folders, and vault files
+  - `@server-name` enables context-saving MCP servers
+  - `@folder/` filters to files from that context path (e.g., `@workspace/`)
+  - Vault files shown by default
 - **Selection**: Select text in editor, then chat—selection included automatically
 - **Images**: Drag-drop, paste, or type path; configure media folder for `![[image]]` embeds
 - **External paths**: Click folder icon in toolbar for read-only access to directories outside vault
@@ -91,7 +95,7 @@ Use it like Claude Code—read, write, edit, search files in your vault.
 - **Instruction Mode**: Type `#` to add refined instructions to system prompt
 - **Plan Mode**: `Shift+Tab` for read-only exploration before implementation
 - **Skills**: Add `SKILL.md` files to `~/.claude/skills/` or `{vault}/.claude/skills/`
-- **MCP**: Add external tools via Settings → MCP Servers; use `@server-name` to activate
+- **MCP**: Add external tools via Settings → MCP Servers; use `@server-name` in chat to activate
 
 ## Configuration
 
@@ -206,6 +210,7 @@ src/
 - [x] Context window usage display
 - [x] Plan mode (Shift+Tab toggle, read-only exploration, approval flow)
 - [x] Auto title generation (AI-powered, concurrent, with regenerate option)
+- [x] Context path @-mention (`@folder/` to filter files from external directories)
 - [ ] Hooks and other advanced features
 
 ## License

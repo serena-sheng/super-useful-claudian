@@ -266,13 +266,27 @@ Reusable capability modules that Claude discovers and invokes automatically base
 - **Project skills**: `{vault}/.claude/skills/{name}/SKILL.md` (vault-specific)
 - Compatible with [Claude Code skill format](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview)
 
+### @-Mention Dropdown
+Type `@` in the input to open the mention dropdown for attaching context.
+- **MCP servers**: `@server-name` enables context-saving MCP servers
+- **Context folders**: `@folder/` filters to files from that context path
+- **Context files**: Only shown after `@folder/` filter, displays filename with folder badge
+- **Vault files**: Markdown files from the vault, shown by default
+
+**Dropdown order**: MCP servers → Context folders → Vault files
+
+**Example flow**:
+```
+@           → [@workspace/] [note.md] [note2.md] ...
+@workspace/ → [file1.ts] [file2.ts] ...  (files from context path)
+```
+
 ### MCP (Model Context Protocol)
 Extend Claude with external tools and data sources via MCP servers.
 - **Server types**: `stdio` (local command), `sse` (Server-Sent Events), `http` (HTTP endpoint)
 - **Storage**: `.claude/mcp.json` (Claude Code compatible with `_claudian` metadata)
 - **Context-saving mode**: Hide server tools unless `@`-mentioned (saves context window)
 - **UI**: Settings page for add/edit/delete, connection tester, toolbar selector with glow effect
-- **@-mention**: Type `@server-name` to enable context-saving servers in a message
 
 ### Context Window Usage
 240° arc gauge showing context usage in the input toolbar.

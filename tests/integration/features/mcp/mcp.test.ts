@@ -558,6 +558,15 @@ describe('MCP Utils', () => {
       expect(result.size).toBe(1);
     });
 
+    it('should ignore @name/ filter mentions', () => {
+      const validNames = new Set(['workspace']);
+      const text = 'Use @workspace/ to filter files';
+
+      const result = extractMcpMentions(text, validNames);
+
+      expect(result.size).toBe(0);
+    });
+
     it('should not match partial names from email addresses', () => {
       // The regex captures everything after @ until a non-valid char
       // So user@example.com captures 'example.com', not 'example'
