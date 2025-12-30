@@ -379,5 +379,5 @@ All classes use `.claudian-` prefix. Key patterns:
 ## Development Notes
 
 - Test Driven Development
-- Generated docs go in `dev/`
+- Generated docs go in `dev/`, move docs to `dev/archive` before commit
 - Run `npm run typecheck`, `npm run lint`, `npm run build`, `npm run test` after editing
