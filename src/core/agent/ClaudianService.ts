@@ -100,14 +100,6 @@ class SessionManager {
     this.state.pendingSessionModel = null;
   }
 
-  needsSessionReset(requestedModel: ClaudeModel, defaultModel: ClaudeModel): boolean {
-    if (!this.state.sessionId) {
-      return false;
-    }
-    const activeModel = this.state.sessionModel ?? defaultModel;
-    return requestedModel !== activeModel;
-  }
-
   invalidateSession(): void {
     this.state.sessionId = null;
     this.state.sessionModel = null;
@@ -300,16 +292,14 @@ export class ClaudianService {
       this.sessionManager.clearInterrupted();
     }
 
-    // If a command overrides the model, avoid resuming a potentially incompatible session.
-    const requestedModel = queryOptions?.model || this.plugin.settings.model;
-    const needsModelReset = this.sessionManager.needsSessionReset(requestedModel, this.plugin.settings.model);
-
-    // Also rebuild history if no session exists but we have conversation history
+    // Rebuild history if no session exists but we have conversation history
     // (e.g., after provider change cleared the sessionId).
+    // Note: Model switching within same provider doesn't require session reset -
+    // the SDK handles it natively with the same session ID.
     const noSessionButHasHistory = !this.sessionManager.getSessionId() &&
       conversationHistory && conversationHistory.length > 0;
 
-    if (needsModelReset || noSessionButHasHistory) {
+    if (noSessionButHasHistory) {
       if (conversationHistory && conversationHistory.length > 0) {
         const historyContext = buildContextFromHistory(conversationHistory);
         const lastUserMessage = getLastUserMessage(conversationHistory);
