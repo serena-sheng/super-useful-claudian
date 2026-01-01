@@ -541,30 +541,13 @@ export class McpServerSelector {
 
     this.updateDisplay();
 
-    // Click to toggle dropdown
-    iconWrapper.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.toggleDropdown();
-    });
-
     this.dropdownEl = this.container.createDiv({ cls: 'claudian-mcp-selector-dropdown' });
     this.renderDropdown();
 
-    // Close dropdown on outside click
-    document.addEventListener('click', (e) => {
-      if (!this.container.contains(e.target as Node)) {
-        this.dropdownEl?.removeClass('visible');
-      }
-    });
-  }
-
-  private toggleDropdown() {
-    if (this.dropdownEl?.hasClass('visible')) {
-      this.dropdownEl.removeClass('visible');
-    } else {
+    // Re-render dropdown content on hover (CSS handles visibility)
+    this.container.addEventListener('mouseenter', () => {
       this.renderDropdown();
-      this.dropdownEl?.addClass('visible');
-    }
+    });
   }
 
   private renderDropdown() {
@@ -595,6 +578,7 @@ export class McpServerSelector {
 
   private renderServerItem(listEl: HTMLElement, server: ClaudianMcpServer) {
     const itemEl = listEl.createDiv({ cls: 'claudian-mcp-selector-item' });
+    itemEl.dataset.serverName = server.name;
 
     const isEnabled = this.enabledServers.has(server.name);
     if (isEnabled) {
@@ -623,18 +607,32 @@ export class McpServerSelector {
     // Click to toggle
     itemEl.addEventListener('click', (e) => {
       e.stopPropagation();
-      this.toggleServer(server.name);
+      this.toggleServer(server.name, itemEl);
     });
   }
 
-  private toggleServer(name: string) {
+  private toggleServer(name: string, itemEl?: HTMLElement) {
     if (this.enabledServers.has(name)) {
       this.enabledServers.delete(name);
     } else {
       this.enabledServers.add(name);
     }
+
+    // Update item in-place if provided
+    if (itemEl) {
+      const isEnabled = this.enabledServers.has(name);
+      const checkEl = itemEl.querySelector('.claudian-mcp-selector-check');
+
+      if (isEnabled) {
+        itemEl.addClass('enabled');
+        if (checkEl) setIcon(checkEl as HTMLElement, 'check');
+      } else {
+        itemEl.removeClass('enabled');
+        if (checkEl) checkEl.empty();
+      }
+    }
+
     this.updateDisplay();
-    this.renderDropdown();
     this.onChangeCallback?.(this.enabledServers);
   }
 

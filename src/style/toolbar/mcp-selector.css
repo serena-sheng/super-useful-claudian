@@ -76,7 +76,18 @@
   z-index: 100;
 }
 
-.claudian-mcp-selector-dropdown.visible {
+/* Bridge the gap between icon and dropdown to prevent hover breaks */
+.claudian-mcp-selector-dropdown::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -8px;
+  height: 8px;
+}
+
+.claudian-mcp-selector-dropdown.visible,
+.claudian-mcp-selector:hover .claudian-mcp-selector-dropdown {
   opacity: 1;
   visibility: visible;
 }
@@ -143,6 +154,7 @@
 .claudian-mcp-selector-item-info {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
   flex: 1;
   overflow: hidden;
@@ -163,4 +175,6 @@
   border-radius: 3px;
   background: rgba(217, 119, 87, 0.2);
   color: #D97757;
+  flex-shrink: 0;
+  margin-left: auto;
 }
