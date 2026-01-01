@@ -24,6 +24,7 @@ export interface ToolbarSettings {
   thinkingBudget: ThinkingBudget;
   permissionMode: PermissionMode;
   allowedContextPaths: string[];
+  lastNonPlanPermissionMode?: 'yolo' | 'normal';
 }
 
 /** Callback interface for toolbar changes. */
@@ -34,6 +35,10 @@ export interface ToolbarCallbacks {
   onContextPathsChange: (paths: string[]) => Promise<void>;
   getSettings: () => ToolbarSettings;
   getEnvironmentVariables?: () => string;
+  /** Whether plan mode was initiated by the agent (EnterPlanMode tool). */
+  isAgentInitiatedPlanMode?: () => boolean;
+  /** Whether the user has requested plan mode (UI/prefix only). */
+  isPlanModeRequested?: () => boolean;
 }
 
 /** Model selector dropdown component. */
@@ -184,7 +189,6 @@ export class PermissionToggle {
   private toggleEl: HTMLElement | null = null;
   private labelEl: HTMLElement | null = null;
   private callbacks: ToolbarCallbacks;
-  private planModeActive = false;
   private onPlanModeToggle: ((active: boolean) => void) | null = null;
 
   constructor(parentEl: HTMLElement, callbacks: ToolbarCallbacks) {
@@ -202,10 +206,10 @@ export class PermissionToggle {
     this.updateDisplay();
 
     this.toggleEl.addEventListener('click', () => this.toggle());
-    // Container click for plan mode exit
+    // Container click while in plan mode (do not allow exit)
     this.container.addEventListener('click', (e) => {
-      if (this.planModeActive && e.target !== this.toggleEl) {
-        this.toggle();
+      if (this.isPlanModeLocked() && e.target !== this.toggleEl) {
+        new Notice('Plan mode is active until the plan is approved.');
       }
     });
   }
@@ -216,27 +220,36 @@ export class PermissionToggle {
   }
 
   /** Set plan mode active state. */
-  setPlanModeActive(active: boolean) {
-    this.planModeActive = active;
+  setPlanModeActive(_active: boolean) {
     this.updateDisplay();
   }
 
   /** Check if plan mode is active. */
   isPlanModeActive(): boolean {
-    return this.planModeActive;
+    return this.isPlanModeLocked() || this.isPlanModeRequested();
+  }
+
+  private isPlanModeLocked(): boolean {
+    return this.callbacks.getSettings().permissionMode === 'plan';
+  }
+
+  private isPlanModeRequested(): boolean {
+    return this.callbacks.isPlanModeRequested?.() ?? false;
   }
 
   updateDisplay() {
     if (!this.toggleEl || !this.labelEl) return;
 
     // Plan mode takes precedence
-    if (this.planModeActive) {
+    if (this.isPlanModeActive()) {
       this.toggleEl.removeClass('active');
       this.container.addClass('plan-mode');
       // Show pause icon (two vertical bars) + "Plan Mode"
       this.labelEl.empty();
       const iconEl = this.labelEl.createSpan({ cls: 'claudian-plan-mode-icon' });
-      iconEl.textContent = '❘❘';
+      iconEl.textContent = '▎▎';
+      iconEl.style.fontSize = '0.8em';
+      iconEl.style.letterSpacing = '-4px';
       this.labelEl.createSpan({ text: 'Plan Mode' });
       return;
     }
@@ -254,11 +267,9 @@ export class PermissionToggle {
   }
 
   private async toggle() {
-    // If in plan mode, clicking exits plan mode
-    if (this.planModeActive) {
-      this.planModeActive = false;
-      this.onPlanModeToggle?.(false);
-      this.updateDisplay();
+    // If in plan mode, do not allow exit
+    if (this.isPlanModeLocked()) {
+      new Notice('Plan mode is active until the plan is approved.');
       return;
     }
 
@@ -269,9 +280,13 @@ export class PermissionToggle {
   }
 
   /** Toggle plan mode on/off. */
-  togglePlanMode() {
-    this.planModeActive = !this.planModeActive;
-    this.onPlanModeToggle?.(this.planModeActive);
+  async togglePlanMode() {
+    if (this.isPlanModeLocked()) {
+      new Notice('Plan mode is active until the plan is approved.');
+      return;
+    }
+    const nextRequested = !this.isPlanModeRequested();
+    this.onPlanModeToggle?.(nextRequested);
     this.updateDisplay();
   }
 }

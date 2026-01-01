@@ -26,6 +26,7 @@ export interface QueuedMessage {
   images?: ImageAttachment[];
   editorContext: EditorSelectionContext | null;
   hidden?: boolean;
+  promptPrefix?: string;
 }
 
 /** Stored selection state from editor polling. */
@@ -49,8 +50,8 @@ export interface PlanModeState {
   planContent: string | null;
   /** User's original query that started plan mode. */
   originalQuery: string | null;
-  /** Whether we need to re-send the query with plan mode after current stream ends. */
-  pendingResend?: boolean;
+  /** Whether plan mode was initiated by the agent (EnterPlanMode tool). */
+  agentInitiated?: boolean;
 }
 
 /** Centralized chat state data. */
@@ -92,6 +93,10 @@ export interface ChatStateData {
 
   // Plan mode state
   planModeState: PlanModeState | null;
+  // User-requested plan mode (UI/prompt prefix only)
+  planModeRequested: boolean;
+  // EnterPlanMode tool was called; switch permission mode after current reply
+  planModeActivationPending: boolean;
 
   // Pending plan content awaiting user approval (persisted)
   pendingPlanContent: string | null;

@@ -97,6 +97,7 @@ function createMockDeps(overrides: Partial<ConversationControllerDeps> = {}): Co
       settings: {
         userName: '',
         enableAutoTitleGeneration: true,
+        permissionMode: 'yolo',
       },
     } as any,
     state,
@@ -279,6 +280,49 @@ describe('ConversationController - Queue Management', () => {
       await controller.switchTo('new-conv');
 
       expect(dropdown.hasClass('visible')).toBe(false);
+    });
+  });
+
+  describe('Plan mode restore', () => {
+    it('should restore plan mode state on loadActive', async () => {
+      const conversation = {
+        id: 'conv-1',
+        messages: [],
+        sessionId: null,
+        isInPlanMode: false,
+      };
+      deps.plugin.settings.permissionMode = 'plan';
+      deps.plugin.getActiveConversation = jest.fn().mockReturnValue(conversation);
+
+      await controller.loadActive();
+
+      expect(deps.state.planModeState?.isActive).toBe(true);
+      expect(deps.setPlanModeActive).toHaveBeenCalledWith(true);
+    });
+
+    it('should restore plan mode state on switch', async () => {
+      deps.state.currentConversationId = 'old-conv';
+      deps.plugin.settings.permissionMode = 'plan';
+      (deps.plugin.switchConversation as jest.Mock).mockResolvedValue({
+        id: 'new-conv',
+        messages: [],
+        sessionId: null,
+        isInPlanMode: false,
+      });
+
+      await controller.switchTo('new-conv');
+
+      expect(deps.state.planModeState?.isActive).toBe(true);
+      expect(deps.setPlanModeActive).toHaveBeenCalledWith(true);
+    });
+
+    it('should keep plan mode active when creating new conversation', async () => {
+      deps.plugin.settings.permissionMode = 'plan';
+
+      await controller.createNew();
+
+      expect(deps.state.planModeState?.isActive).toBe(true);
+      expect(deps.setPlanModeActive).toHaveBeenCalledWith(true);
     });
   });
 

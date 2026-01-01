@@ -46,6 +46,7 @@ export {
   getCurrentPlatformKey,
   getDefaultBlockedCommands,
   type InstructionRefineResult,
+  type NonPlanPermissionMode,
   type Permission,
   type PermissionMode,
   type PlatformBlockedCommands,

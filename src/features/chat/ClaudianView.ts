@@ -310,8 +310,11 @@ export class ClaudianView extends ItemView {
         thinkingBudget: this.plugin.settings.thinkingBudget,
         permissionMode: this.plugin.settings.permissionMode,
         allowedContextPaths: this.plugin.settings.allowedContextPaths,
+        lastNonPlanPermissionMode: this.plugin.settings.lastNonPlanPermissionMode,
       }),
       getEnvironmentVariables: () => this.plugin.getActiveEnvironmentVariables(),
+      isAgentInitiatedPlanMode: () => this.state.planModeState?.agentInitiated ?? false,
+      isPlanModeRequested: () => this.state.planModeRequested,
       onModelChange: async (model: ClaudeModel) => {
         this.plugin.settings.model = model;
         const isDefaultModel = DEFAULT_CLAUDE_MODELS.find((m: any) => m.value === model);
@@ -331,8 +334,32 @@ export class ClaudianView extends ItemView {
         await this.plugin.saveSettings();
       },
       onPermissionModeChange: async (mode) => {
+        const current = this.plugin.settings.permissionMode;
+        if (mode === 'plan') {
+          if (current !== 'plan') {
+            this.plugin.settings.lastNonPlanPermissionMode = current;
+          }
+        } else {
+          this.plugin.settings.lastNonPlanPermissionMode = mode;
+        }
         this.plugin.settings.permissionMode = mode;
         await this.plugin.saveSettings();
+
+        if (mode === 'plan') {
+          if (!this.state.planModeState?.isActive) {
+            this.state.planModeState = {
+              isActive: true,
+              planFilePath: null,
+              planContent: null,
+              originalQuery: null,
+              agentInitiated: true,
+            };
+          }
+        } else {
+          this.state.resetPlanModeState();
+        }
+
+        this.updatePlanModeUiState();
       },
       onContextPathsChange: async (paths) => {
         this.plugin.settings.allowedContextPaths = paths;
@@ -377,9 +404,8 @@ export class ClaudianView extends ItemView {
       getMessagesEl: () => this.messagesEl!,
       getFileContextManager: () => this.fileContextManager,
       updateQueueIndicator: () => this.inputController?.updateQueueIndicator(),
-      setPlanModeActive: (active) => {
-        this.permissionToggle?.setPlanModeActive(active);
-        this.fileContextManager?.setPlanModeActive(active);
+      setPlanModeActive: (_active) => {
+        this.updatePlanModeUiState();
       },
     });
 
@@ -405,9 +431,8 @@ export class ClaudianView extends ItemView {
         hidePlanBanner: () => this.planBanner?.hide(),
         triggerPendingPlanApproval: (content) => this.inputController?.restorePendingPlanApproval(content),
         getTitleGenerationService: () => this.titleGenerationService,
-        setPlanModeActive: (active) => {
-          this.permissionToggle?.setPlanModeActive(active);
-          this.fileContextManager?.setPlanModeActive(active);
+        setPlanModeActive: (_active) => {
+          this.updatePlanModeUiState();
         },
       },
       {}
@@ -432,13 +457,16 @@ export class ClaudianView extends ItemView {
       getInstructionRefineService: () => this.instructionRefineService,
       getTitleGenerationService: () => this.titleGenerationService,
       getComponent: () => this,
-      setPlanModeActive: (active) => {
-        this.permissionToggle?.setPlanModeActive(active);
-        this.fileContextManager?.setPlanModeActive(active);
+      setPlanModeActive: (_active) => {
+        this.updatePlanModeUiState();
       },
       getPlanBanner: () => this.planBanner,
       generateId: () => this.generateId(),
       resetContextMeter: () => this.contextUsageMeter?.update(null),
+    });
+
+    this.permissionToggle?.setOnPlanModeToggle((active) => {
+      this.inputController?.setPlanModeRequested(active);
     });
 
     // Set approval callback
@@ -555,6 +583,13 @@ export class ClaudianView extends ItemView {
 
   private generateId(): string {
     return `msg-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+  }
+
+  private updatePlanModeUiState(): void {
+    const isPlanMode = this.plugin.settings.permissionMode === 'plan';
+    const isPlanModeRequested = this.state.planModeRequested;
+    this.permissionToggle?.setPlanModeActive(isPlanMode || isPlanModeRequested);
+    this.fileContextManager?.setPlanModeActive(isPlanMode);
   }
 
 }

@@ -175,4 +175,14 @@ describe('ApprovalModal - global keyboard navigation', () => {
     ApprovalModal.prototype.onClose.call(modal);
     (global as any).document = originalDocument;
   });
+
+  it('resolves cancel when closed without decision', () => {
+    const resolve = jest.fn();
+    const modal = new ApprovalModal({} as any, 'Tool', {}, 'Desc', resolve);
+    (modal as any).contentEl = new MockElement('div');
+
+    ApprovalModal.prototype.onClose.call(modal);
+
+    expect(resolve).toHaveBeenCalledWith('cancel');
+  });
 });

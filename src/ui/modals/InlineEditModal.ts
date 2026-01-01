@@ -473,7 +473,7 @@ class InlineEditController {
                   this.plugin.settings.enableBlocklist
                 ),
               requestApproval:
-                this.plugin.settings.permissionMode === 'normal'
+                this.plugin.settings.permissionMode !== 'yolo'
                   ? (bashCommand) => this.requestInlineBashApproval(bashCommand)
                   : undefined,
             },

@@ -42,6 +42,8 @@ function createInitialState(): ChatStateData {
     ignoreUsageUpdates: false,
     subagentsSpawnedThisStream: 0,
     planModeState: null,
+    planModeRequested: false,
+    planModeActivationPending: false,
     pendingPlanContent: null,
   };
 }
@@ -252,6 +254,22 @@ export class ChatState {
     this.state.planModeState = null;
   }
 
+  get planModeRequested(): boolean {
+    return this.state.planModeRequested;
+  }
+
+  set planModeRequested(value: boolean) {
+    this.state.planModeRequested = value;
+  }
+
+  get planModeActivationPending(): boolean {
+    return this.state.planModeActivationPending;
+  }
+
+  set planModeActivationPending(value: boolean) {
+    this.state.planModeActivationPending = value;
+  }
+
   // ============================================
   // Pending Plan Content (for approval persistence)
   // ============================================
@@ -293,6 +311,8 @@ export class ChatState {
     this.resetStreamingState();
     this.clearMaps();
     this.state.queuedMessage = null;
+    this.state.planModeRequested = false;
+    this.state.planModeActivationPending = false;
     this.usage = null;
   }
 

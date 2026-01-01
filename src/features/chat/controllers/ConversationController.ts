@@ -91,12 +91,11 @@ export class ConversationController {
     state.clearMessages();
     state.usage = null;
 
-    // Clear approved plan, pending plan, and plan mode for new conversation
+    // Clear approved plan and pending plan for new conversation
     this.deps.setApprovedPlan(null);
     this.deps.hidePlanBanner();
     state.pendingPlanContent = null;
-    state.resetPlanModeState();
-    this.deps.setPlanModeActive(false);
+    this.restorePlanModeState();
 
     const messagesEl = this.deps.getMessagesEl();
     messagesEl.empty();
@@ -147,20 +146,7 @@ export class ConversationController {
 
     // Restore pending plan content
     state.pendingPlanContent = conversation.pendingPlanContent ?? null;
-
-    // Restore plan mode state if conversation was in plan mode
-    if (conversation.isInPlanMode) {
-      state.planModeState = {
-        isActive: true,
-        planFilePath: null,
-        planContent: null,
-        originalQuery: null,
-      };
-      this.deps.setPlanModeActive(true);
-    } else {
-      state.resetPlanModeState();
-      this.deps.setPlanModeActive(false);
-    }
+    this.restorePlanModeState();
 
     const hasMessages = state.messages.length > 0;
     const fileCtx = this.deps.getFileContextManager();
@@ -217,20 +203,7 @@ export class ConversationController {
 
     // Restore pending plan content
     state.pendingPlanContent = conversation.pendingPlanContent ?? null;
-
-    // Restore plan mode state if conversation was in plan mode
-    if (conversation.isInPlanMode) {
-      state.planModeState = {
-        isActive: true,
-        planFilePath: null,
-        planContent: null,
-        originalQuery: null,
-      };
-      this.deps.setPlanModeActive(true);
-    } else {
-      state.resetPlanModeState();
-      this.deps.setPlanModeActive(false);
-    }
+    this.restorePlanModeState();
 
     this.deps.getInputEl().value = '';
     this.deps.clearQueuedMessage();
@@ -284,6 +257,33 @@ export class ConversationController {
     }
 
     await plugin.updateConversation(state.currentConversationId, updates);
+  }
+
+  /**
+   * Restores plan mode state based on current permission mode.
+   * Resets transient flags and sets up planModeState appropriately.
+   */
+  private restorePlanModeState(): void {
+    const { plugin, state } = this.deps;
+
+    state.planModeRequested = false;
+    state.planModeActivationPending = false;
+
+    const isPlanMode = plugin.settings.permissionMode === 'plan';
+    if (isPlanMode) {
+      // Preserve agentInitiated status when staying in plan mode
+      const wasAgentInitiated = state.planModeState?.agentInitiated ?? false;
+      state.planModeState = {
+        isActive: true,
+        planFilePath: null,
+        planContent: null,
+        originalQuery: null,
+        agentInitiated: wasAgentInitiated,
+      };
+    } else {
+      state.resetPlanModeState();
+    }
+    this.deps.setPlanModeActive(isPlanMode);
   }
 
   // ============================================

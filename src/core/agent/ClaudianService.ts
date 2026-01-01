@@ -695,7 +695,7 @@ export class ClaudianService {
         return this.handleAskUserQuestionTool(input, context?.toolUseID);
       }
 
-      // Special handling for EnterPlanMode - interrupt and re-send with plan mode
+      // Special handling for EnterPlanMode - mark plan mode activation after reply
       if (toolName === TOOL_ENTER_PLAN_MODE) {
         return this.handleEnterPlanModeTool();
       }
@@ -770,8 +770,7 @@ export class ClaudianService {
   }
 
   /**
-   * Handle EnterPlanMode tool - notifies UI and triggers re-send with plan mode.
-   * Interrupts the current query so it can be re-sent with proper plan mode settings.
+   * Handle EnterPlanMode tool - notifies UI to activate plan mode after the reply ends.
    */
   private async handleEnterPlanModeTool(): Promise<PermissionResult> {
     if (!this.enterPlanModeCallback) {
@@ -782,19 +781,9 @@ export class ClaudianService {
     try {
       // Notify UI to update state and queue re-send with plan mode
       await this.enterPlanModeCallback();
-
-      // Interrupt so the query can be re-sent with plan mode enabled
-      return {
-        behavior: 'deny',
-        message: 'ENTERING_PLAN_MODE. Restarting query with plan mode enabled.',
-        interrupt: true,
-      };
+      return { behavior: 'allow', updatedInput: {} };
     } catch {
-      return {
-        behavior: 'deny',
-        message: 'Failed to enter plan mode.',
-        interrupt: true,
-      };
+      return { behavior: 'allow', updatedInput: {} };
     }
   }
 

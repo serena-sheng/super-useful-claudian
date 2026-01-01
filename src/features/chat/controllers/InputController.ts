@@ -39,8 +39,8 @@ import type { ConversationController } from './ConversationController';
 import type { SelectionController } from './SelectionController';
 import type { StreamController } from './StreamController';
 
-const PLAN_MODE_CONTINUE_PROMPT =
-  'Continue the most recent user request in plan mode. Use the prior request as the task, plus any attached files, editor context, and images. Create an implementation plan and call ExitPlanMode when ready.';
+const PLAN_MODE_REQUEST_PREFIX =
+  'User requested plan mode. Call EnterPlanMode before responding.';
 
 /** Dependencies for InputController. */
 export interface InputControllerDeps {
@@ -78,6 +78,7 @@ interface PlanModeResendPayload {
 
 interface PlanModeSendOptions extends PlanModeResendPayload {
   skipUserMessage?: boolean;
+  hidden?: boolean;
 }
 
 /**
@@ -85,8 +86,6 @@ interface PlanModeSendOptions extends PlanModeResendPayload {
  */
 export class InputController {
   private deps: InputControllerDeps;
-  private lastSentPayload: PlanModeResendPayload | null = null;
-  private pendingPlanModeResendPayload: PlanModeResendPayload | null = null;
 
   constructor(deps: InputControllerDeps) {
     this.deps = deps;
@@ -97,7 +96,12 @@ export class InputController {
   // ============================================
 
   /** Sends a message with optional editor context override. */
-  async sendMessage(options?: { editorContextOverride?: EditorSelectionContext | null; hidden?: boolean }): Promise<void> {
+  async sendMessage(options?: {
+    editorContextOverride?: EditorSelectionContext | null;
+    hidden?: boolean;
+    content?: string;
+    promptPrefix?: string;
+  }): Promise<void> {
     const { plugin, state, renderer, streamController, selectionController, conversationController } = this.deps;
     const inputEl = this.deps.getInputEl();
     const imageContextManager = this.deps.getImageContextManager();
@@ -105,7 +109,9 @@ export class InputController {
     const slashCommandManager = this.deps.getSlashCommandManager();
     const mcpServerSelector = this.deps.getMcpServerSelector();
 
-    let content = inputEl.value.trim();
+    const contentOverride = options?.content;
+    const shouldUseInput = contentOverride === undefined;
+    let content = (contentOverride ?? inputEl.value).trim();
     const hasImages = imageContextManager?.hasImages() ?? false;
     if (!content && !hasImages) return;
 
@@ -113,6 +119,7 @@ export class InputController {
     if (state.isStreaming) {
       const images = hasImages ? [...(imageContextManager?.getAttachedImages() || [])] : undefined;
       const editorContext = selectionController.getContext();
+      const promptPrefix = options?.promptPrefix;
 
       // Append to existing queued message if any
       if (state.queuedMessage) {
@@ -123,17 +130,30 @@ export class InputController {
         state.queuedMessage.editorContext = editorContext;
         // Preserve hidden flag (once hidden, always hidden)
         state.queuedMessage.hidden = state.queuedMessage.hidden || options?.hidden;
+        if (promptPrefix) {
+          state.queuedMessage.promptPrefix = state.queuedMessage.promptPrefix ?? promptPrefix;
+        }
       } else {
-        state.queuedMessage = { content, images, editorContext, hidden: options?.hidden };
+        state.queuedMessage = {
+          content,
+          images,
+          editorContext,
+          hidden: options?.hidden,
+          promptPrefix,
+        };
       }
 
-      inputEl.value = '';
+      if (shouldUseInput) {
+        inputEl.value = '';
+      }
       imageContextManager?.clearImages();
       this.updateQueueIndicator();
       return;
     }
 
-    inputEl.value = '';
+    if (shouldUseInput) {
+      inputEl.value = '';
+    }
     state.isStreaming = true;
     state.cancelRequested = false;
     state.ignoreUsageUpdates = false; // Allow usage updates for new query
@@ -168,7 +188,7 @@ export class InputController {
                   plugin.settings.enableBlocklist
                 ),
               requestApproval:
-                plugin.settings.permissionMode === 'normal'
+                plugin.settings.permissionMode !== 'yolo'
                   ? (bashCommand) => this.requestInlineBashApproval(bashCommand)
                   : undefined,
             },
@@ -199,7 +219,10 @@ export class InputController {
     const images = imageContextManager?.getAttachedImages() || [];
     const imagesForMessage = images.length > 0 ? [...images] : undefined;
 
-    imageContextManager?.clearImages();
+    // Only clear images if we consumed user input (not for programmatic content override)
+    if (shouldUseInput) {
+      imageContextManager?.clearImages();
+    }
 
     const attachedFiles = fileContextManager?.getAttachedFiles() || new Set();
     const currentFiles = Array.from(attachedFiles);
@@ -224,14 +247,9 @@ export class InputController {
       contextFilesForMessage = currentFiles;
     }
 
-    this.lastSentPayload = {
-      content,
-      displayContent,
-      images: imagesForMessage,
-      contextFiles: contextFilesForMessage,
-      editorContext,
-      queryOptions,
-    };
+    if (options?.promptPrefix) {
+      promptToSend = `${options.promptPrefix}\n\n${promptToSend}`;
+    }
 
     fileContextManager?.markFilesSent();
 
@@ -283,7 +301,6 @@ export class InputController {
     }
 
     let wasInterrupted = false;
-    let scheduledPlanModeResend = false;
     try {
       for await (const chunk of plugin.agentService.query(promptToSend, imagesForMessage, state.messages, queryOptions)) {
         if (state.cancelRequested) {
@@ -296,11 +313,7 @@ export class InputController {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       await streamController.appendText(`\n\n**Error:** ${errorMsg}`);
     } finally {
-      // Check if we need to re-send with plan mode (agent called EnterPlanMode)
-      const planModeState = state.planModeState;
-      const pendingPlanModeResend = planModeState?.pendingResend;
-
-      if (wasInterrupted && !pendingPlanModeResend) {
+      if (wasInterrupted) {
         await streamController.appendText('\n\n<span class="claudian-interrupted">Interrupted</span> <span class="claudian-interrupted-hint">· What should Claudian do instead?</span>');
       }
       streamController.hideThinkingIndicator();
@@ -314,31 +327,81 @@ export class InputController {
 
       await conversationController.save(true);
 
-      // If agent initiated plan mode, re-send with plan mode enabled
-      if (pendingPlanModeResend) {
-        planModeState.pendingResend = false;
-        const resendPayload = this.pendingPlanModeResendPayload ?? this.getPlanModeResendPayload();
-        this.pendingPlanModeResendPayload = null;
-        if (resendPayload) {
-          setTimeout(() => {
-            void this.sendMessageWithPlanMode({ ...resendPayload, skipUserMessage: true });
-          }, 100);
-          scheduledPlanModeResend = true;
-        }
-      }
+      await this.activatePendingPlanMode();
 
       // Generate AI title after first complete exchange (user + assistant)
       await this.triggerTitleGeneration();
 
-      if (!scheduledPlanModeResend) {
-        this.processQueuedMessage();
-      }
+      this.processQueuedMessage();
     }
   }
 
   // ============================================
   // Plan Mode
   // ============================================
+
+  setPlanModeRequested(active: boolean): void {
+    const { state } = this.deps;
+    if (state.planModeRequested === active) {
+      return;
+    }
+    state.planModeRequested = active;
+    this.deps.setPlanModeActive(active);
+  }
+
+  private ensurePlanModeState(agentInitiated: boolean): void {
+    const { state, plugin } = this.deps;
+    if (plugin.settings.permissionMode !== 'plan') {
+      return;
+    }
+    if (state.planModeState?.isActive) {
+      if (!state.planModeState.agentInitiated && agentInitiated) {
+        state.planModeState.agentInitiated = true;
+      }
+      return;
+    }
+    state.planModeState = {
+      isActive: true,
+      planFilePath: null,
+      planContent: null,
+      originalQuery: null,
+      agentInitiated,
+    };
+  }
+
+  private async activatePendingPlanMode(): Promise<void> {
+    const { plugin, state } = this.deps;
+    if (!state.planModeActivationPending) {
+      return;
+    }
+
+    state.planModeActivationPending = false;
+
+    if (plugin.settings.permissionMode !== 'plan') {
+      plugin.settings.lastNonPlanPermissionMode = plugin.settings.permissionMode;
+      plugin.settings.permissionMode = 'plan';
+      await plugin.saveSettings();
+    }
+
+    state.planModeRequested = false;
+    this.ensurePlanModeState(true);
+    plugin.agentService.setCurrentPlanFilePath(null);
+    this.deps.setPlanModeActive(true);
+  }
+
+  private async exitPlanPermissionMode(): Promise<void> {
+    const { plugin, state } = this.deps;
+    const restored = plugin.settings.lastNonPlanPermissionMode ?? 'yolo';
+    if (plugin.settings.permissionMode === 'plan') {
+      plugin.settings.permissionMode = restored;
+      plugin.settings.lastNonPlanPermissionMode = restored;
+      await plugin.saveSettings();
+    }
+    state.resetPlanModeState();
+    state.planModeRequested = false;
+    state.planModeActivationPending = false;
+    this.deps.setPlanModeActive(false);
+  }
 
   /** Sends a message in plan mode (read-only exploration). */
   async sendPlanModeMessage(): Promise<void> {
@@ -350,27 +413,33 @@ export class InputController {
 
     // Cannot enter plan mode while streaming
     if (state.isStreaming) {
-      new Notice('Cannot enter plan mode while agent is working');
+      new Notice('Cannot request plan mode while agent is working');
       return;
     }
 
-    // Clear any stale plan file path before starting a new plan mode session
-    plugin.agentService.setCurrentPlanFilePath(null);
+    if (plugin.settings.permissionMode === 'plan') {
+      // Clear any stale plan file path before starting a new plan mode session
+      plugin.agentService.setCurrentPlanFilePath(null);
+      // Preserve existing agentInitiated value, default to false (user-initiated) if unknown
+      const wasAgentInitiated = state.planModeState?.agentInitiated ?? false;
+      this.ensurePlanModeState(wasAgentInitiated);
 
-    // Set plan mode state (agent will determine plan file path)
-    state.planModeState = {
-      isActive: true,
-      planFilePath: null,
-      planContent: null,
-      originalQuery: content,
-    };
+      // Set plan mode state (agent determines plan file path)
+      state.planModeState = {
+        isActive: true,
+        planFilePath: null,
+        planContent: null,
+        originalQuery: content,
+        agentInitiated: wasAgentInitiated,
+      };
 
-    // Update file context manager to hide edited files during plan mode
-    this.deps.getFileContextManager()?.setPlanModeActive(true);
+      // Clear input and send
+      inputEl.value = '';
+      await this.sendMessageWithPlanMode({ content });
+      return;
+    }
 
-    // Clear input and send
-    inputEl.value = '';
-    await this.sendMessageWithPlanMode({ content });
+    await this.sendMessage({ promptPrefix: PLAN_MODE_REQUEST_PREFIX });
   }
 
   /**
@@ -380,43 +449,12 @@ export class InputController {
   async handleEnterPlanMode(): Promise<void> {
     const { state, plugin } = this.deps;
 
-    if (state.planModeState?.isActive) {
+    if (plugin.settings.permissionMode === 'plan') {
+      this.ensurePlanModeState(true);
       return;
     }
 
-    const resendPayload = this.getPlanModeResendPayload();
-    if (!resendPayload || !resendPayload.content.trim()) {
-      return;
-    }
-
-    const originalQuery = resendPayload.content;
-    const planModePayload: PlanModeResendPayload = {
-      ...resendPayload,
-      content: PLAN_MODE_CONTINUE_PROMPT,
-      displayContent: PLAN_MODE_CONTINUE_PROMPT,
-    };
-
-    this.pendingPlanModeResendPayload = {
-      ...planModePayload,
-      images: planModePayload.images ? [...planModePayload.images] : undefined,
-      contextFiles: planModePayload.contextFiles ? [...planModePayload.contextFiles] : undefined,
-    };
-
-    // Set plan mode state with pending resend flag
-    state.planModeState = {
-      isActive: true,
-      planFilePath: null,
-      planContent: null,
-      originalQuery,
-      pendingResend: true,
-    };
-
-    // Update UI
-    this.deps.setPlanModeActive(true);
-    this.deps.getFileContextManager()?.setPlanModeActive(true);
-
-    // Clear stale plan file path
-    plugin.agentService.setCurrentPlanFilePath(null);
+    state.planModeActivationPending = true;
   }
 
   /** Internal: sends message with plan mode options. */
@@ -426,6 +464,12 @@ export class InputController {
     const imageContextManager = this.deps.getImageContextManager();
     const fileContextManager = this.deps.getFileContextManager();
     const mcpServerSelector = this.deps.getMcpServerSelector();
+    if (plugin.settings.permissionMode !== 'plan') {
+      await this.sendMessage({ promptPrefix: PLAN_MODE_REQUEST_PREFIX });
+      return;
+    }
+    // Preserve existing agentInitiated value, default to false (user-initiated) if unknown
+    this.ensurePlanModeState(state.planModeState?.agentInitiated ?? false);
 
     const content = (options?.content ?? inputEl.value).trim();
     if (!content) return;
@@ -508,10 +552,12 @@ ${content}
         timestamp: Date.now(),
         contextFiles: contextFilesForMessage,
         images: imagesForMessage,
+        hidden: options?.hidden,
       };
       state.addMessage(userMsg);
-      renderer.addMessage(userMsg);
-
+      if (!options?.hidden) {
+        renderer.addMessage(userMsg);
+      }
     }
     const assistantMsg: ChatMessage = {
       id: this.deps.generateId(),
@@ -558,9 +604,7 @@ ${content}
     } finally {
       if (wasInterrupted) {
         await streamController.appendText('\n\n<span class="claudian-interrupted">Plan mode interrupted</span>');
-        state.resetPlanModeState();
         plugin.agentService.setCurrentPlanFilePath(null);
-        this.deps.setPlanModeActive(false);
       }
       streamController.hideThinkingIndicator();
       state.isStreaming = false;
@@ -572,32 +616,13 @@ ${content}
       state.activeSubagents.clear();
 
       await conversationController.save(true);
+      await this.activatePendingPlanMode();
 
       // Generate AI title after first complete plan mode exchange
       await this.triggerTitleGeneration({ isPlanMode: true });
 
       this.processQueuedMessage();
     }
-  }
-
-  private getPlanModeResendPayload(): PlanModeResendPayload | null {
-    if (this.lastSentPayload?.content) {
-      return this.lastSentPayload;
-    }
-
-    const { state, selectionController } = this.deps;
-    const lastUserMsg = [...state.messages].reverse().find(m => m.role === 'user');
-    if (!lastUserMsg?.content) {
-      return null;
-    }
-
-    return {
-      content: lastUserMsg.content,
-      displayContent: lastUserMsg.displayContent,
-      images: lastUserMsg.images,
-      contextFiles: lastUserMsg.contextFiles,
-      editorContext: selectionController.getContext(),
-    };
   }
 
   // ============================================
@@ -640,9 +665,18 @@ ${content}
     const { state } = this.deps;
     if (!state.queuedMessage) return;
 
-    const { content, images, editorContext, hidden } = state.queuedMessage;
+    const { content, images, editorContext, hidden, promptPrefix } = state.queuedMessage;
     state.queuedMessage = null;
     this.updateQueueIndicator();
+
+    const isPlanMode = this.deps.plugin.settings.permissionMode === 'plan';
+    if (isPlanMode) {
+      setTimeout(
+        () => this.sendMessageWithPlanMode({ content, images, editorContext, hidden }),
+        0
+      );
+      return;
+    }
 
     const inputEl = this.deps.getInputEl();
     inputEl.value = content;
@@ -650,7 +684,7 @@ ${content}
       this.deps.getImageContextManager()?.setImages(images);
     }
 
-    setTimeout(() => this.sendMessage({ editorContextOverride: editorContext, hidden }), 0);
+    setTimeout(() => this.sendMessage({ editorContextOverride: editorContext, hidden, promptPrefix }), 0);
   }
 
   // ============================================
@@ -947,6 +981,9 @@ ${content}
         // This ensures that if revision is selected and the stream continues,
         // new content (including thinking indicator) will appear below the plan.
         state.currentContentEl = contentEl;
+        state.currentTextEl = null;
+        state.currentTextContent = '';
+        state.currentThinkingState = null;
       }
     }
 
@@ -1004,16 +1041,16 @@ ${content}
       if (planBanner) {
         void planBanner.show(planContent);
       }
-      // Clear plan mode state and toggle
-      state.resetPlanModeState();
+      // Exit plan mode and restore permission settings
+      await this.exitPlanPermissionMode();
       plugin.agentService.setCurrentPlanFilePath(null);
-      this.deps.setPlanModeActive(false);
       // Save conversation to clear pending and set approved
       await conversationController.save();
       // Auto-send implementation prompt (hidden from UI)
-      const inputEl = this.deps.getInputEl();
-      inputEl.value = 'Please implement the approved plan.';
-      setTimeout(() => this.sendMessage({ hidden: true }), 100);
+      setTimeout(
+        () => this.sendMessage({ hidden: true, content: 'Please implement the approved plan.' }),
+        100
+      );
       return { decision: 'approve' };
     } else if (result.decision === 'approve_new_session') {
       // Add approval indicator
@@ -1023,10 +1060,9 @@ ${content}
       if (planBanner) {
         void planBanner.show(planContent);
       }
-      // Clear plan mode state and toggle
-      state.resetPlanModeState();
+      // Exit plan mode and restore permission settings
+      await this.exitPlanPermissionMode();
       plugin.agentService.setCurrentPlanFilePath(null);
-      this.deps.setPlanModeActive(false);
       // RESET SESSION for fresh context window
       plugin.agentService.resetSession();
       // Store approved plan content AFTER reset (resetSession clears it)
@@ -1039,9 +1075,10 @@ ${content}
       // Save conversation to clear pending and set approved (sessionId will be null)
       await conversationController.save();
       // Auto-send implementation prompt (hidden from UI)
-      const inputEl = this.deps.getInputEl();
-      inputEl.value = 'Please implement the approved plan.';
-      setTimeout(() => this.sendMessage({ hidden: true }), 100);
+      setTimeout(
+        () => this.sendMessage({ hidden: true, content: 'Please implement the approved plan.' }),
+        100
+      );
       return { decision: 'approve_new_session' };
     } else if (result.decision === 'revise') {
       // Add approval indicator with feedback
@@ -1050,16 +1087,16 @@ ${content}
       await conversationController.save();
       // Clear plan file path to avoid reusing stale content on revise
       plugin.agentService.setCurrentPlanFilePath(null);
-      // Auto-send feedback as hidden message (indicator already shows it)
-      const inputEl = this.deps.getInputEl();
-      inputEl.value = result.feedback;
-      setTimeout(() => this.sendMessage({ hidden: true }), 100);
+      // Auto-send feedback as hidden plan mode message (indicator already shows it)
+      setTimeout(
+        () => this.sendMessageWithPlanMode({ content: result.feedback, hidden: true, images: [] }),
+        100
+      );
       return { decision: 'revise', feedback: result.feedback };
     } else {
-      // Cancel (Esc) - treat as normal interrupt, no indicator
-      state.resetPlanModeState();
+      // Cancel (Esc) - plan mode stays active, user can continue chatting or revise
+      // Only clear the plan file path so a new plan can be generated
       plugin.agentService.setCurrentPlanFilePath(null);
-      this.deps.setPlanModeActive(false);
       // Save conversation to clear pending
       await conversationController.save();
       return { decision: 'cancel' };

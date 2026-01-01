@@ -87,7 +87,8 @@ export function getBashToolBlockedCommands(commands: PlatformBlockedCommands): s
 }
 
 /** Permission mode for tool execution. */
-export type PermissionMode = 'yolo' | 'normal';
+export type PermissionMode = 'yolo' | 'normal' | 'plan';
+export type NonPlanPermissionMode = Exclude<PermissionMode, 'plan'>;
 
 /** Permanently approved tool permission (like Claude Code). */
 export interface Permission {
@@ -134,6 +135,7 @@ export interface ClaudianSettings {
   lastEnvHash?: string;
   thinkingBudget: ThinkingBudget;
   permissionMode: PermissionMode;
+  lastNonPlanPermissionMode?: NonPlanPermissionMode;
   permissions: Permission[];
   excludedTags: string[];
   mediaFolder: string;
@@ -160,6 +162,7 @@ export const DEFAULT_SETTINGS: ClaudianSettings = {
   lastEnvHash: '',
   thinkingBudget: 'off',
   permissionMode: 'yolo',
+  lastNonPlanPermissionMode: 'yolo',
   permissions: [],
   excludedTags: [],
   mediaFolder: '',
