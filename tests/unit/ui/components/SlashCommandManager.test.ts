@@ -1,7 +1,7 @@
 import { TFile } from 'obsidian';
 
+import { SlashCommandManager } from '@/core/commands';
 import type { SlashCommand } from '@/core/types';
-import { SlashCommandManager } from '@/ui/components/SlashCommandManager';
 import { parseSlashCommandContent } from '@/utils/slashCommand';
 
 function createMockApp(files: Record<string, string>) {

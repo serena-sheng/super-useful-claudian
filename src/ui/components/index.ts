@@ -45,8 +45,3 @@ export {
   type SlashCommandDropdownCallbacks,
   type SlashCommandDropdownOptions,
 } from './SlashCommandDropdown';
-export {
-  type DetectedCommand,
-  type ExpansionResult,
-  SlashCommandManager,
-} from './SlashCommandManager';

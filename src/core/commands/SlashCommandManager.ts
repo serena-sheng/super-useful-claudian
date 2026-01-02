@@ -9,8 +9,8 @@ import { exec } from 'child_process';
 import type { App} from 'obsidian';
 import { TFile } from 'obsidian';
 
-import type { ClaudeModel,SlashCommand } from '../../core/types';
 import { parseSlashCommandContent } from '../../utils/slashCommand';
+import type { ClaudeModel,SlashCommand } from '../types';
 
 type BashRunner = (command: string, cwd: string) => Promise<string>;
 

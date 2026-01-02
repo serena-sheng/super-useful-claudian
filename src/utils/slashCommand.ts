@@ -1,9 +1,16 @@
 /**
- * Claudian - Slash command parsing utilities
+ * Claudian - Slash command utilities
  *
- * Core parsing logic for slash command YAML frontmatter.
- * Extracted to utils/ to avoid cross-layer dependencies.
+ * Core parsing logic for slash command YAML frontmatter and warning formatting.
  */
+
+/** Formats expansion errors for display. */
+export function formatSlashCommandWarnings(errors: string[]): string {
+  const maxItems = 3;
+  const head = errors.slice(0, maxItems);
+  const more = errors.length > maxItems ? `\n...and ${errors.length - maxItems} more` : '';
+  return `Slash command expansion warnings:\n- ${head.join('\n- ')}${more}`;
+}
 
 /** Parsed slash command frontmatter and prompt content. */
 export interface ParsedSlashCommandContent {

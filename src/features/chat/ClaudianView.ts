@@ -8,6 +8,7 @@
 import type { WorkspaceLeaf } from 'obsidian';
 import { ItemView, setIcon } from 'obsidian';
 
+import { SlashCommandManager } from '../../core/commands';
 import type { ClaudeModel, ThinkingBudget } from '../../core/types';
 import { DEFAULT_CLAUDE_MODELS, DEFAULT_THINKING_BUDGET, VIEW_TYPE_CLAUDIAN } from '../../core/types';
 import type ClaudianPlugin from '../../main';
@@ -25,7 +26,6 @@ import {
   type PermissionToggle,
   PlanBanner,
   SlashCommandDropdown,
-  SlashCommandManager,
   type ThinkingBudgetSelector,
 } from '../../ui';
 import { getVaultPath } from '../../utils/path';

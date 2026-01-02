@@ -9,6 +9,7 @@ import type { Component } from 'obsidian';
 import { Notice } from 'obsidian';
 
 import type { ExitPlanModeDecision } from '../../../core/agent/ClaudianService';
+import type { SlashCommandManager } from '../../../core/commands';
 import { isCommandBlocked } from '../../../core/security/BlocklistChecker';
 import { TOOL_BASH } from '../../../core/tools/toolNames';
 import type { AskUserQuestionInput, ChatMessage, ImageAttachment } from '../../../core/types';
@@ -24,12 +25,11 @@ import {
   type PlanBanner,
   showAskUserQuestionPanel,
   showPlanApprovalPanel,
-  type SlashCommandManager,
 } from '../../../ui';
 import { prependContextFiles } from '../../../utils/context';
 import { type EditorSelectionContext, prependEditorContext } from '../../../utils/editor';
 import { appendMarkdownSnippet } from '../../../utils/markdown';
-import { formatSlashCommandWarnings } from '../../../utils/slashCommandWarnings';
+import { formatSlashCommandWarnings } from '../../../utils/slashCommand';
 import type { MessageRenderer } from '../rendering/MessageRenderer';
 import type { InstructionRefineService } from '../services/InstructionRefineService';
 import type { TitleGenerationService } from '../services/TitleGenerationService';
