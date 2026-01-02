@@ -204,10 +204,6 @@ export class ClaudianSettingTab extends PluginSettingTab {
         });
     }
 
-    // Keyboard Navigation subsection
-    const navDesc = containerEl.createDiv({ cls: 'setting-item-description' });
-    navDesc.setText('Vim-style navigation: press Escape to focus chat panel, then use keys to scroll or focus input.');
-
     new Setting(containerEl)
       .setName('Vim-style navigation mappings')
       .setDesc('One mapping per line. Format: "map <key> <action>" (actions: scrollUp, scrollDown, focusInput).')
