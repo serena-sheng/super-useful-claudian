@@ -37,6 +37,11 @@ src/
 │   └── settings/                # Settings tab
 ├── ui/                          # UI components
 │   ├── components/              # Reusable UI components
+│   │   └── file-context/        # File context manager (modular)
+│   │       ├── mention/         # @-mention dropdown controller
+│   │       ├── state/           # State management (files, cache, edited tracking)
+│   │       ├── utils/           # File opening utilities
+│   │       └── view/            # File chips UI
 │   ├── modals/                  # Modal dialogs
 │   ├── renderers/               # Content renderers
 │   └── settings/                # Settings UI components
@@ -65,6 +70,11 @@ src/
 | | `mcp/` | MCP @-mention detection, UI helpers, connection testing |
 | | `settings/` | Settings tab UI |
 | **ui** | `components/` | Input toolbar (with context meter), file/image context, slash command dropdown, AskUserQuestion panel, PlanBanner, PlanApprovalPanel |
+| | `components/file-context/` | Modular file context manager with submodules: |
+| | `  mention/` | MentionDropdownController - @-mention dropdown with MCP/vault/context file support |
+| | `  state/` | FileContextState, EditedFilesTracker, MarkdownFileCache |
+| | `  view/` | FileChipsView - attached/edited file chips UI |
+| | `  utils/` | FileOpener - open files in editor or default app |
 | | `modals/` | Approval, inline edit, instruction, MCP modals |
 | | `renderers/` | Thinking blocks, tool calls, todo lists, subagents, diffs, AskUserQuestion |
 | | `settings/` | Env snippets, MCP settings, slash command settings |
@@ -191,7 +201,6 @@ interface ClaudianSettings {
   envSnippets: EnvSnippet[];
   systemPrompt: string;
   allowedExportPaths: string[];      // Write-only paths outside vault
-  allowedContextPaths: string[];     // Read-only paths outside vault
   slashCommands: SlashCommand[];     // Loaded from .claude/commands/*.md
   keyboardNavigation: {             // Vim-style navigation key bindings
     scrollUpKey: string;
@@ -199,6 +208,12 @@ interface ClaudianSettings {
     focusInputKey: string;
   };
   claudeCliPath: string;             // Custom Claude CLI path (empty = auto-detect)
+}
+
+// Per-conversation state (session-only, not global settings)
+interface Conversation {
+  // ... other fields ...
+  sessionContextPaths?: string[];    // Read-only paths outside vault (resets on session switch)
 }
 ```
 
@@ -274,10 +289,12 @@ Reusable capability modules that Claude discovers and invokes automatically base
 
 ### @-Mention Dropdown
 Type `@` in the input to open the mention dropdown for attaching context.
-- **MCP servers**: `@server-name` enables context-saving MCP servers
-- **Context folders**: `@folder/` filters to files from that context path
+- **MCP servers**: `@server-name` enables context-saving MCP servers (session-only)
+- **Context folders**: `@folder/` filters to files from that context path (session-only, added via folder icon)
 - **Context files**: Only shown after `@folder/` filter, displays filename with folder badge
 - **Vault files**: Markdown files from the vault, shown by default
+
+**Session-only state**: Context paths and MCP server selections reset when switching conversations or creating new ones.
 
 **Dropdown order**: MCP servers → Context folders → Vault files
 
@@ -339,7 +356,7 @@ AI-powered conversation titles generated after first exchange.
   - Windows PowerShell: `Remove-Item` variants, `ri`/`rm`/`del`/`erase` aliases with `-Recurse`/`-Force`, `Format-Volume`, `Clear-Disk`, `Initialize-Disk`, `Remove-Partition`
   - On Windows, both Unix and Windows blocklists are merged (Git Bash can invoke both)
 - Export paths: Write-only to configured paths (default: `~/Desktop`, `~/Downloads`)
-- Context paths: Read-only access to configured paths outside vault (folder icon in input toolbar)
+- Context paths: Session-only read-only access to paths outside vault (folder icon in input toolbar, resets on session switch)
 
 ## Cross-Platform Support
 
