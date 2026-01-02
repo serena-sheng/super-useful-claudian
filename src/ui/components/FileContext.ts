@@ -7,7 +7,7 @@
 
 import { createHash } from 'crypto';
 import type { App, EventRef } from 'obsidian';
-import { setIcon, TFile } from 'obsidian';
+import { Notice, setIcon, TFile } from 'obsidian';
 import * as path from 'path';
 
 import { isEditTool } from '../../core/tools/toolNames';
@@ -15,7 +15,7 @@ import type { McpService } from '../../features/mcp/McpService';
 import { getFolderName, normalizePathForComparison } from '../../utils/contextPath';
 import { type ContextPathFile, contextPathScanner } from '../../utils/contextPathScanner';
 import { extractMcpMentions } from '../../utils/mcp';
-import { getVaultPath, isPathWithinVault } from '../../utils/path';
+import { getVaultPath, isPathWithinVault, normalizePathForFilesystem } from '../../utils/path';
 
 interface FileHashState {
   originalHash: string | null;
@@ -380,20 +380,21 @@ export class FileContextManager {
   normalizePathForVault(rawPath: string | undefined | null): string | null {
     if (!rawPath) return null;
 
-    const unixPath = rawPath.replace(/\\/g, '/');
+    const normalizedRaw = normalizePathForFilesystem(rawPath);
     const vaultPath = getVaultPath(this.app);
 
-    if (vaultPath) {
-      const normalizedVault = vaultPath.replace(/\\/g, '/').replace(/\/+$/, '');
-      if (unixPath.startsWith(normalizedVault)) {
-        const relative = unixPath.slice(normalizedVault.length).replace(/^\/+/, '');
-        if (relative) {
-          return relative;
-        }
+    if (vaultPath && isPathWithinVault(normalizedRaw, vaultPath)) {
+      const absolute = path.isAbsolute(normalizedRaw)
+        ? normalizedRaw
+        : path.resolve(vaultPath, normalizedRaw);
+      const relative = path.relative(vaultPath, absolute);
+      if (relative) {
+        return relative.replace(/\\/g, '/');
       }
+      return null;
     }
 
-    return unixPath;
+    return normalizedRaw.replace(/\\/g, '/');
   }
 
   private updateFileIndicator() {
@@ -470,20 +471,26 @@ export class FileContextManager {
 
   private async openFileFromChip(filePath: string) {
     const normalizedPath = this.normalizePathForVault(filePath);
-    if (!normalizedPath) return;
+    if (!normalizedPath) {
+      this.notifyOpenFailure(filePath);
+      return;
+    }
 
     const file = this.app.vault.getAbstractFileByPath(normalizedPath);
     if (file instanceof TFile) {
       try {
         await this.app.workspace.getLeaf('tab').openFile(file);
         return;
-      } catch {
+      } catch (error) {
+        console.error('Failed to open file in workspace:', error);
         const vaultPath = getVaultPath(this.app);
         const absolutePath = vaultPath ? path.join(vaultPath, file.path) : file.path;
         const opened = await this.openWithDefaultApp(absolutePath);
         if (opened) {
           this.dismissEditedFile(filePath);
+          return;
         }
+        this.notifyOpenFailure(filePath);
         return;
       }
     }
@@ -492,8 +499,13 @@ export class FileContextManager {
       const opened = await this.openWithDefaultApp(normalizedPath);
       if (opened) {
         this.dismissEditedFile(filePath);
+        return;
       }
+      this.notifyOpenFailure(filePath);
+      return;
     }
+
+    this.notifyOpenFailure(filePath);
   }
 
   private async openWithDefaultApp(filePath: string): Promise<boolean> {
@@ -566,9 +578,15 @@ export class FileContextManager {
       if (!(file instanceof TFile)) return null;
       const content = await this.app.vault.read(file);
       return await this.computeContentHash(content);
-    } catch {
+    } catch (error) {
+      console.warn('Failed to compute file hash:', error);
       return null;
     }
+  }
+
+  private notifyOpenFailure(filePath: string) {
+    console.warn(`Failed to open file: ${filePath}`);
+    new Notice(`Failed to open file: ${filePath}`);
   }
 
   private async computeContentHash(content: string): Promise<string> {
