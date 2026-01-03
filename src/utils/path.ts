@@ -432,7 +432,8 @@ export function isPathWithinVault(candidatePath: string, vaultPath: string): boo
 
   const resolvedCandidate = normalizePathForComparison(resolveRealPath(absCandidate));
 
-  return resolvedCandidate === vaultReal || resolvedCandidate.startsWith(vaultReal + path.sep);
+  // Use '/' since normalizePathForComparison converts all paths to forward slashes
+  return resolvedCandidate === vaultReal || resolvedCandidate.startsWith(vaultReal + '/');
 }
 
 /** Checks whether a candidate path is within any of the allowed export paths. */
@@ -461,9 +462,10 @@ export function isPathInAllowedExportPaths(
     const resolvedExport = normalizePathForComparison(resolveRealPath(normalizedExport));
 
     // Check if candidate equals or is within the export path
+    // Use '/' since normalizePathForComparison converts all paths to forward slashes
     if (
       resolvedCandidate === resolvedExport ||
-      resolvedCandidate.startsWith(resolvedExport + path.sep)
+      resolvedCandidate.startsWith(resolvedExport + '/')
     ) {
       return true;
     }
@@ -498,9 +500,10 @@ export function isPathInAllowedContextPaths(
     const resolvedContext = normalizePathForComparison(resolveRealPath(normalizedContext));
 
     // Check if candidate equals or is within the context path
+    // Use '/' since normalizePathForComparison converts all paths to forward slashes
     if (
       resolvedCandidate === resolvedContext ||
-      resolvedCandidate.startsWith(resolvedContext + path.sep)
+      resolvedCandidate.startsWith(resolvedContext + '/')
     ) {
       return true;
     }
@@ -534,13 +537,14 @@ export function getPathAccessType(
 
   const resolvedCandidate = normalizePathForComparison(resolveRealPath(absCandidate));
 
-  if (resolvedCandidate === vaultReal || resolvedCandidate.startsWith(vaultReal + path.sep)) {
+  // Use '/' since normalizePathForComparison converts all paths to forward slashes
+  if (resolvedCandidate === vaultReal || resolvedCandidate.startsWith(vaultReal + '/')) {
     return 'vault';
   }
 
   // Allow full access to ~/.claude/ (agent's native directory)
   const claudeDir = normalizePathForComparison(resolveRealPath(path.join(os.homedir(), '.claude')));
-  if (resolvedCandidate === claudeDir || resolvedCandidate.startsWith(claudeDir + path.sep)) {
+  if (resolvedCandidate === claudeDir || resolvedCandidate.startsWith(claudeDir + '/')) {
     return 'vault';
   }
 
@@ -569,7 +573,8 @@ export function getPathAccessType(
   let bestFlags: { context: boolean; export: boolean } | null = null;
 
   for (const [root, flags] of roots) {
-    if (resolvedCandidate === root || resolvedCandidate.startsWith(root + path.sep)) {
+    // Use '/' since normalizePathForComparison converts all paths to forward slashes
+    if (resolvedCandidate === root || resolvedCandidate.startsWith(root + '/')) {
       if (!bestRoot || root.length > bestRoot.length) {
         bestRoot = root;
         bestFlags = flags;
