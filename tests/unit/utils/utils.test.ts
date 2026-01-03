@@ -9,6 +9,7 @@ import {
   findClaudeCLIPath,
   getPathAccessType,
   getVaultPath,
+  isPathInAllowedContextPaths,
   isPathInAllowedExportPaths,
   isPathWithinVault,
   normalizePathForFilesystem,
@@ -749,6 +750,83 @@ describe('utils.ts', () => {
       (fs.realpathSync as any).native = realpathSpy;
 
       expect(isPathWithinVault('export/newfile.txt', '/vault')).toBe(false);
+    });
+  });
+
+  describe('Windows separator normalization', () => {
+    const originalPlatform = process.platform;
+    const originalSep = path.sep;
+    const originalIsAbsolute = path.isAbsolute;
+
+    beforeEach(() => {
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      // Force Windows-style separator to detect regressions when comparisons rely on path.sep.
+      path.sep = '\\';
+      jest.spyOn(path, 'isAbsolute').mockImplementation((p: any) => {
+        const value = String(p);
+        return /^[A-Za-z]:[\\/]/.test(value) || originalIsAbsolute(value);
+      });
+
+      const realpathSpy = jest.spyOn(fs, 'realpathSync').mockImplementation((p: any) => String(p) as any);
+      (fs.realpathSync as any).native = realpathSpy;
+    });
+
+    afterEach(() => {
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+      path.sep = originalSep;
+      jest.restoreAllMocks();
+    });
+
+    it('allows vault paths after slash normalization', () => {
+      expect(isPathWithinVault('C:\\Users\\test\\vault\\note.md', 'C:\\Users\\test\\vault')).toBe(true);
+    });
+
+    it('allows export paths after slash normalization', () => {
+      expect(
+        isPathInAllowedExportPaths(
+          'C:\\Users\\test\\export\\out.md',
+          ['C:\\Users\\test\\export'],
+          'C:\\Users\\test\\vault'
+        )
+      ).toBe(true);
+    });
+
+    it('allows context paths after slash normalization', () => {
+      expect(
+        isPathInAllowedContextPaths(
+          'C:\\Users\\test\\context\\in.md',
+          ['C:\\Users\\test\\context'],
+          'C:\\Users\\test\\vault'
+        )
+      ).toBe(true);
+    });
+
+    it('treats vault paths as vault access after normalization', () => {
+      expect(getPathAccessType(
+        'C:\\Users\\test\\vault\\note.md',
+        [],
+        [],
+        'C:\\Users\\test\\vault'
+      )).toBe('vault');
+    });
+
+    it('resolves access type using normalized boundaries', () => {
+      expect(getPathAccessType(
+        'C:\\Users\\test\\shared\\note.md',
+        ['C:\\Users\\test\\shared'],
+        ['C:\\Users\\test\\shared'],
+        'C:\\Users\\test\\vault'
+      )).toBe('readwrite');
+    });
+
+    it('treats ~/.claude paths as vault access after normalization', () => {
+      jest.spyOn(os, 'homedir').mockReturnValue('C:\\Users\\test');
+      expect(getPathAccessType(
+        'C:\\Users\\test\\.claude\\settings.json',
+        [],
+        [],
+        'C:\\Users\\test\\vault'
+      )).toBe('vault');
     });
   });
 
