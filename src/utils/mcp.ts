@@ -18,6 +18,36 @@ export function extractMcpMentions(text: string, validNames: Set<string>): Set<s
   return mentions;
 }
 
+/**
+ * Transform MCP mentions in text by appending " MCP" after each valid @mention.
+ * This is applied to the API request only, not shown in the input.
+ */
+export function transformMcpMentions(text: string, validNames: Set<string>): string {
+  if (validNames.size === 0) return text;
+
+  // Sort names by length (longest first) to avoid partial matches
+  const sortedNames = Array.from(validNames).sort((a, b) => b.length - a.length);
+
+  // Build single pattern with alternation (more efficient than N passes)
+  const escapedNames = sortedNames.map(escapeRegExp).join('|');
+  // Match @name that:
+  // - is not already followed by " MCP"
+  // - is not followed by "/" (context folder)
+  // - is not followed by alphanumeric/underscore/hyphen (partial match)
+  // - is not followed by "." + word char (e.g., @test in @test.server)
+  // This allows @server. (period as punctuation) while preventing @test.foo matches
+  const pattern = new RegExp(
+    `@(${escapedNames})(?! MCP)(?!/)(?![a-zA-Z0-9_-])(?!\\.[a-zA-Z0-9_-])`,
+    'g'
+  );
+
+  return text.replace(pattern, '@$1 MCP');
+}
+
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export function parseCommand(command: string, providedArgs?: string[]): { cmd: string; args: string[] } {
   if (providedArgs && providedArgs.length > 0) {
     return { cmd: command, args: providedArgs };
