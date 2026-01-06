@@ -109,6 +109,9 @@ export class EnvSnippetModal extends Modal {
       cls: 'claudian-save-btn'
     });
     saveBtn.addEventListener('click', () => saveSnippet());
+
+    // Focus name input after modal is rendered (timeout for Windows compatibility)
+    setTimeout(() => nameEl?.focus(), 50);
   }
 
   onClose() {

@@ -613,7 +613,7 @@ export function isPathInAllowedExportPaths(
   return false;
 }
 
-/** Checks whether a candidate path is within any of the allowed context paths (read-only). */
+/** Checks whether a candidate path is within any of the allowed context paths. */
 export function isPathInAllowedContextPaths(
   candidatePath: string,
   allowedContextPaths: string[],

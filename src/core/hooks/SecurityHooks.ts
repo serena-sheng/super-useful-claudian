@@ -83,9 +83,7 @@ export function createVaultRestrictionHook(context: VaultRestrictionContext): Ho
             const reason =
               violation.type === 'export_path_read'
                 ? `Access denied: Command path "${violation.path}" is in an allowed export directory, but export paths are write-only.`
-                : violation.type === 'context_path_write'
-                  ? `Access denied: Command path "${violation.path}" is in an allowed context directory, but context paths are read-only.`
-                  : `Access denied: Command path "${violation.path}" is outside the vault. Agent is restricted to vault directory only.`;
+                : `Access denied: Command path "${violation.path}" is outside the vault. Agent is restricted to vault directory only.`;
             return {
               continue: false,
               hookSpecificOutput: {
@@ -109,29 +107,14 @@ export function createVaultRestrictionHook(context: VaultRestrictionContext): Ho
         if (filePath) {
           const accessType = context.getPathAccessType(filePath);
 
-          if (accessType === 'vault' || accessType === 'readwrite') {
+          // Allow full access to vault, readwrite, and context paths
+          if (accessType === 'vault' || accessType === 'readwrite' || accessType === 'context') {
             return { continue: true };
           }
 
-          if (!isEditTool(toolName) && accessType === 'context') {
+          // Export paths are write-only
+          if (isEditTool(toolName) && accessType === 'export') {
             return { continue: true };
-          }
-
-          if (isEditTool(toolName)) {
-            if (accessType === 'export') {
-              return { continue: true };
-            }
-
-            if (accessType === 'context') {
-              return {
-                continue: false,
-                hookSpecificOutput: {
-                  hookEventName: 'PreToolUse' as const,
-                  permissionDecision: 'deny' as const,
-                  permissionDecisionReason: `Access denied: Path "${filePath}" is in an allowed context directory, but context paths are read-only.`,
-                },
-              };
-            }
           }
 
           if (!isEditTool(toolName) && accessType === 'export') {

@@ -209,7 +209,7 @@ interface ClaudianSettings {
 // Per-conversation state (session-only, not global settings)
 interface Conversation {
   // ... other fields ...
-  sessionContextPaths?: string[];    // Read-only paths outside vault (resets on session switch)
+  externalContextPaths?: string[];   // External directories with full access (resets on session switch)
 }
 ```
 
@@ -286,7 +286,7 @@ Reusable capability modules that Claude discovers and invokes automatically base
 ### @-Mention Dropdown
 Type `@` in the input to open the mention dropdown for attaching context.
 - **MCP servers**: `@server-name` enables context-saving MCP servers (persisted per-conversation)
-- **Context folders**: `@folder/` filters to files from that context path (session-only, added via folder icon)
+- **External contexts**: `@folder/` filters to files from that external context (session-only, added via folder icon)
 - **Context files**: Only shown after `@folder/` filter, displays filename with folder badge
 - **Vault files**: Markdown files from the vault, shown by default
 
@@ -294,14 +294,14 @@ Type `@` in the input to open the mention dropdown for attaching context.
 
 **Persisted per-conversation**: MCP server selections are saved with each conversation and restored when switching back.
 
-**Session-only state**: Context paths reset when switching conversations or creating new ones.
+**Session-only state**: External contexts reset when switching conversations or creating new ones.
 
-**Dropdown order**: MCP servers → Context folders → Vault files
+**Dropdown order**: MCP servers → External contexts → Vault files
 
 **Example flow**:
 ```
 @           → [@workspace/] [note.md] [note2.md] ...
-@workspace/ → [file1.ts] [file2.ts] ...  (files from context path)
+@workspace/ → [file1.ts] [file2.ts] ...  (files from external context)
 ```
 
 ### MCP (Model Context Protocol)
@@ -356,7 +356,7 @@ AI-powered conversation titles generated after first exchange.
   - Windows PowerShell: `Remove-Item` variants, `ri`/`rm`/`del`/`erase` aliases with `-Recurse`/`-Force`, `Format-Volume`, `Clear-Disk`, `Initialize-Disk`, `Remove-Partition`
   - On Windows, both Unix and Windows blocklists are merged (Git Bash can invoke both)
 - Export paths: Write-only to configured paths (default: `~/Desktop`, `~/Downloads`)
-- Context paths: Session-only read-only access to paths outside vault (folder icon in input toolbar, resets on session switch)
+- External contexts: Session-only full access to paths outside vault (folder icon in input toolbar, resets on session switch)
 
 ## Cross-Platform Support
 
@@ -381,7 +381,7 @@ CSS is modularized in `src/style/` and built into root `styles.css`:
 src/style/
 ├── base/           # container, animations (@keyframes)
 ├── components/     # header, history, messages, code, thinking, toolcalls, todo, subagent, input, ask-user-question, context-footer (meter), plan-banner, plan-approval
-├── toolbar/        # model-selector, thinking-selector, permission-toggle, context-path, mcp-selector
+├── toolbar/        # model-selector, thinking-selector, permission-toggle, external-context, mcp-selector
 ├── features/       # file-context, image-context, image-modal, inline-edit, diff, slash-commands
 ├── modals/         # approval, instruction, mcp-modal
 ├── settings/       # base, approved-actions, env-snippets, slash-settings, mcp-settings
@@ -405,7 +405,7 @@ All classes use `.claudian-` prefix. Key patterns:
 | Images | `-image-preview`, `-image-chip`, `-drop-overlay` |
 | Inline edit | `-inline-input`, `-inline-diff-replace`, `-diff-del`, `-diff-ins` |
 | Selection | `-selection-indicator`, `-selection-highlight` |
-| Context paths | `-context-path-selector`, `-context-path-icon`, `-context-path-dropdown` |
+| External context | `-external-context-selector`, `-external-context-icon`, `-external-context-dropdown` |
 | Context meter | `-context-meter`, `-context-meter-gauge`, `-context-meter-percent`, `-meter-bg`, `-meter-fill` |
 | MCP | `-mcp-selector`, `-mcp-selector-icon`, `-mcp-selector-dropdown`, `-mcp-item` |
 | MCP Settings | `-mcp-header`, `-mcp-list`, `-mcp-status`, `-mcp-test-modal` |

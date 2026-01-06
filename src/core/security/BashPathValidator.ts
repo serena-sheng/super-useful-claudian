@@ -12,8 +12,7 @@ import type { PathAccessType } from '../../utils/path';
 /** Result of a path violation check */
 export type PathViolation =
   | { type: 'outside_vault'; path: string }
-  | { type: 'export_path_read'; path: string }
-  | { type: 'context_path_write'; path: string };
+  | { type: 'export_path_read'; path: string };
 
 /** Context for path validation - allows dependency injection of access rules */
 export interface PathCheckContext {
@@ -176,7 +175,7 @@ export function checkBashPathAccess(
   }
 
   if (accessType === 'context') {
-    return access === 'read' ? null : { type: 'context_path_write', path: cleaned };
+    return null; // Context paths have full read/write access
   }
 
   if (accessType === 'export') {

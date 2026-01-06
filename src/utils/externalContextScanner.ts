@@ -1,7 +1,7 @@
 /**
- * Claudian - Context Path Scanner
+ * Claudian - External Context Scanner
  *
- * Scans configured context paths for files to include in @-mention dropdown.
+ * Scans configured external context paths for files to include in @-mention dropdown.
  * Features: recursive scanning, caching, and error handling.
  */
 
@@ -10,29 +10,29 @@ import * as path from 'path';
 
 import { normalizePathForFilesystem } from './path';
 
-/** File information from a context path. */
-export interface ContextPathFile {
+/** File information from an external context path. */
+export interface ExternalContextFile {
   /** Absolute file path */
   path: string;
   /** Filename */
   name: string;
   /** Path relative to context root */
   relativePath: string;
-  /** Which context path this file belongs to */
+  /** Which external context path this file belongs to */
   contextRoot: string;
   /** Modification time in milliseconds */
   mtime: number;
 }
 
 interface ScanCache {
-  files: ContextPathFile[];
+  files: ExternalContextFile[];
   timestamp: number;
 }
 
 /** Cache TTL in milliseconds (30 seconds) */
 const CACHE_TTL_MS = 30000;
 
-/** Maximum files to scan per context path */
+/** Maximum files to scan per external context path */
 const MAX_FILES_PER_PATH = 1000;
 
 /** Maximum directory depth to prevent infinite recursion */
@@ -58,21 +58,21 @@ const SKIP_DIRECTORIES = new Set([
 ]);
 
 /**
- * Scanner for files in context paths.
+ * Scanner for files in external context paths.
  * Caches results to avoid repeated filesystem scans.
  */
-class ContextPathScanner {
+class ExternalContextScanner {
   private cache = new Map<string, ScanCache>();
 
   /**
-   * Scans all context paths and returns matching files.
+   * Scans all external context paths and returns matching files.
    * Uses cached results when available.
    */
-  scanPaths(contextPaths: string[]): ContextPathFile[] {
-    const allFiles: ContextPathFile[] = [];
+  scanPaths(externalContextPaths: string[]): ExternalContextFile[] {
+    const allFiles: ExternalContextFile[] = [];
     const now = Date.now();
 
-    for (const contextPath of contextPaths) {
+    for (const contextPath of externalContextPaths) {
       const expandedPath = normalizePathForFilesystem(contextPath);
 
       // Check cache first
@@ -98,10 +98,10 @@ class ContextPathScanner {
     dir: string,
     contextRoot: string,
     depth: number
-  ): ContextPathFile[] {
+  ): ExternalContextFile[] {
     if (depth > MAX_DEPTH) return [];
 
-    const files: ContextPathFile[] = [];
+    const files: ExternalContextFile[] = [];
 
     try {
       if (!fs.existsSync(dir)) return [];
@@ -142,11 +142,11 @@ class ContextPathScanner {
           }
         }
 
-        // Limit total files per context path
+        // Limit total files per external context path
         if (files.length >= MAX_FILES_PER_PATH) break;
       }
     } catch (err) {
-      console.warn(`Failed to scan context directory ${dir}: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`Failed to scan external context directory ${dir}: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     return files;
@@ -157,7 +157,7 @@ class ContextPathScanner {
     this.cache.clear();
   }
 
-  /** Clears cached results for a specific context path. */
+  /** Clears cached results for a specific external context path. */
   invalidatePath(contextPath: string): void {
     const expandedPath = normalizePathForFilesystem(contextPath);
     this.cache.delete(expandedPath);
@@ -165,4 +165,4 @@ class ContextPathScanner {
 }
 
 /** Singleton scanner instance. */
-export const contextPathScanner = new ContextPathScanner();
+export const externalContextScanner = new ExternalContextScanner();

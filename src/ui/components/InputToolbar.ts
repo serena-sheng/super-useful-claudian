@@ -16,8 +16,8 @@ import {
 } from '../../core/types';
 import { CHECK_ICON_SVG, MCP_ICON_SVG } from '../../features/chat/constants';
 import type { McpService } from '../../features/mcp/McpService';
-import { findConflictingPath } from '../../utils/contextPath';
 import { getModelsFromEnvironment, parseEnvironmentVariables } from '../../utils/env';
+import { findConflictingPath } from '../../utils/externalContext';
 
 /** Settings access interface for toolbar components. */
 export interface ToolbarSettings {
@@ -290,43 +290,43 @@ export class PermissionToggle {
   }
 }
 
-/** Context path selector component (folder icon). */
-export class ContextPathSelector {
+/** External context selector component (folder icon). */
+export class ExternalContextSelector {
   private container: HTMLElement;
   private iconEl: HTMLElement | null = null;
   private badgeEl: HTMLElement | null = null;
   private dropdownEl: HTMLElement | null = null;
   private callbacks: ToolbarCallbacks;
-  /** Session-specific context paths (resets on new conversation). */
-  private sessionContextPaths: string[] = [];
+  /** Session-specific external context paths (resets on new conversation). */
+  private externalContextPaths: string[] = [];
   private onChangeCallback: ((paths: string[]) => void) | null = null;
 
   constructor(parentEl: HTMLElement, callbacks: ToolbarCallbacks) {
     this.callbacks = callbacks;
-    this.container = parentEl.createDiv({ cls: 'claudian-context-path-selector' });
+    this.container = parentEl.createDiv({ cls: 'claudian-external-context-selector' });
     this.render();
   }
 
-  /** Set callback for when context paths change. */
+  /** Set callback for when external context paths change. */
   setOnChange(callback: (paths: string[]) => void): void {
     this.onChangeCallback = callback;
   }
 
-  /** Get current session context paths. */
-  getContextPaths(): string[] {
-    return [...this.sessionContextPaths];
+  /** Get current external context paths. */
+  getExternalContexts(): string[] {
+    return [...this.externalContextPaths];
   }
 
-  /** Set session context paths (for restoring from conversation). */
-  setContextPaths(paths: string[]): void {
-    this.sessionContextPaths = [...paths];
+  /** Set external context paths (for restoring from conversation). */
+  setExternalContexts(paths: string[]): void {
+    this.externalContextPaths = [...paths];
     this.updateDisplay();
     this.renderDropdown();
   }
 
-  /** Clear session context paths (call on new conversation). */
-  clearContextPaths(): void {
-    this.sessionContextPaths = [];
+  /** Clear external context paths (call on new conversation). */
+  clearExternalContexts(): void {
+    this.externalContextPaths = [];
     this.updateDisplay();
     this.renderDropdown();
   }
@@ -334,12 +334,12 @@ export class ContextPathSelector {
   private render() {
     this.container.empty();
 
-    const iconWrapper = this.container.createDiv({ cls: 'claudian-context-path-icon-wrapper' });
+    const iconWrapper = this.container.createDiv({ cls: 'claudian-external-context-icon-wrapper' });
 
-    this.iconEl = iconWrapper.createDiv({ cls: 'claudian-context-path-icon' });
+    this.iconEl = iconWrapper.createDiv({ cls: 'claudian-external-context-icon' });
     setIcon(this.iconEl, 'folder');
 
-    this.badgeEl = iconWrapper.createDiv({ cls: 'claudian-context-path-badge' });
+    this.badgeEl = iconWrapper.createDiv({ cls: 'claudian-external-context-badge' });
 
     this.updateDisplay();
 
@@ -349,7 +349,7 @@ export class ContextPathSelector {
       this.openFolderPicker();
     });
 
-    this.dropdownEl = this.container.createDiv({ cls: 'claudian-context-path-dropdown' });
+    this.dropdownEl = this.container.createDiv({ cls: 'claudian-external-context-dropdown' });
     this.renderDropdown();
   }
 
@@ -360,27 +360,27 @@ export class ContextPathSelector {
       const { remote } = require('electron');
       const result = await remote.dialog.showOpenDialog({
         properties: ['openDirectory'],
-        title: 'Select Context Path (Read-Only)',
+        title: 'Select External Context',
       });
 
       if (!result.canceled && result.filePaths.length > 0) {
         const selectedPath = result.filePaths[0];
 
         // Check for duplicate
-        if (this.sessionContextPaths.includes(selectedPath)) {
+        if (this.externalContextPaths.includes(selectedPath)) {
           return;
         }
 
         // Check for nested/overlapping paths
-        const conflict = findConflictingPath(selectedPath, this.sessionContextPaths);
+        const conflict = findConflictingPath(selectedPath, this.externalContextPaths);
         if (conflict) {
           // Show warning notice
           this.showConflictNotice(selectedPath, conflict);
           return;
         }
 
-        this.sessionContextPaths = [...this.sessionContextPaths, selectedPath];
-        this.onChangeCallback?.(this.sessionContextPaths);
+        this.externalContextPaths = [...this.externalContextPaths, selectedPath];
+        this.onChangeCallback?.(this.externalContextPaths);
         this.updateDisplay();
         this.renderDropdown();
       }
@@ -409,32 +409,32 @@ export class ContextPathSelector {
     this.dropdownEl.empty();
 
     // Header
-    const headerEl = this.dropdownEl.createDiv({ cls: 'claudian-context-path-header' });
-    headerEl.setText('Context Paths (Read-Only)');
+    const headerEl = this.dropdownEl.createDiv({ cls: 'claudian-external-context-header' });
+    headerEl.setText('External Contexts');
 
     // Path list
-    const listEl = this.dropdownEl.createDiv({ cls: 'claudian-context-path-list' });
+    const listEl = this.dropdownEl.createDiv({ cls: 'claudian-external-context-list' });
 
-    if (this.sessionContextPaths.length === 0) {
-      const emptyEl = listEl.createDiv({ cls: 'claudian-context-path-empty' });
+    if (this.externalContextPaths.length === 0) {
+      const emptyEl = listEl.createDiv({ cls: 'claudian-external-context-empty' });
       emptyEl.setText('Click folder icon to add');
     } else {
-      for (const pathStr of this.sessionContextPaths) {
-        const itemEl = listEl.createDiv({ cls: 'claudian-context-path-item' });
+      for (const pathStr of this.externalContextPaths) {
+        const itemEl = listEl.createDiv({ cls: 'claudian-external-context-item' });
 
-        const pathTextEl = itemEl.createSpan({ cls: 'claudian-context-path-text' });
+        const pathTextEl = itemEl.createSpan({ cls: 'claudian-external-context-text' });
         // Show shortened path for display
         const displayPath = this.shortenPath(pathStr);
         pathTextEl.setText(displayPath);
         pathTextEl.setAttribute('title', pathStr);
 
-        const removeBtn = itemEl.createSpan({ cls: 'claudian-context-path-remove' });
+        const removeBtn = itemEl.createSpan({ cls: 'claudian-external-context-remove' });
         setIcon(removeBtn, 'x');
         removeBtn.setAttribute('title', 'Remove path');
         removeBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          this.sessionContextPaths = this.sessionContextPaths.filter(p => p !== pathStr);
-          this.onChangeCallback?.(this.sessionContextPaths);
+          this.externalContextPaths = this.externalContextPaths.filter(p => p !== pathStr);
+          this.onChangeCallback?.(this.externalContextPaths);
           this.updateDisplay();
           this.renderDropdown();
         });
@@ -469,11 +469,11 @@ export class ContextPathSelector {
   updateDisplay() {
     if (!this.iconEl || !this.badgeEl) return;
 
-    const count = this.sessionContextPaths.length;
+    const count = this.externalContextPaths.length;
 
     if (count > 0) {
       this.iconEl.addClass('active');
-      this.iconEl.setAttribute('title', `${count} context path${count > 1 ? 's' : ''} (click to add more)`);
+      this.iconEl.setAttribute('title', `${count} external context${count > 1 ? 's' : ''} (click to add more)`);
 
       // Show badge only when more than 1 path
       if (count > 1) {
@@ -484,7 +484,7 @@ export class ContextPathSelector {
       }
     } else {
       this.iconEl.removeClass('active');
-      this.iconEl.setAttribute('title', 'Add context paths (click)');
+      this.iconEl.setAttribute('title', 'Add external contexts (click)');
       this.badgeEl.removeClass('visible');
     }
   }
@@ -803,16 +803,16 @@ export function createInputToolbar(
   modelSelector: ModelSelector;
   thinkingBudgetSelector: ThinkingBudgetSelector;
   contextUsageMeter: ContextUsageMeter;
-  contextPathSelector: ContextPathSelector;
+  externalContextSelector: ExternalContextSelector;
   mcpServerSelector: McpServerSelector;
   permissionToggle: PermissionToggle;
 } {
   const modelSelector = new ModelSelector(parentEl, callbacks);
   const thinkingBudgetSelector = new ThinkingBudgetSelector(parentEl, callbacks);
   const contextUsageMeter = new ContextUsageMeter(parentEl);
-  const contextPathSelector = new ContextPathSelector(parentEl, callbacks);
+  const externalContextSelector = new ExternalContextSelector(parentEl, callbacks);
   const mcpServerSelector = new McpServerSelector(parentEl);
   const permissionToggle = new PermissionToggle(parentEl, callbacks);
 
-  return { modelSelector, thinkingBudgetSelector, contextUsageMeter, contextPathSelector, mcpServerSelector, permissionToggle };
+  return { modelSelector, thinkingBudgetSelector, contextUsageMeter, externalContextSelector, mcpServerSelector, permissionToggle };
 }

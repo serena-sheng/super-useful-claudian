@@ -57,7 +57,7 @@ export interface InputControllerDeps {
   getImageContextManager: () => ImageContextManager | null;
   getSlashCommandManager: () => SlashCommandManager | null;
   getMcpServerSelector: () => McpServerSelector | null;
-  getContextPathSelector: () => { getContextPaths: () => string[] } | null;
+  getExternalContextSelector: () => { getExternalContexts: () => string[] } | null;
   getInstructionModeManager: () => InstructionModeManager | null;
   getInstructionRefineService: () => InstructionRefineService | null;
   getTitleGenerationService: () => TitleGenerationService | null;
@@ -301,13 +301,13 @@ export class InputController {
       };
     }
 
-    // Add session context paths to query
-    const contextPathSelector = this.deps.getContextPathSelector();
-    const sessionContextPaths = contextPathSelector?.getContextPaths();
-    if (sessionContextPaths && sessionContextPaths.length > 0) {
+    // Add external context paths to query
+    const externalContextSelector = this.deps.getExternalContextSelector();
+    const externalContextPaths = externalContextSelector?.getExternalContexts();
+    if (externalContextPaths && externalContextPaths.length > 0) {
       queryOptions = {
         ...queryOptions,
-        sessionContextPaths,
+        externalContextPaths,
       };
     }
 

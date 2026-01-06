@@ -455,7 +455,7 @@ class InlineEditController {
         getMentionedMcpServers: () => new Set(),
         setMentionedMcpServers: () => false,
         addMentionedMcpServer: () => {},
-        getContextPaths: () => [],
+        getExternalContexts: () => [],
         getCachedMarkdownFiles: () => {
           try {
             return this.app.vault.getMarkdownFiles();

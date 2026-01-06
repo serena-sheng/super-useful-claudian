@@ -121,10 +121,10 @@ function createMockDeps(overrides: Partial<ConversationControllerDeps> = {}): Co
       getEnabledServers: jest.fn().mockReturnValue(new Set()),
       setEnabledServers: jest.fn(),
     }) as any,
-    getContextPathSelector: () => ({
-      getContextPaths: jest.fn().mockReturnValue([]),
-      setContextPaths: jest.fn(),
-      clearContextPaths: jest.fn(),
+    getExternalContextSelector: () => ({
+      getExternalContexts: jest.fn().mockReturnValue([]),
+      setExternalContexts: jest.fn(),
+      clearExternalContexts: jest.fn(),
     }) as any,
     clearQueuedMessage: jest.fn(),
     getApprovedPlan: jest.fn().mockReturnValue(null),

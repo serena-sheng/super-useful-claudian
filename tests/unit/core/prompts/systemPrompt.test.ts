@@ -27,7 +27,7 @@ describe('systemPrompt', () => {
       const prompt = buildSystemPrompt();
       expect(prompt).toContain('Mocked Date');
       expect(prompt).toContain('Claudian');
-      expect(prompt).toContain('# Critical Path Rules');
+      expect(prompt).toContain('# Path Rules');
       expect(prompt).toContain('# User Message Format');
     });
 

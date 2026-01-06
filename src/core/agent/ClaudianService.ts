@@ -13,12 +13,7 @@ import * as path from 'path';
 import type ClaudianPlugin from '../../main';
 import { stripCurrentNotePrefix } from '../../utils/context';
 import { getEnhancedPath, parseEnvironmentVariables } from '../../utils/env';
-import {
-  getPathAccessType,
-  getVaultPath,
-  normalizePathForFilesystem,
-  type PathAccessType,
-} from '../../utils/path';
+import { getPathAccessType, getVaultPath, normalizePathForFilesystem } from '../../utils/path';
 import { buildContextFromHistory, getLastUserMessage, isSessionExpiredError } from '../../utils/session';
 import {
   createBlocklistHook,
@@ -185,8 +180,8 @@ export interface QueryOptions {
   enabledMcpServers?: Set<string>;
   /** Enable plan mode (read-only exploration). */
   planMode?: boolean;
-  /** Session-specific context paths (read-only external directories). */
-  sessionContextPaths?: string[];
+  /** Session-specific external context paths (directories with full access). */
+  externalContextPaths?: string[];
 }
 
 /** Decision returned after plan approval. */
@@ -414,7 +409,7 @@ export class ClaudianService {
       mediaFolder: this.plugin.settings.mediaFolder,
       customPrompt: this.plugin.settings.systemPrompt,
       allowedExportPaths: this.plugin.settings.allowedExportPaths,
-      allowedContextPaths: queryOptions?.sessionContextPaths,
+      externalContextPaths: queryOptions?.externalContextPaths,
       vaultPath: cwd,
       hasEditorContext,
       planMode: queryOptions?.planMode,
@@ -464,8 +459,19 @@ export class ClaudianService {
       enableBlocklist: this.plugin.settings.enableBlocklist,
     }));
 
+    // External context paths (added via folder icon in UI)
+    const externalContextPaths = queryOptions?.externalContextPaths || [];
+
     const vaultRestrictionHook = createVaultRestrictionHook({
-      getPathAccessType: (p) => this.getPathAccessType(p),
+      getPathAccessType: (p) => {
+        if (!this.vaultPath) return 'vault';
+        return getPathAccessType(
+          p,
+          externalContextPaths,
+          this.plugin.settings.allowedExportPaths,
+          this.vaultPath
+        );
+      },
     });
 
     // Create file tracking callbacks
@@ -650,16 +656,6 @@ export class ClaudianService {
   /** Clear all diff-related state. */
   clearDiffState(): void {
     this.diffStore.clear();
-  }
-
-  private getPathAccessType(filePath: string): PathAccessType {
-    if (!this.vaultPath) return 'vault';
-    return getPathAccessType(
-      filePath,
-      this.plugin.settings.allowedContextPaths,
-      this.plugin.settings.allowedExportPaths,
-      this.vaultPath
-    );
   }
 
   private resolvePlanPath(filePath: string): string {

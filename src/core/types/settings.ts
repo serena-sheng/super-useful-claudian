@@ -145,7 +145,6 @@ export interface ClaudianSettings {
   envSnippets: EnvSnippet[];
   systemPrompt: string;
   allowedExportPaths: string[];
-  allowedContextPaths: string[];
   slashCommands: SlashCommand[];
   keyboardNavigation: KeyboardNavigationSettings;
   claudeCliPath: string;  // Custom Claude CLI path (empty = auto-detect)
@@ -173,7 +172,6 @@ export const DEFAULT_SETTINGS: ClaudianSettings = {
   envSnippets: [],
   systemPrompt: '',
   allowedExportPaths: ['~/Desktop', '~/Downloads'],
-  allowedContextPaths: [],
   slashCommands: [],
   keyboardNavigation: {
     scrollUpKey: 'w',

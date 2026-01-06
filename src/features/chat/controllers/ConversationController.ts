@@ -9,7 +9,7 @@ import { setIcon } from 'obsidian';
 
 import type { Conversation } from '../../../core/types';
 import type ClaudianPlugin from '../../../main';
-import { type ContextPathSelector, extractLastTodosFromMessages, type FileContextManager, type ImageContextManager, type McpServerSelector, type TodoPanel } from '../../../ui';
+import { type ExternalContextSelector, extractLastTodosFromMessages, type FileContextManager, type ImageContextManager, type McpServerSelector, type TodoPanel } from '../../../ui';
 import type { MessageRenderer } from '../rendering/MessageRenderer';
 import type { AsyncSubagentManager } from '../services/AsyncSubagentManager';
 import type { TitleGenerationService } from '../services/TitleGenerationService';
@@ -36,7 +36,7 @@ export interface ConversationControllerDeps {
   getFileContextManager: () => FileContextManager | null;
   getImageContextManager: () => ImageContextManager | null;
   getMcpServerSelector: () => McpServerSelector | null;
-  getContextPathSelector: () => ContextPathSelector | null;
+  getExternalContextSelector: () => ExternalContextSelector | null;
   clearQueuedMessage: () => void;
   /** Get current approved plan content from agent service. */
   getApprovedPlan: () => string | null;
@@ -120,7 +120,7 @@ export class ConversationController {
 
     this.deps.getImageContextManager()?.clearImages();
     this.deps.getMcpServerSelector()?.clearEnabled();
-    this.deps.getContextPathSelector()?.clearContextPaths();
+    this.deps.getExternalContextSelector()?.clearExternalContexts();
     this.deps.clearQueuedMessage();
 
     this.callbacks.onNewConversation?.();
@@ -166,12 +166,12 @@ export class ConversationController {
       fileCtx?.autoAttachActiveFile();
     }
 
-    // Restore session context paths (or clear for new conversation)
-    const contextPathSelector = this.deps.getContextPathSelector();
-    if (conversation.sessionContextPaths && conversation.sessionContextPaths.length > 0) {
-      contextPathSelector?.setContextPaths(conversation.sessionContextPaths);
+    // Restore external context paths (or clear for new conversation)
+    const externalContextSelector = this.deps.getExternalContextSelector();
+    if (conversation.externalContextPaths && conversation.externalContextPaths.length > 0) {
+      externalContextSelector?.setExternalContexts(conversation.externalContextPaths);
     } else {
-      contextPathSelector?.clearContextPaths();
+      externalContextSelector?.clearExternalContexts();
     }
 
     // Restore enabled MCP servers (or clear for new conversation)
@@ -242,12 +242,12 @@ export class ConversationController {
       fileCtx?.setCurrentNote(conversation.currentNote);
     }
 
-    // Restore session context paths (or clear if none)
-    const contextPathSelector = this.deps.getContextPathSelector();
-    if (conversation.sessionContextPaths && conversation.sessionContextPaths.length > 0) {
-      contextPathSelector?.setContextPaths(conversation.sessionContextPaths);
+    // Restore external context paths (or clear if none)
+    const externalContextSelector = this.deps.getExternalContextSelector();
+    if (conversation.externalContextPaths && conversation.externalContextPaths.length > 0) {
+      externalContextSelector?.setExternalContexts(conversation.externalContextPaths);
     } else {
-      contextPathSelector?.clearContextPaths();
+      externalContextSelector?.clearExternalContexts();
     }
 
     // Restore enabled MCP servers (or clear if none)
@@ -286,8 +286,8 @@ export class ConversationController {
     const sessionId = plugin.agentService.getSessionId();
     const fileCtx = this.deps.getFileContextManager();
     const currentNote = fileCtx?.getCurrentNotePath() || undefined;
-    const contextPathSelector = this.deps.getContextPathSelector();
-    const sessionContextPaths = contextPathSelector?.getContextPaths() ?? [];
+    const externalContextSelector = this.deps.getExternalContextSelector();
+    const externalContextPaths = externalContextSelector?.getExternalContexts() ?? [];
     const approvedPlan = this.deps.getApprovedPlan();
     const mcpServerSelector = this.deps.getMcpServerSelector();
     const enabledMcpServers = mcpServerSelector ? Array.from(mcpServerSelector.getEnabledServers()) : [];
@@ -296,7 +296,7 @@ export class ConversationController {
       messages: state.getPersistedMessages(),
       sessionId: sessionId,
       currentNote: currentNote,
-      sessionContextPaths: sessionContextPaths.length > 0 ? sessionContextPaths : undefined,
+      externalContextPaths: externalContextPaths.length > 0 ? externalContextPaths : undefined,
       usage: state.usage ?? undefined,
       approvedPlan: approvedPlan ?? undefined,
       pendingPlanContent: state.pendingPlanContent ?? undefined,

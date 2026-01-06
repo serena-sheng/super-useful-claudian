@@ -33,18 +33,18 @@ export type MentionItem =
   | ContextFileMentionItem
   | ContextFolderMentionItem;
 
-export interface ContextPathEntry {
+export interface ExternalContextEntry {
   contextRoot: string;
   folderName: string;
   displayName: string;
   displayNameLower: string;
 }
 
-export function createContextPathEntry(
+export function createExternalContextEntry(
   contextRoot: string,
   folderName: string,
   displayName: string
-): ContextPathEntry {
+): ExternalContextEntry {
   return {
     contextRoot,
     folderName,

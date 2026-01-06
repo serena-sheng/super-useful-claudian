@@ -1,7 +1,7 @@
 /**
- * Claudian - Context Path Utilities
+ * Claudian - External Context Utilities
  *
- * Utilities for context path validation, normalization, and conflict detection.
+ * Utilities for external context validation, normalization, and conflict detection.
  */
 
 import { normalizePathForComparison as normalizePathForComparisonImpl } from './path';
@@ -33,7 +33,7 @@ function normalizePathForDisplay(p: string): string {
  * Returns the conflicting path if found, null otherwise.
  *
  * @param newPath - The new path to add
- * @param existingPaths - Array of existing context paths
+ * @param existingPaths - Array of existing external context paths
  * @returns Conflict info or null if no conflict
  */
 export function findConflictingPath(

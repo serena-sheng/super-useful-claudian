@@ -20,7 +20,7 @@ import { FileChipsView } from './file-context/view/FileChipsView';
 export interface FileContextCallbacks {
   getExcludedTags: () => string[];
   onChipsChanged?: () => void;
-  getContextPaths?: () => string[];
+  getExternalContexts?: () => string[];
 }
 
 /** Manages file context: current note chip and @ mention dropdown. */
@@ -90,7 +90,7 @@ export class FileContextManager {
         getMentionedMcpServers: () => this.state.getMentionedMcpServers(),
         setMentionedMcpServers: (mentions) => this.state.setMentionedMcpServers(mentions),
         addMentionedMcpServer: (name) => this.state.addMentionedMcpServer(name),
-        getContextPaths: () => this.callbacks.getContextPaths?.() || [],
+        getExternalContexts: () => this.callbacks.getExternalContexts?.() || [],
         getCachedMarkdownFiles: () => this.fileCache.getFiles(),
         normalizePathForVault: (rawPath) => this.normalizePathForVault(rawPath),
       }
@@ -313,11 +313,11 @@ export class FileContextManager {
   }
 
   /**
-   * Pre-scans context paths in the background to warm the cache.
-   * Should be called when context paths are added/changed.
+   * Pre-scans external context paths in the background to warm the cache.
+   * Should be called when external context paths are added/changed.
    */
-  preScanContextPaths(): void {
-    this.mentionDropdown.preScanContextPaths();
+  preScanExternalContexts(): void {
+    this.mentionDropdown.preScanExternalContexts();
   }
 
   /** Get currently @-mentioned MCP servers. */

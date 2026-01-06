@@ -2,7 +2,7 @@ import type { TFile } from 'obsidian';
 
 import type { FileContextCallbacks } from '@/ui/components/FileContext';
 import { FileContextManager } from '@/ui/components/FileContext';
-import type { ContextPathFile } from '@/utils/contextPathScanner';
+import type { ExternalContextFile } from '@/utils/externalContextScanner';
 
 jest.mock('obsidian', () => ({
   setIcon: jest.fn(),
@@ -31,9 +31,9 @@ jest.mock('@/utils/path', () => {
   };
 });
 
-const mockScanPaths = jest.fn<ContextPathFile[], [string[]]>(() => []);
-jest.mock('@/utils/contextPathScanner', () => ({
-  contextPathScanner: {
+const mockScanPaths = jest.fn<ExternalContextFile[], [string[]]>(() => []);
+jest.mock('@/utils/externalContextScanner', () => ({
+  externalContextScanner: {
     scanPaths: (paths: string[]) => mockScanPaths(paths),
   },
 }));
@@ -197,13 +197,13 @@ function createMockApp(options: {
 }
 
 function createMockCallbacks(options: {
-  contextPaths?: string[];
+  externalContexts?: string[];
   excludedTags?: string[];
 } = {}): FileContextCallbacks {
-  const { contextPaths = [], excludedTags = [] } = options;
+  const { externalContexts = [], excludedTags = [] } = options;
   return {
     getExcludedTags: jest.fn(() => excludedTags),
-    getContextPaths: jest.fn(() => contextPaths),
+    getExternalContexts: jest.fn(() => externalContexts),
   };
 }
 
@@ -372,10 +372,10 @@ describe('FileContextManager', () => {
       app,
       containerEl as any,
       inputEl,
-      createMockCallbacks({ contextPaths: ['/external'] })
+      createMockCallbacks({ externalContexts: ['/external'] })
     );
 
-    const contextFiles: ContextPathFile[] = [
+    const contextFiles: ExternalContextFile[] = [
       {
         path: '/external/src/app.md',
         name: 'app.md',

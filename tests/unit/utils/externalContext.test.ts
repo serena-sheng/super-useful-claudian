@@ -2,9 +2,9 @@ import {
   findConflictingPath,
   getFolderName,
   normalizePathForComparison,
-} from '@/utils/contextPath';
+} from '@/utils/externalContext';
 
-describe('contextPath utilities', () => {
+describe('externalContext utilities', () => {
   describe('normalizePathForComparison', () => {
     const originalPlatform = process.platform;
     const expectNormalized = (input: string, expected: string) => {

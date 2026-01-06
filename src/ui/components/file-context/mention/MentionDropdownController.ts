@@ -7,11 +7,11 @@ import { setIcon } from 'obsidian';
 
 import { MCP_ICON_SVG } from '../../../../features/chat/constants';
 import type { McpService } from '../../../../features/mcp/McpService';
-import { getFolderName, normalizePathForComparison } from '../../../../utils/contextPath';
-import { type ContextPathFile, contextPathScanner } from '../../../../utils/contextPathScanner';
+import { getFolderName, normalizePathForComparison } from '../../../../utils/externalContext';
+import { type ExternalContextFile, externalContextScanner } from '../../../../utils/externalContextScanner';
 import { extractMcpMentions } from '../../../../utils/mcp';
 import { SelectableDropdown } from '../../SelectableDropdown';
-import { type ContextPathEntry, createContextPathEntry, type MentionItem } from './types';
+import { createExternalContextEntry, type ExternalContextEntry, type MentionItem } from './types';
 
 export interface MentionDropdownOptions {
   fixed?: boolean;
@@ -25,7 +25,7 @@ export interface MentionDropdownCallbacks {
   getMentionedMcpServers: () => Set<string>;
   setMentionedMcpServers: (mentions: Set<string>) => boolean;
   addMentionedMcpServer: (name: string) => void;
-  getContextPaths: () => string[];
+  getExternalContexts: () => string[];
   getCachedMarkdownFiles: () => TFile[];
   normalizePathForVault: (path: string | undefined | null) => string | null;
 }
@@ -38,7 +38,7 @@ export class MentionDropdownController {
   private mentionStartIndex = -1;
   private selectedMentionIndex = 0;
   private filteredMentionItems: MentionItem[] = [];
-  private filteredContextFiles: ContextPathFile[] = [];
+  private filteredContextFiles: ExternalContextFile[] = [];
   private activeContextFilter: { folderName: string; contextRoot: string } | null = null;
   private mcpService: McpService | null = null;
   private fixed: boolean;
@@ -67,16 +67,16 @@ export class MentionDropdownController {
     this.mcpService = service;
   }
 
-  preScanContextPaths(): void {
-    const contextPaths = this.callbacks.getContextPaths() || [];
-    if (contextPaths.length === 0) return;
+  preScanExternalContexts(): void {
+    const externalContexts = this.callbacks.getExternalContexts() || [];
+    if (externalContexts.length === 0) return;
 
     setTimeout(() => {
       try {
-        contextPathScanner.scanPaths(contextPaths);
+        externalContextScanner.scanPaths(externalContexts);
       } catch (err) {
         console.warn(
-          'Failed to pre-scan context paths:',
+          'Failed to pre-scan external contexts:',
           err instanceof Error ? err.message : String(err)
         );
       }
@@ -174,23 +174,23 @@ export class MentionDropdownController {
     return false;
   }
 
-  private buildContextPathEntries(contextPaths: string[]): ContextPathEntry[] {
+  private buildExternalContextEntries(externalContexts: string[]): ExternalContextEntry[] {
     const counts = new Map<string, number>();
     const normalizedPaths = new Map<string, string>();
 
-    for (const contextPath of contextPaths) {
+    for (const contextPath of externalContexts) {
       const normalized = normalizePathForComparison(contextPath);
       normalizedPaths.set(contextPath, normalized);
       const folderName = getFolderName(normalized);
       counts.set(folderName, (counts.get(folderName) ?? 0) + 1);
     }
 
-    return contextPaths.map(contextRoot => {
+    return externalContexts.map(contextRoot => {
       const normalized = normalizedPaths.get(contextRoot) ?? normalizePathForComparison(contextRoot);
       const folderName = getFolderName(contextRoot);
       const needsDisambiguation = (counts.get(folderName) ?? 0) > 1;
       const displayName = this.getContextDisplayName(normalized, folderName, needsDisambiguation);
-      return createContextPathEntry(contextRoot, folderName, displayName);
+      return createExternalContextEntry(contextRoot, folderName, displayName);
     });
   }
 
@@ -215,8 +215,8 @@ export class MentionDropdownController {
     this.filteredMentionItems = [];
     this.filteredContextFiles = [];
 
-    const contextPaths = this.callbacks.getContextPaths() || [];
-    const contextEntries = this.buildContextPathEntries(contextPaths);
+    const externalContexts = this.callbacks.getExternalContexts() || [];
+    const contextEntries = this.buildExternalContextEntries(externalContexts);
 
     const isFilterSearch = searchText.includes('/');
     let fileSearchText = searchLower;
@@ -239,7 +239,7 @@ export class MentionDropdownController {
     }
 
     if (this.activeContextFilter && isFilterSearch) {
-      const contextFiles = contextPathScanner.scanPaths([this.activeContextFilter.contextRoot]);
+      const contextFiles = externalContextScanner.scanPaths([this.activeContextFilter.contextRoot]);
       this.filteredContextFiles = contextFiles
         .filter(file => {
           const relativePath = file.relativePath.replace(/\\/g, '/');

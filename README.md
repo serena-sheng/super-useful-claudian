@@ -77,13 +77,13 @@ Use it like Claude Code—read, write, edit, search files in your vault.
 ### Context
 
 - **File**: Auto-attaches focused note; type `@` to attach other files
-- **@-mention dropdown**: Type `@` to see MCP servers, context folders, and vault files
+- **@-mention dropdown**: Type `@` to see MCP servers, external contexts, and vault files
   - `@server-name` enables context-saving MCP servers
-  - `@folder/` filters to files from that context path (e.g., `@workspace/`)
+  - `@folder/` filters to files from that external context (e.g., `@workspace/`)
   - Vault files shown by default
 - **Selection**: Select text in editor, then chat—selection included automatically
 - **Images**: Drag-drop, paste, or type path; configure media folder for `![[image]]` embeds
-- **External paths**: Click folder icon in toolbar for read-only access to directories outside vault
+- **External contexts**: Click folder icon in toolbar for access to directories outside vault
 
 ### Features
 
@@ -135,7 +135,7 @@ Use it like Claude Code—read, write, edit, search files in your vault.
 
 - **Vault restriction**: File tools and Bash commands are limited to the Obsidian vault. Paths are resolved with `realpath` to prevent symlink escapes; attempts outside the vault are blocked.
 - **Export paths exception**: Write operations to configured export paths (e.g., `~/Desktop`) are allowed for export workflows (e.g., `pandoc` generating `.docx`). Export paths are treated as write-only: `Read/Glob/Grep/LS` remain vault-only, and `Bash` only allows export paths as write targets (e.g., `-o/--output`, `>`).
-- **Context paths exception**: Read operations from configured context paths are allowed. Context paths are read-only: `Read/Glob/Grep/LS` work, `Bash` allows read operations (e.g., `cat`, `pandoc ... -t plain`), but all write operations are blocked.
+- **External contexts exception**: External contexts have full read/write access. All file tools (`Read/Write/Edit/Glob/Grep/LS`) and `Bash` commands work normally on external context paths.
 - **Approvals**:
   - Safe mode shows an approval modal per tool call.
   - Bash approvals require an exact command match.
@@ -255,14 +255,14 @@ src/
 - [x] Instruction mode (`#`) to save in custom system prompt
 - [x] Skills support (Claude Code compatible)
 - [x] Selection awareness in main chat (visual indicator + context)
-- [x] Context paths for read-only access to external directories
+- [x] External contexts for access to directories outside vault
 - [x] Distributed storage (settings, commands, sessions as separate files)
 - [x] Windows platform support (MSYS paths, PowerShell blocklist, env vars)
 - [x] MCP (Model Context Protocol) server support with context-saving mode
 - [x] Context window usage display
 - [x] Plan mode (Shift+Tab toggle, read-only exploration, approval flow)
 - [x] Auto title generation (AI-powered, concurrent, with regenerate option)
-- [x] Context path @-mention (`@folder/` to filter files from external directories)
+- [x] External context @-mention (`@folder/` to filter files from external directories)
 - [ ] Hooks and other advanced features
 
 ## License

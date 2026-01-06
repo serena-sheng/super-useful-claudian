@@ -14,9 +14,9 @@ import { DEFAULT_CLAUDE_MODELS, DEFAULT_THINKING_BUDGET, VIEW_TYPE_CLAUDIAN } fr
 import type ClaudianPlugin from '../../main';
 import {
   cleanupThinkingBlock,
-  type ContextPathSelector,
   type ContextUsageMeter,
   createInputToolbar,
+  type ExternalContextSelector,
   FileContextManager,
   ImageContextManager,
   type InstructionModeManager,
@@ -79,7 +79,7 @@ export class ClaudianView extends ItemView {
   private imageContextManager: ImageContextManager | null = null;
   private modelSelector: ModelSelector | null = null;
   private thinkingBudgetSelector: ThinkingBudgetSelector | null = null;
-  private contextPathSelector: ContextPathSelector | null = null;
+  private externalContextSelector: ExternalContextSelector | null = null;
   private mcpServerSelector: McpServerSelector | null = null;
   private permissionToggle: PermissionToggle | null = null;
   private slashCommandManager: SlashCommandManager | null = null;
@@ -266,7 +266,7 @@ export class ClaudianView extends ItemView {
       {
         getExcludedTags: () => this.plugin.settings.excludedTags,
         onChipsChanged: () => this.renderer?.scrollToBottomIfNeeded(),
-        getContextPaths: () => this.contextPathSelector?.getContextPaths() || [],
+        getExternalContexts: () => this.externalContextSelector?.getExternalContexts() || [],
       }
     );
     this.fileContextManager.setMcpService(this.plugin.mcpService);
@@ -374,7 +374,7 @@ export class ClaudianView extends ItemView {
     this.modelSelector = toolbarComponents.modelSelector;
     this.thinkingBudgetSelector = toolbarComponents.thinkingBudgetSelector;
     this.contextUsageMeter = toolbarComponents.contextUsageMeter;
-    this.contextPathSelector = toolbarComponents.contextPathSelector;
+    this.externalContextSelector = toolbarComponents.externalContextSelector;
     this.mcpServerSelector = toolbarComponents.mcpServerSelector;
     this.permissionToggle = toolbarComponents.permissionToggle;
 
@@ -386,9 +386,9 @@ export class ClaudianView extends ItemView {
       this.mcpServerSelector?.addMentionedServers(servers);
     });
 
-    // Wire context path changes to pre-scan files
-    this.contextPathSelector.setOnChange(() => {
-      this.fileContextManager?.preScanContextPaths();
+    // Wire external context changes to pre-scan files
+    this.externalContextSelector.setOnChange(() => {
+      this.fileContextManager?.preScanExternalContexts();
     });
   }
 
@@ -433,7 +433,7 @@ export class ClaudianView extends ItemView {
         getFileContextManager: () => this.fileContextManager,
         getImageContextManager: () => this.imageContextManager,
         getMcpServerSelector: () => this.mcpServerSelector,
-        getContextPathSelector: () => this.contextPathSelector,
+        getExternalContextSelector: () => this.externalContextSelector,
         clearQueuedMessage: () => this.inputController?.clearQueuedMessage(),
         getApprovedPlan: () => this.plugin.agentService.getApprovedPlanContent(),
         setApprovedPlan: (plan) => this.plugin.agentService.setApprovedPlanContent(plan),
@@ -464,7 +464,7 @@ export class ClaudianView extends ItemView {
       getImageContextManager: () => this.imageContextManager,
       getSlashCommandManager: () => this.slashCommandManager,
       getMcpServerSelector: () => this.mcpServerSelector,
-      getContextPathSelector: () => this.contextPathSelector,
+      getExternalContextSelector: () => this.externalContextSelector,
       getInstructionModeManager: () => this.instructionModeManager,
       getInstructionRefineService: () => this.instructionRefineService,
       getTitleGenerationService: () => this.titleGenerationService,

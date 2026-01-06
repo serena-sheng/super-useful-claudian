@@ -11,7 +11,7 @@ export interface SystemPromptSettings {
   mediaFolder?: string;
   customPrompt?: string;
   allowedExportPaths?: string[];
-  allowedContextPaths?: string[];
+  externalContextPaths?: string[];
   vaultPath?: string;
   hasEditorContext?: boolean;
   /** Whether this query is in plan mode (read-only exploration). */
@@ -41,15 +41,23 @@ You are **Claudian**, an expert AI assistant specialized in Obsidian vault manag
 
 The current working directory is the user's vault root.${vaultInfo}
 
-## Critical Path Rules (MUST FOLLOW)
+## Path Rules (MUST FOLLOW)
 
-**ALL file operations** (Read, Write, Edit, Glob, Grep, LS) require RELATIVE paths from vault root:
-- ✓ Correct: "notes/my-note.md", "my-note.md", "folder/subfolder/file.md", "."
-- ✗ WRONG: "/notes/my-note.md", "/my-note.md", "${vaultPath || '/absolute/path'}/file.md"
+| Location | Access | Path Format | Example |
+|----------|--------|-------------|---------|
+| **Vault** | Read/Write | Relative from vault root | \`notes/my-note.md\`, \`.\` |
+| **Export paths** | Write-only | \`~\` or absolute | \`~/Desktop/output.docx\` |
+| **External contexts** | Full access | Absolute path | \`/Users/me/Workspace/file.ts\` |
 
-A leading slash ("/") or absolute path will FAIL. Always use paths relative to the vault root.
+**Vault files** (default):
+- ✓ Correct: \`notes/my-note.md\`, \`my-note.md\`, \`folder/subfolder/file.md\`, \`.\`
+- ✗ WRONG: \`/notes/my-note.md\`, \`${vaultPath || '/absolute/path'}/file.md\`
+- A leading slash or absolute path will FAIL for vault operations.
 
-**Export Exception**: You may write files outside the vault ONLY to configured export paths (write-only). Export destinations may use ~ or absolute paths.
+**Path specificity**: When paths overlap, the **more specific path wins**:
+- If \`~/Desktop\` is export (write-only) and \`~/Desktop/Workspace\` is external context (full access)
+- → Files in \`~/Desktop/Workspace\` have full read/write access
+- → Files directly in \`~/Desktop\` remain write-only
 
 ## User Message Format
 
@@ -108,6 +116,7 @@ Before taking action, explicitly THINK about:
 - **Bash**:
     - Runs with vault as working directory.
     - **Prefer** Read/Write/Edit over shell commands for file operations (safer).
+    - **Stdout-capable tools** (pandoc, jq, imagemagick): Prefer piping output directly instead of creating temporary files when the result will be used immediately.
     - Use BashOutput/KillShell to manage background processes.
 - **LS**: Uses "." for vault root.
 - **WebFetch**: For text/HTML/PDF only. Avoid binaries.
@@ -236,32 +245,25 @@ function getExportInstructions(allowedExportPaths: string[]): string {
 
 ## Allowed Export Paths
 
-You are restricted to the vault by default. You may write exported files outside the vault ONLY to the following allowed export paths:
+Write-only destinations outside the vault:
 
 ${formattedPaths}
 
-Rules:
-- Treat export paths as write-only (do not read/list files from them)
-- If a path appears in both export and context lists, it is read-write for that root
-- For vault files, always use relative paths
-- For export destinations, you may use ~ or absolute paths
-
 Examples:
-
 \`\`\`bash
-pandoc ./note.md -o ~/Desktop/note.docx
+pandoc ./note.md -o ~/Desktop/note.docx   # Direct export
+pandoc ./note.md | head -100              # Pipe to stdout (no temp file)
 cp ./note.md ~/Desktop/note.md
-cat ./note.md > ~/Desktop/note.md
 \`\`\``;
 }
 
-/** Returns instructions for allowed context paths (read-only paths outside vault). */
-function getContextPathInstructions(allowedContextPaths: string[]): string {
-  if (!allowedContextPaths || allowedContextPaths.length === 0) {
+/** Returns instructions for external context directories (directories with full access). */
+function getExternalContextInstructions(externalContextPaths: string[]): string {
+  if (!externalContextPaths || externalContextPaths.length === 0) {
     return '';
   }
 
-  const uniquePaths = Array.from(new Set(allowedContextPaths.map((p) => p.trim()).filter(Boolean)));
+  const uniquePaths = Array.from(new Set(externalContextPaths.map((p) => p.trim()).filter(Boolean)));
   if (uniquePaths.length === 0) {
     return '';
   }
@@ -279,16 +281,13 @@ function getContextPathInstructions(allowedContextPaths: string[]): string {
 
   return `
 
-## Extra Context Paths
+## External Contexts
 
-The user has selected these directories as relevant to their tasks. Proactively read from them when helpful:
+Directories outside the vault with **full read/write access**. Use absolute paths:
 
 ${formattedPaths}
 
-Rules:
-- These paths are READ-ONLY (do not write, edit, or create files in them)
-- If a path is in both context and export lists, it is read-write
-- When user refers to a folder by name (e.g., "check Workspace"), use the corresponding path`;
+When user refers to a folder by name (e.g., "check Workspace"), use the corresponding absolute path.`;
 }
 
 /** Returns editor context instructions (only included when selection exists). */
@@ -347,7 +346,7 @@ export function buildSystemPrompt(settings: SystemPromptSettings = {}): string {
   // Stable content (ordered for context cache optimization)
   prompt += getImageInstructions(settings.mediaFolder || '');
   prompt += getExportInstructions(settings.allowedExportPaths || []);
-  prompt += getContextPathInstructions(settings.allowedContextPaths || []);
+  prompt += getExternalContextInstructions(settings.externalContextPaths || []);
 
   if (settings.customPrompt?.trim()) {
     prompt += '\n\n## Custom Instructions\n\n' + settings.customPrompt.trim();

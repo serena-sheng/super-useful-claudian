@@ -1042,29 +1042,26 @@ describe('ClaudianService', () => {
       expect(blockedChunk).toBeUndefined();
     });
 
-    it('should block Write tool writing to context path under export path', async () => {
-      mockPlugin.settings.allowedExportPaths = ['/tmp'];
-      mockPlugin.settings.allowedContextPaths = ['/tmp/workspace'];
-
+    it('should allow Write tool writing to context path', async () => {
       setMockMessages([
         { type: 'system', subtype: 'init', session_id: 'test-session' },
-        createAssistantWithToolUse('Write', { file_path: '/tmp/workspace/out.md', content: 'blocked' }, 'write-context'),
+        createAssistantWithToolUse('Write', { file_path: '/tmp/workspace/out.md', content: 'allowed' }, 'write-context'),
         { type: 'result' },
       ]);
 
       const chunks: any[] = [];
-      for await (const chunk of service.query('write context')) {
+      for await (const chunk of service.query('write context', undefined, undefined, {
+        externalContextPaths: ['/tmp/workspace'],
+      })) {
         chunks.push(chunk);
       }
 
       const blockedChunk = chunks.find((c) => c.type === 'blocked');
-      expect(blockedChunk).toBeDefined();
-      expect(blockedChunk?.content).toContain('read-only');
+      expect(blockedChunk).toBeUndefined();
     });
 
     it('should allow Read tool reading from context path under export path', async () => {
       mockPlugin.settings.allowedExportPaths = ['/tmp'];
-      mockPlugin.settings.allowedContextPaths = ['/tmp/workspace'];
 
       setMockMessages([
         { type: 'system', subtype: 'init', session_id: 'test-session' },
@@ -1074,7 +1071,9 @@ describe('ClaudianService', () => {
       ]);
 
       const chunks: any[] = [];
-      for await (const chunk of service.query('read context')) {
+      for await (const chunk of service.query('read context', undefined, undefined, {
+        externalContextPaths: ['/tmp/workspace'],
+      })) {
         chunks.push(chunk);
       }
 
@@ -1084,7 +1083,6 @@ describe('ClaudianService', () => {
 
     it('should allow Write tool writing to exact overlap path', async () => {
       mockPlugin.settings.allowedExportPaths = ['/tmp/shared'];
-      mockPlugin.settings.allowedContextPaths = ['/tmp/shared'];
 
       setMockMessages([
         { type: 'system', subtype: 'init', session_id: 'test-session' },
@@ -1093,7 +1091,9 @@ describe('ClaudianService', () => {
       ]);
 
       const chunks: any[] = [];
-      for await (const chunk of service.query('write overlap')) {
+      for await (const chunk of service.query('write overlap', undefined, undefined, {
+        externalContextPaths: ['/tmp/shared'],
+      })) {
         chunks.push(chunk);
       }
 
@@ -1153,10 +1153,7 @@ describe('ClaudianService', () => {
       expect(blockedChunk).toBeUndefined();
     });
 
-    it('should block Bash command writing to context path under export path', async () => {
-      mockPlugin.settings.allowedExportPaths = ['/tmp'];
-      mockPlugin.settings.allowedContextPaths = ['/tmp/workspace'];
-
+    it('should allow Bash command writing to context path', async () => {
       setMockMessages([
         { type: 'system', subtype: 'init', session_id: 'test-session' },
         createAssistantWithToolUse('Bash', { command: 'echo hi > /tmp/workspace/out.md' }, 'bash-context-write'),
@@ -1164,13 +1161,14 @@ describe('ClaudianService', () => {
       ]);
 
       const chunks: any[] = [];
-      for await (const chunk of service.query('write context bash')) {
+      for await (const chunk of service.query('write context bash', undefined, undefined, {
+        externalContextPaths: ['/tmp/workspace'],
+      })) {
         chunks.push(chunk);
       }
 
       const blockedChunk = chunks.find((c) => c.type === 'blocked');
-      expect(blockedChunk).toBeDefined();
-      expect(blockedChunk?.content).toContain('read-only');
+      expect(blockedChunk).toBeUndefined();
     });
 
     it('should allow Bash command writing to allowed export path via -o', async () => {

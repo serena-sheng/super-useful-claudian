@@ -15,9 +15,9 @@ export {
   ImageContextManager,
 } from './ImageContext';
 export {
-  ContextPathSelector,
   ContextUsageMeter,
   createInputToolbar,
+  ExternalContextSelector,
   McpServerSelector,
   ModelSelector,
   PermissionToggle,
