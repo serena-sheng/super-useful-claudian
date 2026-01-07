@@ -57,6 +57,14 @@ export default class ClaudianPlugin extends Plugin {
     // Initialize agent service with the MCP manager
     this.agentService = new ClaudianService(this, this.mcpService.getManager());
 
+    // Pre-warm the persistent query with the active conversation's session ID (Phase 5)
+    const activeConv = this.getActiveConversation();
+    const sessionId = activeConv?.sessionId;
+    this.agentService.preWarm(sessionId ?? undefined).catch((error) => {
+      console.warn('[Claudian] Pre-warm failed, first query will use cold-start:',
+        error instanceof Error ? error.message : String(error));
+    });
+
     this.registerView(
       VIEW_TYPE_CLAUDIAN,
       (leaf) => new ClaudianView(leaf, this)
