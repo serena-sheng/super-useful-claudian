@@ -263,6 +263,7 @@ src/
 - [x] Plan mode (Shift+Tab toggle, read-only exploration, approval flow)
 - [x] Auto title generation (AI-powered, concurrent, with regenerate option)
 - [x] External context @-mention (`@folder/` to filter files from external directories)
+- [ ] Plan Mode refactor. The SDK does not support plan mode natively, current approach has limitations and technical debt, potential simplification is in order.
 - [ ] Hooks and other advanced features
 
 ## License
