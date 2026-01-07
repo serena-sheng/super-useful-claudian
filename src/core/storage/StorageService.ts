@@ -18,7 +18,7 @@ import type {
   Conversation,
   SlashCommand,
 } from '../types';
-import { DEFAULT_SETTINGS } from '../types';
+import { DEFAULT_SETTINGS, getDefaultCliPaths } from '../types';
 import { McpStorage } from './McpStorage';
 import { SESSIONS_PATH, SessionStorage } from './SessionStorage';
 import { SettingsStorage, type StoredSettings } from './SettingsStorage';
@@ -275,7 +275,10 @@ export class StorageService {
       lastCustomModel: ____,
       ...defaults
     } = DEFAULT_SETTINGS;
-    return defaults;
+    return {
+      ...defaults,
+      claudeCliPaths: getDefaultCliPaths(),
+    };
   }
 
   /** Get the vault file adapter for direct file operations. */

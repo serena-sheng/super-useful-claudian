@@ -285,6 +285,7 @@ describe('ClaudianService', () => {
     beforeEach(() => {
       mockPlugin.getResolvedClaudeCliPath.mockImplementation(() =>
         resolveClaudeCliPath(
+          undefined,  // Platform path (not used in tests)
           mockPlugin.settings.claudeCliPath,
           mockPlugin.getActiveEnvironmentVariables()
         )
@@ -339,6 +340,7 @@ describe('ClaudianService', () => {
       mockPlugin = createMockPlugin({ claudeCliPath: customPath });
       mockPlugin.getResolvedClaudeCliPath.mockImplementation(() =>
         resolveClaudeCliPath(
+          undefined,  // Platform path (not used in tests)
           mockPlugin.settings.claudeCliPath,
           mockPlugin.getActiveEnvironmentVariables()
         )
@@ -369,6 +371,7 @@ describe('ClaudianService', () => {
       mockPlugin = createMockPlugin({ claudeCliPath: customPath });
       mockPlugin.getResolvedClaudeCliPath.mockImplementation(() =>
         resolveClaudeCliPath(
+          undefined,  // Platform path (not used in tests)
           mockPlugin.settings.claudeCliPath,
           mockPlugin.getActiveEnvironmentVariables()
         )
@@ -408,6 +411,7 @@ describe('ClaudianService', () => {
       mockPlugin = createMockPlugin({ claudeCliPath: customPath });
       mockPlugin.getResolvedClaudeCliPath.mockImplementation(() =>
         resolveClaudeCliPath(
+          undefined,  // Platform path (not used in tests)
           mockPlugin.settings.claudeCliPath,
           mockPlugin.getActiveEnvironmentVariables()
         )
@@ -447,6 +451,7 @@ describe('ClaudianService', () => {
       mockPlugin = createMockPlugin({ claudeCliPath: customPath });
       mockPlugin.getResolvedClaudeCliPath.mockImplementation(() =>
         resolveClaudeCliPath(
+          undefined,  // Platform path (not used in tests)
           mockPlugin.settings.claudeCliPath,
           mockPlugin.getActiveEnvironmentVariables()
         )
@@ -498,6 +503,7 @@ describe('ClaudianService', () => {
       mockPlugin = createMockPlugin({ claudeCliPath: firstPath });
       mockPlugin.getResolvedClaudeCliPath.mockImplementation(() =>
         resolveClaudeCliPath(
+          undefined,  // Platform path (not used in tests)
           mockPlugin.settings.claudeCliPath,
           mockPlugin.getActiveEnvironmentVariables()
         )

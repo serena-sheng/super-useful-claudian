@@ -8,8 +8,8 @@
  * Machine-specific state (lastEnvHash, model tracking) stays in Obsidian's data.json.
  */
 
-import type { ClaudianSettings, PlatformBlockedCommands } from '../types';
-import { DEFAULT_SETTINGS, getDefaultBlockedCommands } from '../types';
+import type { ClaudianSettings, PlatformBlockedCommands, PlatformCliPaths } from '../types';
+import { DEFAULT_SETTINGS, getDefaultBlockedCommands, getDefaultCliPaths } from '../types';
 import type { VaultFileAdapter } from './VaultFileAdapter';
 
 /** Fields that are machine-specific state or loaded separately. */
@@ -58,6 +58,20 @@ function normalizeBlockedCommands(value: unknown): PlatformBlockedCommands {
   };
 }
 
+function normalizeCliPaths(value: unknown): PlatformCliPaths {
+  const defaults = getDefaultCliPaths();
+  if (!value || typeof value !== 'object') {
+    return defaults;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return {
+    macos: typeof candidate.macos === 'string' ? candidate.macos.trim() : defaults.macos,
+    linux: typeof candidate.linux === 'string' ? candidate.linux.trim() : defaults.linux,
+    windows: typeof candidate.windows === 'string' ? candidate.windows.trim() : defaults.windows,
+  };
+}
+
 export class SettingsStorage {
   constructor(private adapter: VaultFileAdapter) {}
 
@@ -71,11 +85,15 @@ export class SettingsStorage {
       const content = await this.adapter.read(SETTINGS_PATH);
       const stored = JSON.parse(content) as Record<string, unknown>;
       const blockedCommands = normalizeBlockedCommands(stored.blockedCommands);
+      const cliPaths = normalizeCliPaths(stored.claudeCliPaths);
+      const legacyCliPath = typeof stored.claudeCliPath === 'string' ? stored.claudeCliPath : '';
 
       return {
         ...this.getDefaults(),
         ...stored,
         blockedCommands,
+        claudeCliPath: legacyCliPath,
+        claudeCliPaths: cliPaths,
       } as StoredSettings;
     } catch (error) {
       console.error('[Claudian] Failed to load settings:', error);
@@ -108,6 +126,9 @@ export class SettingsStorage {
       lastCustomModel: ____,
       ...defaults
     } = DEFAULT_SETTINGS;
-    return defaults;
+    return {
+      ...defaults,
+      claudeCliPaths: getDefaultCliPaths(),
+    };
   }
 }

@@ -38,18 +38,23 @@ export {
 // Settings types
 export {
   type ClaudianSettings,
+  type CliPlatformKey,
   DEFAULT_SETTINGS,
   type EnvSnippet,
   getBashToolBlockedCommands,
+  getCliPlatformDisplayName,
+  getCliPlatformKey,
   getCurrentPlatformBlockedCommands,
   getCurrentPlatformKey,
   getDefaultBlockedCommands,
+  getDefaultCliPaths,
   type InstructionRefineResult,
   type KeyboardNavigationSettings,
   type NonPlanPermissionMode,
   type Permission,
   type PermissionMode,
   type PlatformBlockedCommands,
+  type PlatformCliPaths,
   type SlashCommand,
 } from './settings';
 

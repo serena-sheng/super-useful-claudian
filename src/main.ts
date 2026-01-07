@@ -18,6 +18,8 @@ import type {
 import {
   DEFAULT_CLAUDE_MODELS,
   DEFAULT_SETTINGS,
+  getCliPlatformKey,
+  getDefaultCliPaths,
   VIEW_TYPE_CLAUDIAN,
 } from './core/types';
 import { ClaudianView } from './features/chat/ClaudianView';
@@ -152,6 +154,20 @@ export default class ClaudianPlugin extends Plugin {
       slashCommands,
     };
 
+    this.settings.claudeCliPaths = {
+      ...getDefaultCliPaths(),
+      ...(this.settings.claudeCliPaths ?? {}),
+    };
+
+    // Migrate legacy claudeCliPath to platform-specific claudeCliPaths
+    let didMigrateCliPath = false;
+    if (this.settings.claudeCliPath && !this.hasAnyPlatformCliPath()) {
+      const currentPlatformKey = getCliPlatformKey();
+      this.settings.claudeCliPaths[currentPlatformKey] = this.settings.claudeCliPath.trim();
+      // Keep legacy field as fallback for downgrade compatibility
+      didMigrateCliPath = true;
+    }
+
     // Load all conversations from session files
     this.conversations = await this.storage.sessions.loadAllConversations();
     this.activeConversationId = state.activeConversationId;
@@ -167,7 +183,7 @@ export default class ClaudianPlugin extends Plugin {
     this.runtimeEnvironmentVariables = this.settings.environmentVariables || '';
     const { changed, invalidatedConversations } = this.reconcileModelWithEnvironment(this.runtimeEnvironmentVariables);
 
-    if (changed) {
+    if (changed || didMigrateCliPath) {
       await this.saveSettings();
     }
 
@@ -239,9 +255,15 @@ export default class ClaudianPlugin extends Plugin {
 
   getResolvedClaudeCliPath(): string | null {
     return this.cliResolver.resolve(
-      this.settings.claudeCliPath,
+      this.settings.claudeCliPaths,
+      this.settings.claudeCliPath,  // Legacy fallback
       this.getActiveEnvironmentVariables()
     );
+  }
+
+  private hasAnyPlatformCliPath(): boolean {
+    const paths = this.settings.claudeCliPaths;
+    return !!(paths?.macos || paths?.linux || paths?.windows);
   }
 
   private getDefaultModelValues(): string[] {

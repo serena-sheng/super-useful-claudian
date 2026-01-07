@@ -7,6 +7,9 @@ import type {
   ToolCallInfo} from '@/core/types';
 import {
   DEFAULT_SETTINGS,
+  getCliPlatformDisplayName,
+  getCliPlatformKey,
+  getDefaultCliPaths,
   VIEW_TYPE_CLAUDIAN} from '@/core/types';
 
 describe('types.ts', () => {
@@ -92,6 +95,7 @@ describe('types.ts', () => {
         slashCommands: [],
         keyboardNavigation: { scrollUpKey: 'w', scrollDownKey: 's', focusInputKey: 'i' },
         claudeCliPath: '',
+        claudeCliPaths: { macos: '', linux: '', windows: '' },
         loadUserClaudeSettings: false,
       };
 
@@ -120,6 +124,7 @@ describe('types.ts', () => {
         slashCommands: [],
         keyboardNavigation: { scrollUpKey: 'w', scrollDownKey: 's', focusInputKey: 'i' },
         claudeCliPath: '',
+        claudeCliPaths: { macos: '', linux: '', windows: '' },
         loadUserClaudeSettings: false,
       };
 
@@ -148,6 +153,7 @@ describe('types.ts', () => {
         slashCommands: [],
         keyboardNavigation: { scrollUpKey: 'w', scrollDownKey: 's', focusInputKey: 'i' },
         claudeCliPath: '',
+        claudeCliPaths: { macos: '', linux: '', windows: '' },
         loadUserClaudeSettings: false,
       };
 
@@ -428,6 +434,60 @@ describe('types.ts', () => {
 
       expect(meta.messageCount).toBe(0);
       expect(meta.preview).toBe('New conversation');
+    });
+  });
+
+  describe('Platform CLI helpers', () => {
+    describe('getCliPlatformKey', () => {
+      it('should return a valid platform key', () => {
+        const key = getCliPlatformKey();
+        expect(['macos', 'linux', 'windows']).toContain(key);
+      });
+
+      it('should return consistent results', () => {
+        const key1 = getCliPlatformKey();
+        const key2 = getCliPlatformKey();
+        expect(key1).toBe(key2);
+      });
+    });
+
+    describe('getCliPlatformDisplayName', () => {
+      it('should return macOS for macos key', () => {
+        expect(getCliPlatformDisplayName('macos')).toBe('macOS');
+      });
+
+      it('should return Linux for linux key', () => {
+        expect(getCliPlatformDisplayName('linux')).toBe('Linux');
+      });
+
+      it('should return Windows for windows key', () => {
+        expect(getCliPlatformDisplayName('windows')).toBe('Windows');
+      });
+    });
+
+    describe('getDefaultCliPaths', () => {
+      it('should return empty paths for all platforms', () => {
+        const paths = getDefaultCliPaths();
+        expect(paths.macos).toBe('');
+        expect(paths.linux).toBe('');
+        expect(paths.windows).toBe('');
+      });
+
+      it('should return a new object each time', () => {
+        const paths1 = getDefaultCliPaths();
+        const paths2 = getDefaultCliPaths();
+        expect(paths1).not.toBe(paths2);
+        expect(paths1).toEqual(paths2);
+      });
+    });
+
+    describe('DEFAULT_SETTINGS.claudeCliPaths', () => {
+      it('should have empty platform CLI paths by default', () => {
+        expect(DEFAULT_SETTINGS.claudeCliPaths).toBeDefined();
+        expect(DEFAULT_SETTINGS.claudeCliPaths.macos).toBe('');
+        expect(DEFAULT_SETTINGS.claudeCliPaths.linux).toBe('');
+        expect(DEFAULT_SETTINGS.claudeCliPaths.windows).toBe('');
+      });
     });
   });
 });

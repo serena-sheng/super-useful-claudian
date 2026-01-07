@@ -6,59 +6,112 @@
 
 import * as fs from 'fs';
 
+import { getCliPlatformKey, type PlatformCliPaths } from '../core/types/settings';
 import { parseEnvironmentVariables } from './env';
 import { expandHomePath, findClaudeCLIPath } from './path';
 
 export class ClaudeCliResolver {
   private resolvedPath: string | null = null;
-  private lastCustomPath = '';
+  private lastPlatformPath = '';
+  private lastLegacyPath = '';
   private lastEnvText = '';
 
-  resolve(customPath: string | undefined, envText: string): string | null {
-    const normalizedCustom = (customPath ?? '').trim();
+  /**
+   * Resolves CLI path with priority: platform-specific -> legacy -> auto-detect.
+   * Legacy fallback is only used when platform paths are not provided.
+   * @param platformPaths Platform-specific CLI paths
+   * @param legacyPath Legacy claudeCliPath (for backwards compatibility)
+   * @param envText Environment variables text
+   */
+  resolve(
+    platformPaths: PlatformCliPaths | undefined,
+    legacyPath: string | undefined,
+    envText: string
+  ): string | null {
+    const currentPlatformKey = getCliPlatformKey();
+    const platformPath = (platformPaths?.[currentPlatformKey] ?? '').trim();
+    const normalizedLegacy = platformPaths ? '' : (legacyPath ?? '').trim();
     const normalizedEnv = envText ?? '';
 
+    // Cache check
     if (
       this.resolvedPath &&
-      normalizedCustom === this.lastCustomPath &&
+      platformPath === this.lastPlatformPath &&
+      normalizedLegacy === this.lastLegacyPath &&
       normalizedEnv === this.lastEnvText
     ) {
       return this.resolvedPath;
     }
 
-    this.lastCustomPath = normalizedCustom;
+    this.lastPlatformPath = platformPath;
+    this.lastLegacyPath = normalizedLegacy;
     this.lastEnvText = normalizedEnv;
-    this.resolvedPath = resolveClaudeCliPath(normalizedCustom, normalizedEnv);
+
+    // Resolution priority: platform-specific -> legacy -> auto-detect
+    this.resolvedPath = resolveClaudeCliPath(platformPath, normalizedLegacy, normalizedEnv);
     return this.resolvedPath;
   }
 
   reset(): void {
     this.resolvedPath = null;
-    this.lastCustomPath = '';
+    this.lastPlatformPath = '';
+    this.lastLegacyPath = '';
     this.lastEnvText = '';
   }
 }
 
-export function resolveClaudeCliPath(customPath: string | undefined, envText: string): string | null {
-  const trimmed = (customPath ?? '').trim();
-  if (trimmed) {
-    const expandedPath = expandHomePath(trimmed);
+/**
+ * Resolves CLI path with fallback chain.
+ * @param platformPath Platform-specific path for current OS
+ * @param legacyPath Legacy claudeCliPath (backwards compatibility)
+ * @param envText Environment variables text
+ */
+export function resolveClaudeCliPath(
+  platformPath: string | undefined,
+  legacyPath: string | undefined,
+  envText: string
+): string | null {
+  // Try platform-specific path first
+  const trimmedPlatform = (platformPath ?? '').trim();
+  if (trimmedPlatform) {
+    const expandedPath = expandHomePath(trimmedPlatform);
     if (fs.existsSync(expandedPath)) {
       try {
         const stat = fs.statSync(expandedPath);
         if (stat.isFile()) {
           return expandedPath;
         }
-        console.warn(`Claudian: Custom CLI path is a directory, not a file: ${expandedPath}`);
+        console.warn(`Claudian: Platform CLI path is a directory, not a file: ${expandedPath}`);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        console.warn(`Claudian: Custom CLI path not accessible: ${expandedPath} (${message})`);
+        console.warn(`Claudian: Platform CLI path not accessible: ${expandedPath} (${message})`);
       }
     } else {
-      console.warn(`Claudian: Custom CLI path not found: ${expandedPath}`);
+      console.warn(`Claudian: Platform CLI path not found: ${expandedPath}`);
     }
   }
 
+  // Fall back to legacy path
+  const trimmedLegacy = (legacyPath ?? '').trim();
+  if (trimmedLegacy) {
+    const expandedPath = expandHomePath(trimmedLegacy);
+    if (fs.existsSync(expandedPath)) {
+      try {
+        const stat = fs.statSync(expandedPath);
+        if (stat.isFile()) {
+          return expandedPath;
+        }
+        console.warn(`Claudian: Legacy CLI path is a directory, not a file: ${expandedPath}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`Claudian: Legacy CLI path not accessible: ${expandedPath} (${message})`);
+      }
+    } else {
+      console.warn(`Claudian: Legacy CLI path not found: ${expandedPath}`);
+    }
+  }
+
+  // Auto-detect
   const customEnv = parseEnvironmentVariables(envText || '');
   return findClaudeCLIPath(customEnv.PATH);
 }

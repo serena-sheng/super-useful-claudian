@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import type { App } from 'obsidian';
 import { Notice, PluginSettingTab, Setting } from 'obsidian';
 
-import { getCurrentPlatformKey } from '../../core/types';
+import { getCliPlatformKey, getCurrentPlatformKey } from '../../core/types';
 import { DEFAULT_CLAUDE_MODELS } from '../../core/types/models';
 import type ClaudianPlugin from '../../main';
 import { EnvSnippetManager, McpSettingsManager, SlashCommandSettings } from '../../ui';
@@ -464,6 +464,9 @@ export class ClaudianSettingTab extends PluginSettingTab {
     // Advanced section
     new Setting(containerEl).setName('Advanced').setHeading();
 
+    // Get current platform key for platform-specific CLI path storage
+    const cliPlatformKey = getCliPlatformKey();
+
     const cliPathDescription = process.platform === 'win32'
       ? 'Custom path to Claude Code CLI. Leave empty for auto-detection. For the native installer, use claude.exe. For npm/pnpm/yarn or other package manager installs, use the cli.js path (not claude.cmd).'
       : 'Custom path to Claude Code CLI. Leave empty for auto-detection. Paste the output of "which claude" — works for both native and npm/pnpm/yarn installs.';
@@ -501,9 +504,13 @@ export class ClaudianSettingTab extends PluginSettingTab {
       const placeholder = process.platform === 'win32'
         ? 'D:\\nodejs\\node_global\\node_modules\\@anthropic-ai\\claude-code\\cli.js'
         : '/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js';
+
+      // Read from platform-specific path
+      const currentValue = this.plugin.settings.claudeCliPaths[cliPlatformKey] || '';
+
       text
         .setPlaceholder(placeholder)
-        .setValue(this.plugin.settings.claudeCliPath || '')
+        .setValue(currentValue)
         .onChange(async (value) => {
           const error = validatePath(value);
           if (error) {
@@ -515,7 +522,11 @@ export class ClaudianSettingTab extends PluginSettingTab {
             text.inputEl.style.borderColor = '';
           }
 
-          this.plugin.settings.claudeCliPath = value.trim();
+          const trimmed = value.trim();
+          // Write to platform-specific path
+          this.plugin.settings.claudeCliPaths[cliPlatformKey] = trimmed;
+          // Keep legacy field in sync for downgrade compatibility
+          this.plugin.settings.claudeCliPath = trimmed;
           await this.plugin.saveSettings();
           // Clear cached path so next query will use the new path
           this.plugin.cliResolver?.reset();
@@ -525,7 +536,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
       text.inputEl.style.width = '100%';
 
       // Validate on initial load
-      const initialError = validatePath(this.plugin.settings.claudeCliPath || '');
+      const initialError = validatePath(currentValue);
       if (initialError) {
         validationEl.setText(initialError);
         validationEl.style.display = 'block';

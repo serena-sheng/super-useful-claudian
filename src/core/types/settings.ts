@@ -86,6 +86,49 @@ export function getBashToolBlockedCommands(commands: PlatformBlockedCommands): s
   return getCurrentPlatformBlockedCommands(commands);
 }
 
+/** Platform-specific Claude CLI paths. */
+export interface PlatformCliPaths {
+  macos: string;
+  linux: string;
+  windows: string;
+}
+
+/** Platform key for CLI paths. */
+export type CliPlatformKey = keyof PlatformCliPaths;
+
+/** Map process.platform to CLI platform key. */
+export function getCliPlatformKey(): CliPlatformKey {
+  switch (process.platform) {
+    case 'darwin':
+      return 'macos';
+    case 'win32':
+      return 'windows';
+    default:
+      return 'linux';
+  }
+}
+
+/** Get the display name for a CLI platform key. */
+export function getCliPlatformDisplayName(key: CliPlatformKey): string {
+  switch (key) {
+    case 'macos':
+      return 'macOS';
+    case 'linux':
+      return 'Linux';
+    case 'windows':
+      return 'Windows';
+  }
+}
+
+/** Get default empty CLI paths. */
+export function getDefaultCliPaths(): PlatformCliPaths {
+  return {
+    macos: '',
+    linux: '',
+    windows: '',
+  };
+}
+
 /** Permission mode for tool execution. */
 export type PermissionMode = 'yolo' | 'normal' | 'plan';
 export type NonPlanPermissionMode = Exclude<PermissionMode, 'plan'>;
@@ -147,7 +190,8 @@ export interface ClaudianSettings {
   allowedExportPaths: string[];
   slashCommands: SlashCommand[];
   keyboardNavigation: KeyboardNavigationSettings;
-  claudeCliPath: string;  // Custom Claude CLI path (empty = auto-detect)
+  claudeCliPath: string;  // Legacy: single CLI path (for backwards compatibility)
+  claudeCliPaths: PlatformCliPaths;  // Platform-specific CLI paths (preferred)
   loadUserClaudeSettings: boolean;  // Load ~/.claude/settings.json (may override permissions)
 }
 
@@ -178,7 +222,8 @@ export const DEFAULT_SETTINGS: ClaudianSettings = {
     scrollDownKey: 's',
     focusInputKey: 'i',
   },
-  claudeCliPath: '',  // Empty = auto-detect
+  claudeCliPath: '',  // Legacy field (empty = not migrated)
+  claudeCliPaths: getDefaultCliPaths(),  // Platform-specific paths
   loadUserClaudeSettings: true,  // Default on for compatibility
 };
 

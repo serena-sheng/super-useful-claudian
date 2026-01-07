@@ -1,5 +1,5 @@
 import * as imageCache from '@/core/images/imageCache';
-import { DEFAULT_SETTINGS, VIEW_TYPE_CLAUDIAN } from '@/core/types';
+import { DEFAULT_SETTINGS, getCliPlatformKey, VIEW_TYPE_CLAUDIAN } from '@/core/types';
 
 // Mock fs for ClaudianService
 jest.mock('fs');
@@ -98,6 +98,25 @@ describe('ClaudianPlugin', () => {
       await plugin.onload();
 
       expect((plugin.addSettingTab as jest.Mock)).toHaveBeenCalled();
+    });
+
+    it('should migrate legacy cli path to platform-specific paths', async () => {
+      const legacyPath = '/legacy/claude';
+      mockApp.vault.adapter.exists.mockImplementation(async (path: string) => {
+        return path === '.claude/settings.json';
+      });
+      mockApp.vault.adapter.read.mockImplementation(async (path: string) => {
+        if (path === '.claude/settings.json') {
+          return JSON.stringify({ claudeCliPath: legacyPath });
+        }
+        return '';
+      });
+
+      await plugin.onload();
+
+      const platformKey = getCliPlatformKey();
+      expect(plugin.settings.claudeCliPaths[platformKey]).toBe(legacyPath);
+      expect(mockApp.vault.adapter.write).toHaveBeenCalled();
     });
   });
 
