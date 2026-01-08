@@ -17,7 +17,7 @@ import {
 import { CHECK_ICON_SVG, MCP_ICON_SVG } from '../../features/chat/constants';
 import type { McpService } from '../../features/mcp/McpService';
 import { getModelsFromEnvironment, parseEnvironmentVariables } from '../../utils/env';
-import { findConflictingPath } from '../../utils/externalContext';
+import { filterValidPaths, findConflictingPath, isDuplicatePath, isValidDirectoryPath } from '../../utils/externalContext';
 
 /** Settings access interface for toolbar components. */
 export interface ToolbarSettings {
@@ -297,9 +297,17 @@ export class ExternalContextSelector {
   private badgeEl: HTMLElement | null = null;
   private dropdownEl: HTMLElement | null = null;
   private callbacks: ToolbarCallbacks;
-  /** Session-specific external context paths (resets on new conversation). */
+  /**
+   * Current external context paths. May contain:
+   * - Persistent paths only (new sessions via clearExternalContexts)
+   * - Restored session paths (loaded sessions via setExternalContexts)
+   * - Mixed paths during active sessions
+   */
   private externalContextPaths: string[] = [];
+  /** Paths that persist across all sessions (stored in settings). */
+  private persistentPaths: Set<string> = new Set();
   private onChangeCallback: ((paths: string[]) => void) | null = null;
+  private onPersistenceChangeCallback: ((paths: string[]) => void) | null = null;
 
   constructor(parentEl: HTMLElement, callbacks: ToolbarCallbacks) {
     this.callbacks = callbacks;
@@ -312,21 +320,107 @@ export class ExternalContextSelector {
     this.onChangeCallback = callback;
   }
 
+  /** Set callback for when persistent paths change (to save to settings). */
+  setOnPersistenceChange(callback: (paths: string[]) => void): void {
+    this.onPersistenceChangeCallback = callback;
+  }
+
   /** Get current external context paths. */
   getExternalContexts(): string[] {
     return [...this.externalContextPaths];
   }
 
-  /** Set external context paths (for restoring from conversation). */
+  /** Get current persistent paths. */
+  getPersistentPaths(): string[] {
+    return [...this.persistentPaths];
+  }
+
+  /** Set persistent paths (call on initialization from settings). */
+  setPersistentPaths(paths: string[]): void {
+    // Validate paths - remove non-existent directories
+    const validPaths = filterValidPaths(paths);
+    const invalidPaths = paths.filter(p => !validPaths.includes(p));
+
+    this.persistentPaths = new Set(validPaths);
+    // Merge persistent paths into external context paths
+    this.mergePersistentPaths();
+    this.updateDisplay();
+    this.renderDropdown();
+
+    // If invalid paths were removed, notify user and save updated list
+    if (invalidPaths.length > 0) {
+      const pathNames = invalidPaths.map(p => this.shortenPath(p)).join(', ');
+      new Notice(`Removed ${invalidPaths.length} invalid external context path(s): ${pathNames}`, 5000);
+      console.warn('[ExternalContext] Removed invalid paths:', invalidPaths);
+      this.onPersistenceChangeCallback?.([...this.persistentPaths]);
+    }
+  }
+
+  /** Toggle persistence for a path. */
+  togglePersistence(path: string): void {
+    if (this.persistentPaths.has(path)) {
+      this.persistentPaths.delete(path);
+    } else {
+      // Validate path still exists before persisting
+      if (!isValidDirectoryPath(path)) {
+        new Notice(`Cannot persist "${this.shortenPath(path)}" - directory no longer exists`, 4000);
+        return;
+      }
+      this.persistentPaths.add(path);
+    }
+    this.onPersistenceChangeCallback?.([...this.persistentPaths]);
+    this.renderDropdown();
+  }
+
+  /** Merge persistent paths into externalContextPaths without duplicates. */
+  private mergePersistentPaths(): void {
+    const pathSet = new Set(this.externalContextPaths);
+    for (const path of this.persistentPaths) {
+      pathSet.add(path);
+    }
+    this.externalContextPaths = [...pathSet];
+  }
+
+  /**
+   * Restore exact external context paths from a saved conversation.
+   * Does NOT merge with persistent paths - preserves the session's historical state.
+   * Use clearExternalContexts() for new sessions to start with current persistent paths.
+   */
   setExternalContexts(paths: string[]): void {
     this.externalContextPaths = [...paths];
     this.updateDisplay();
     this.renderDropdown();
   }
 
-  /** Clear external context paths (call on new conversation). */
-  clearExternalContexts(): void {
-    this.externalContextPaths = [];
+  /**
+   * Remove a path from external contexts (and persistent paths if applicable).
+   * Exposed for testing the remove button behavior.
+   */
+  removePath(pathStr: string): void {
+    this.externalContextPaths = this.externalContextPaths.filter(p => p !== pathStr);
+    // Also remove from persistent paths if it was persistent
+    if (this.persistentPaths.has(pathStr)) {
+      this.persistentPaths.delete(pathStr);
+      this.onPersistenceChangeCallback?.([...this.persistentPaths]);
+    }
+    this.onChangeCallback?.(this.externalContextPaths);
+    this.updateDisplay();
+    this.renderDropdown();
+  }
+
+  /**
+   * Clear session-only external context paths (call on new conversation).
+   * Uses persistent paths from settings if provided, otherwise falls back to local cache.
+   * Validates paths before using them (silently filters invalid during session init).
+   */
+  clearExternalContexts(persistentPathsFromSettings?: string[]): void {
+    // Use settings value if provided (most up-to-date), otherwise use local cache
+    if (persistentPathsFromSettings) {
+      // Validate paths - silently filter during session initialization (not user action)
+      const validPaths = filterValidPaths(persistentPathsFromSettings);
+      this.persistentPaths = new Set(validPaths);
+    }
+    this.externalContextPaths = [...this.persistentPaths];
     this.updateDisplay();
     this.renderDropdown();
   }
@@ -366,8 +460,9 @@ export class ExternalContextSelector {
       if (!result.canceled && result.filePaths.length > 0) {
         const selectedPath = result.filePaths[0];
 
-        // Check for duplicate
-        if (this.externalContextPaths.includes(selectedPath)) {
+        // Check for duplicate (normalized comparison for cross-platform support)
+        if (isDuplicatePath(selectedPath, this.externalContextPaths)) {
+          new Notice('This folder is already added as an external context.', 3000);
           return;
         }
 
@@ -385,7 +480,8 @@ export class ExternalContextSelector {
         this.renderDropdown();
       }
     } catch (err) {
-      console.error('Failed to open folder picker:', err);
+      console.error('[ExternalContext] Failed to open folder picker:', err);
+      new Notice('Unable to open folder picker. Please check console for details.', 5000);
     }
   }
 
@@ -406,6 +502,7 @@ export class ExternalContextSelector {
 
   private renderDropdown() {
     if (!this.dropdownEl) return;
+
     this.dropdownEl.empty();
 
     // Header
@@ -428,15 +525,25 @@ export class ExternalContextSelector {
         pathTextEl.setText(displayPath);
         pathTextEl.setAttribute('title', pathStr);
 
+        // Lock toggle button
+        const isPersistent = this.persistentPaths.has(pathStr);
+        const lockBtn = itemEl.createSpan({ cls: 'claudian-external-context-lock' });
+        if (isPersistent) {
+          lockBtn.addClass('locked');
+        }
+        setIcon(lockBtn, isPersistent ? 'lock' : 'unlock');
+        lockBtn.setAttribute('title', isPersistent ? 'Persistent (click to make session-only)' : 'Session-only (click to persist)');
+        lockBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.togglePersistence(pathStr);
+        });
+
         const removeBtn = itemEl.createSpan({ cls: 'claudian-external-context-remove' });
         setIcon(removeBtn, 'x');
         removeBtn.setAttribute('title', 'Remove path');
         removeBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          this.externalContextPaths = this.externalContextPaths.filter(p => p !== pathStr);
-          this.onChangeCallback?.(this.externalContextPaths);
-          this.updateDisplay();
-          this.renderDropdown();
+          this.removePath(pathStr);
         });
       }
     }
@@ -460,8 +567,9 @@ export class ExternalContextSelector {
       if (compareFull.startsWith(compareHome)) {
         return '~' + fullPath.slice(homeDir.length);
       }
-    } catch {
-      // Fall back to full path
+    } catch (error) {
+      // Log for debugging but don't disrupt UX
+      console.debug('[ExternalContext] Failed to shorten path, using full path:', error);
     }
     return fullPath;
   }
