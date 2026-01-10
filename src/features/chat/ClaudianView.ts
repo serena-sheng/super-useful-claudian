@@ -111,6 +111,12 @@ export class ClaudianView extends ItemView {
     return 'bot';
   }
 
+  /** Refreshes the model selector display (used after env var changes). */
+  refreshModelSelector(): void {
+    this.modelSelector?.updateDisplay();
+    this.modelSelector?.renderOptions();
+  }
+
   async onOpen() {
     const container = this.containerEl.children[1] as HTMLElement;
     container.empty();

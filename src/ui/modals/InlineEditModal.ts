@@ -16,7 +16,7 @@ import { TOOL_BASH } from '../../core/tools/toolNames';
 import { getBashToolBlockedCommands } from '../../core/types';
 import { type InlineEditMode, InlineEditService } from '../../features/inline-edit/InlineEditService';
 import type ClaudianPlugin from '../../main';
-import { type CursorContext } from '../../utils/editor';
+import { type CursorContext, getEditorView } from '../../utils/editor';
 import { escapeHtml, normalizeInsertionText } from '../../utils/inlineEdit';
 import { getVaultPath, isPathWithinVault, normalizePathForFilesystem } from '../../utils/path';
 import { formatSlashCommandWarnings } from '../../utils/slashCommand';
@@ -238,7 +238,7 @@ export class InlineEditModal {
     if (!view) return { decision: 'reject' };
 
     const editor = view.editor;
-    const editorView = (editor as any).cm as EditorView;
+    const editorView = getEditorView(editor);
     if (!editorView) return { decision: 'reject' };
 
     return new Promise((resolve) => {
