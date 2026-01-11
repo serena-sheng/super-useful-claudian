@@ -163,12 +163,13 @@ export class MentionDropdownController {
       this.selectedMentionIndex = this.dropdown.getSelectedIndex();
       return true;
     }
-    if (e.key === 'Enter' || e.key === 'Tab') {
+    // Check !e.isComposing for IME support (Chinese, Japanese, Korean, etc.)
+    if ((e.key === 'Enter' || e.key === 'Tab') && !e.isComposing) {
       e.preventDefault();
       this.selectMentionItem();
       return true;
     }
-    if (e.key === 'Escape') {
+    if (e.key === 'Escape' && !e.isComposing) {
       e.preventDefault();
       this.hide();
       return true;

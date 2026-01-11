@@ -621,10 +621,11 @@ class InlineEditController {
     if (this.escHandler) {
       document.removeEventListener('keydown', this.escHandler);
     }
+    // Check !e.isComposing for IME support (Chinese, Japanese, Korean, etc.)
     this.escHandler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !e.isComposing) {
         this.reject();
-      } else if (e.key === 'Enter') {
+      } else if (e.key === 'Enter' && !e.isComposing) {
         this.accept();
       }
     };
@@ -658,10 +659,11 @@ class InlineEditController {
     if (this.escHandler) {
       document.removeEventListener('keydown', this.escHandler);
     }
+    // Check !e.isComposing for IME support (Chinese, Japanese, Korean, etc.)
     this.escHandler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !e.isComposing) {
         this.reject();
-      } else if (e.key === 'Enter') {
+      } else if (e.key === 'Enter' && !e.isComposing) {
         this.accept();
       }
     };
