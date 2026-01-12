@@ -195,7 +195,7 @@ export class SlashCommandDropdown {
         // Argument hint
         if (cmd.argumentHint) {
           const hintEl = itemEl.createSpan({ cls: 'claudian-slash-hint' });
-          hintEl.setText(cmd.argumentHint);
+          hintEl.setText(`[${cmd.argumentHint}]`);
         }
 
         // Description
