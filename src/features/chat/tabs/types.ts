@@ -63,6 +63,18 @@ export const MAX_TABS = 10;
 export const HIGH_TAB_WARNING_THRESHOLD = 5;
 
 /**
+ * Minimum max-height for textarea in pixels.
+ * Used by autoResizeTextarea to ensure minimum usable space.
+ */
+export const TEXTAREA_MIN_MAX_HEIGHT = 150;
+
+/**
+ * Percentage of view height for max textarea height.
+ * Textarea can grow up to this portion of the view.
+ */
+export const TEXTAREA_MAX_HEIGHT_PERCENT = 0.55;
+
+/**
  * Minimal interface for the ClaudianView methods used by TabManager and Tab.
  * Extends Component for Obsidian integration (event handling, cleanup).
  * Avoids circular dependency by not importing ClaudianView directly.

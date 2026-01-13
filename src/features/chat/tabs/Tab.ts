@@ -39,7 +39,7 @@ import {
   TodoPanel,
 } from '../ui';
 import type { TabData, TabDOMElements, TabId } from './types';
-import { generateTabId } from './types';
+import { generateTabId, TEXTAREA_MAX_HEIGHT_PERCENT, TEXTAREA_MIN_MAX_HEIGHT } from './types';
 
 /** Options for creating a new Tab. */
 export interface TabCreateOptions {
@@ -152,11 +152,6 @@ export function createTab(options: TabCreateOptions): TabData {
   return tab;
 }
 
-/** Minimum max-height for textarea in pixels. */
-const MIN_MAX_HEIGHT = 150;
-/** Percentage of view height for max textarea height. */
-const MAX_HEIGHT_PERCENT = 0.55;
-
 /**
  * Auto-resizes a textarea based on its content.
  *
@@ -172,7 +167,7 @@ function autoResizeTextarea(textarea: HTMLTextAreaElement): void {
 
   // Calculate max height: 55% of view height, minimum 150px
   const viewHeight = textarea.closest('.claudian-container')?.clientHeight ?? window.innerHeight;
-  const maxHeight = Math.max(MIN_MAX_HEIGHT, viewHeight * MAX_HEIGHT_PERCENT);
+  const maxHeight = Math.max(TEXTAREA_MIN_MAX_HEIGHT, viewHeight * TEXTAREA_MAX_HEIGHT_PERCENT);
 
   // Get flex-allocated height (what flexbox gives the textarea)
   const flexAllocatedHeight = textarea.offsetHeight;
@@ -389,7 +384,7 @@ export function initializeTabUI(
     getEnvironmentVariables: () => plugin.getActiveEnvironmentVariables(),
     onModelChange: async (model: ClaudeModel) => {
       plugin.settings.model = model;
-      const isDefaultModel = DEFAULT_CLAUDE_MODELS.find((m: any) => m.value === model);
+      const isDefaultModel = DEFAULT_CLAUDE_MODELS.find((m) => m.value === model);
       if (isDefaultModel) {
         plugin.settings.thinkingBudget = DEFAULT_THINKING_BUDGET[model];
         plugin.settings.lastClaudeModel = model;

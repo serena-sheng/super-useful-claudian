@@ -259,6 +259,7 @@ function createMockElement(): any {
       return child;
     },
     querySelector: jest.fn().mockReturnValue(null),
+    closest: jest.fn().mockReturnValue({ clientHeight: 600 }),
     insertBefore: jest.fn(),
     remove: jest.fn(),
     addEventListener: (event: string, handler: EventHandler) => {
