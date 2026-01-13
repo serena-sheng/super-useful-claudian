@@ -42,6 +42,11 @@ import {
   TodoPanel,
 } from './ui';
 
+// Input height constants
+const MIN_INPUT_HEIGHT = 60;
+const MAX_INPUT_HEIGHT_FALLBACK = 150;
+const MAX_INPUT_HEIGHT_RATIO = 0.55;
+
 /** Main sidebar chat view for interacting with Claude. */
 export class ClaudianView extends ItemView {
   private plugin: ClaudianPlugin;
@@ -65,6 +70,7 @@ export class ClaudianView extends ItemView {
   private titleGenerationService: TitleGenerationService | null = null;
 
   // DOM Elements
+  private viewContainerEl: HTMLElement | null = null;
   private messagesEl: HTMLElement | null = null;
   private inputEl: HTMLTextAreaElement | null = null;
   private inputWrapper: HTMLElement | null = null;
@@ -85,6 +91,10 @@ export class ClaudianView extends ItemView {
   private instructionModeManager: InstructionModeManager | null = null;
   private contextUsageMeter: ContextUsageMeter | null = null;
   private todoPanel: TodoPanel | null = null;
+
+  // Input height management
+  private resizeObserver: ResizeObserver | null = null;
+  private rafId: number | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: ClaudianPlugin) {
     super(leaf);
@@ -117,16 +127,16 @@ export class ClaudianView extends ItemView {
   }
 
   async onOpen() {
-    const container = this.containerEl.children[1] as HTMLElement;
-    container.empty();
-    container.addClass('claudian-container');
+    this.viewContainerEl = this.containerEl.children[1] as HTMLElement;
+    this.viewContainerEl.empty();
+    this.viewContainerEl.addClass('claudian-container');
 
     // Build header
-    const header = container.createDiv({ cls: 'claudian-header' });
+    const header = this.viewContainerEl.createDiv({ cls: 'claudian-header' });
     this.buildHeader(header);
 
     // Build messages area
-    this.messagesEl = container.createDiv({ cls: 'claudian-messages' });
+    this.messagesEl = this.viewContainerEl.createDiv({ cls: 'claudian-messages' });
 
     // Welcome message
     this.welcomeEl = this.messagesEl.createDiv({ cls: 'claudian-welcome' });
@@ -136,7 +146,7 @@ export class ClaudianView extends ItemView {
     this.todoPanel.mount(this.messagesEl);
 
     // Build input area
-    const inputContainerEl = container.createDiv({ cls: 'claudian-input-container' });
+    const inputContainerEl = this.viewContainerEl.createDiv({ cls: 'claudian-input-container' });
     this.buildInputArea(inputContainerEl);
 
     // Initialize renderer
@@ -155,14 +165,29 @@ export class ClaudianView extends ItemView {
     // Start selection polling
     this.selectionController?.start();
 
+    // Setup ResizeObserver to handle container resize
+    this.resizeObserver = new ResizeObserver(() => this.adjustInputHeight());
+    this.resizeObserver.observe(this.viewContainerEl);
+
     // Load conversation
     await this.conversationController?.loadActive();
+
+    // Initial input height adjustment (after conversation loads)
+    this.adjustInputHeight();
   }
 
   async onClose() {
     // Stop polling
     this.selectionController?.stop();
     this.selectionController?.clear();
+
+    // Cleanup ResizeObserver and pending RAF
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
+    if (this.rafId) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
 
     // Cleanup navigation controller
     this.navigationController?.dispose();
@@ -315,6 +340,7 @@ export class ClaudianView extends ItemView {
           await this.inputController?.handleInstructionSubmit(rawInstruction);
         },
         getInputWrapper: () => this.inputWrapper,
+        resetInputHeight: () => this.adjustInputHeight(),
       }
     );
 
@@ -426,7 +452,10 @@ export class ClaudianView extends ItemView {
         getTitleGenerationService: () => this.titleGenerationService,
         getTodoPanel: () => this.todoPanel,
       },
-      {}
+      {
+        onConversationLoaded: () => this.adjustInputHeight(),
+        onConversationSwitched: () => this.adjustInputHeight(),
+      }
     );
 
     // Input controller
@@ -450,6 +479,7 @@ export class ClaudianView extends ItemView {
       getTitleGenerationService: () => this.titleGenerationService,
       generateId: () => this.generateId(),
       resetContextMeter: () => this.contextUsageMeter?.update(null),
+      resetInputHeight: () => this.adjustInputHeight(),
     });
 
     // Set approval callback
@@ -548,6 +578,7 @@ export class ClaudianView extends ItemView {
     });
 
     this.inputEl!.addEventListener('input', () => {
+      this.adjustInputHeight();
       this.fileContextManager?.handleInputChange();
       this.instructionModeManager?.handleInputChange();
     });
@@ -563,5 +594,32 @@ export class ClaudianView extends ItemView {
 
   private generateId(): string {
     return `msg-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+  }
+
+  /**
+   * Adjusts textarea height based on content.
+   * Auto-expands up to maxHeight = max(MAX_INPUT_HEIGHT_FALLBACK, viewHeight * MAX_INPUT_HEIGHT_RATIO).
+   * Uses requestAnimationFrame to avoid layout thrashing on rapid input events.
+   */
+  private adjustInputHeight(): void {
+    if (this.rafId) return; // Already scheduled
+
+    this.rafId = requestAnimationFrame(() => {
+      this.rafId = null;
+      if (!this.inputEl || !this.viewContainerEl) return;
+
+      const viewHeight = this.viewContainerEl.clientHeight;
+
+      // Calculate max height: MAX_INPUT_HEIGHT_RATIO of view, minimum MAX_INPUT_HEIGHT_FALLBACK
+      const maxHeight = Math.max(MAX_INPUT_HEIGHT_FALLBACK, viewHeight * MAX_INPUT_HEIGHT_RATIO);
+
+      // Reset height to auto to get accurate scrollHeight
+      this.inputEl.style.height = 'auto';
+
+      // Calculate new height (clamp between min and max)
+      const newHeight = Math.min(Math.max(MIN_INPUT_HEIGHT, this.inputEl.scrollHeight), maxHeight);
+
+      this.inputEl.style.height = `${newHeight}px`;
+    });
   }
 }
