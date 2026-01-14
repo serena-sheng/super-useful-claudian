@@ -69,6 +69,8 @@ npm run dev
 npm run build
 ```
 
+> **Tip**: Create `.env.local` in the root directory with `OBSIDIAN_VAULT=<your vault path>` to auto-copy files to your vault during development.
+
 ## Usage
 
 **Two modes:**
