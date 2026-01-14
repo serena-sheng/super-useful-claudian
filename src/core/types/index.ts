@@ -47,12 +47,11 @@ export {
   DEFAULT_SETTINGS,
   type EnvSnippet,
   getBashToolBlockedCommands,
-  getCliPlatformDisplayName,
-  getCliPlatformKey,
+  getCliPlatformKey,  // Kept for migration
   getCurrentPlatformBlockedCommands,
   getCurrentPlatformKey,
   getDefaultBlockedCommands,
-  getDefaultCliPaths,
+  type HostnameCliPaths,
   type InstructionRefineResult,
   type KeyboardNavigationSettings,
   type LegacyPermission,
@@ -63,9 +62,12 @@ export {
   type PermissionMode,
   type PermissionRule,
   type PlatformBlockedCommands,
-  type PlatformCliPaths,
+  type PlatformCliPaths,  // Kept for migration
   type SlashCommand,
 } from './settings';
+
+// Re-export getHostnameKey from utils (moved from settings for architecture compliance)
+export { getHostnameKey } from '../../utils/env';
 
 // Tool types
 export {

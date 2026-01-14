@@ -6,55 +6,57 @@
 
 import * as fs from 'fs';
 
-import { getCliPlatformKey, type PlatformCliPaths } from '../core/types/settings';
-import { parseEnvironmentVariables } from './env';
+import { type HostnameCliPaths } from '../core/types/settings';
+import { getHostnameKey, parseEnvironmentVariables } from './env';
 import { expandHomePath, findClaudeCLIPath } from './path';
 
 export class ClaudeCliResolver {
   private resolvedPath: string | null = null;
-  private lastPlatformPath = '';
+  private lastHostnamePath = '';
   private lastLegacyPath = '';
   private lastEnvText = '';
+  // Cache hostname since it doesn't change during a session
+  private readonly cachedHostname = getHostnameKey();
 
   /**
-   * Resolves CLI path with priority: platform-specific -> legacy -> auto-detect.
-   * Legacy fallback is only used when platform paths are not provided.
-   * @param platformPaths Platform-specific CLI paths
+   * Resolves CLI path with priority: hostname-specific -> legacy -> auto-detect.
+   * @param hostnamePaths Per-device CLI paths keyed by hostname (preferred)
    * @param legacyPath Legacy claudeCliPath (for backwards compatibility)
    * @param envText Environment variables text
    */
   resolve(
-    platformPaths: PlatformCliPaths | undefined,
+    hostnamePaths: HostnameCliPaths | undefined,
     legacyPath: string | undefined,
     envText: string
   ): string | null {
-    const currentPlatformKey = getCliPlatformKey();
-    const platformPath = (platformPaths?.[currentPlatformKey] ?? '').trim();
-    const normalizedLegacy = platformPaths ? '' : (legacyPath ?? '').trim();
+    const hostnameKey = this.cachedHostname;
+
+    const hostnamePath = (hostnamePaths?.[hostnameKey] ?? '').trim();
+    const normalizedLegacy = (legacyPath ?? '').trim();
     const normalizedEnv = envText ?? '';
 
     // Cache check
     if (
       this.resolvedPath &&
-      platformPath === this.lastPlatformPath &&
+      hostnamePath === this.lastHostnamePath &&
       normalizedLegacy === this.lastLegacyPath &&
       normalizedEnv === this.lastEnvText
     ) {
       return this.resolvedPath;
     }
 
-    this.lastPlatformPath = platformPath;
+    this.lastHostnamePath = hostnamePath;
     this.lastLegacyPath = normalizedLegacy;
     this.lastEnvText = normalizedEnv;
 
-    // Resolution priority: platform-specific -> legacy -> auto-detect
-    this.resolvedPath = resolveClaudeCliPath(platformPath, normalizedLegacy, normalizedEnv);
+    // Resolution priority: hostname-specific -> legacy -> auto-detect
+    this.resolvedPath = resolveClaudeCliPath(hostnamePath, normalizedLegacy, normalizedEnv);
     return this.resolvedPath;
   }
 
   reset(): void {
     this.resolvedPath = null;
-    this.lastPlatformPath = '';
+    this.lastHostnamePath = '';
     this.lastLegacyPath = '';
     this.lastEnvText = '';
   }
@@ -62,44 +64,46 @@ export class ClaudeCliResolver {
 
 /**
  * Resolves CLI path with fallback chain.
- * @param platformPath Platform-specific path for current OS
+ * @param hostnamePath Hostname-specific path for this device (preferred)
  * @param legacyPath Legacy claudeCliPath (backwards compatibility)
  * @param envText Environment variables text
  */
 export function resolveClaudeCliPath(
-  platformPath: string | undefined,
+  hostnamePath: string | undefined,
   legacyPath: string | undefined,
   envText: string
 ): string | null {
-  // Try platform-specific path first
-  const trimmedPlatform = (platformPath ?? '').trim();
-  if (trimmedPlatform) {
-    const expandedPath = expandHomePath(trimmedPlatform);
-    if (fs.existsSync(expandedPath)) {
-      try {
+  // Try hostname-specific path first (highest priority)
+  const trimmedHostname = (hostnamePath ?? '').trim();
+  if (trimmedHostname) {
+    try {
+      const expandedPath = expandHomePath(trimmedHostname);
+      if (fs.existsSync(expandedPath)) {
         const stat = fs.statSync(expandedPath);
         if (stat.isFile()) {
           return expandedPath;
         }
-      } catch {
-        // Ignore and fall back to legacy path detection.
+        console.warn('[ClaudeCliResolver] Hostname path exists but is not a file:', expandedPath);
       }
+    } catch (error) {
+      console.warn('[ClaudeCliResolver] Error resolving hostname path:', trimmedHostname, error);
     }
   }
 
   // Fall back to legacy path
   const trimmedLegacy = (legacyPath ?? '').trim();
   if (trimmedLegacy) {
-    const expandedPath = expandHomePath(trimmedLegacy);
-    if (fs.existsSync(expandedPath)) {
-      try {
+    try {
+      const expandedPath = expandHomePath(trimmedLegacy);
+      if (fs.existsSync(expandedPath)) {
         const stat = fs.statSync(expandedPath);
         if (stat.isFile()) {
           return expandedPath;
         }
-      } catch {
-        // Ignore and fall back to auto-detection.
+        console.warn('[ClaudeCliResolver] Legacy path exists but is not a file:', expandedPath);
       }
+    } catch (error) {
+      console.warn('[ClaudeCliResolver] Error resolving legacy path:', trimmedLegacy, error);
     }
   }
 
