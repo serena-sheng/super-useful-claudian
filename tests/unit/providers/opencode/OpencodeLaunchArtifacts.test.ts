@@ -213,6 +213,36 @@ describe('prepareOpencodeLaunchArtifacts', () => {
     });
   });
 
+  it('keeps the launch key stable when the resolved default database is later passed as OPENCODE_DB', async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'claudian-opencode-artifacts-'));
+    const baseParams = {
+      settings: {
+        customPrompt: '',
+        mediaFolder: '',
+        userName: '',
+        vaultPath: tmpRoot,
+      },
+      workspaceRoot: tmpRoot,
+    };
+    const first = await prepareOpencodeLaunchArtifacts({
+      ...baseParams,
+      runtimeEnv: {
+        HOME: tmpRoot,
+      } as NodeJS.ProcessEnv,
+    });
+
+    const second = await prepareOpencodeLaunchArtifacts({
+      ...baseParams,
+      runtimeEnv: {
+        HOME: tmpRoot,
+        OPENCODE_DB: first.databasePath ?? undefined,
+      } as NodeJS.ProcessEnv,
+    });
+
+    expect(first.databasePath).toBe(second.databasePath);
+    expect(first.launchKey).toBe(second.launchKey);
+  });
+
   it('creates the resolved OpenCode database directory before launch', async () => {
     const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'claudian-opencode-artifacts-'));
     const xdgDataHome = path.join(tmpRoot, 'xdg-data');
