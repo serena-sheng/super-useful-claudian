@@ -39,6 +39,10 @@ export class ClaudianView extends ItemView {
   private tabBarContainerEl: HTMLElement | null = null;
   private tabContentEl: HTMLElement | null = null;
   private navRowContent: HTMLElement | null = null;
+  private inputFooterEl: HTMLElement | null = null;
+  private inputNavRowHostEl: HTMLElement | null = null;
+  private activeInputSlotEl: HTMLElement | null = null;
+  private activeInputTabId: TabId | null = null;
 
   // DOM Elements
   private viewContainerEl: HTMLElement | null = null;
@@ -179,6 +183,7 @@ export class ClaudianView extends ItemView {
 
     this.navRowContent = this.buildNavRowContent();
     this.tabContentEl = this.viewContainerEl.createDiv({ cls: 'claudian-tab-content-container' });
+    this.buildInputFooter();
 
     this.tabManager = new TabManager(
       this.plugin,
@@ -188,20 +193,27 @@ export class ClaudianView extends ItemView {
         onTabCreated: () => {
           this.updateTabBar();
           this.updateHistoryDropdown();
-          this.updateNavRowLocation();
+          this.updateInputLocation();
           this.persistTabState();
+          this.syncProviderBrandColor();
+        },
+        onActiveTabChanged: () => {
+          this.updateTabBar();
+          this.updateHistoryDropdown();
+          this.updateInputLocation();
           this.syncProviderBrandColor();
         },
         onTabSwitched: () => {
           this.updateTabBar();
           this.updateHistoryDropdown();
-          this.updateNavRowLocation();
+          this.updateInputLocation();
           this.persistTabState();
           this.syncProviderBrandColor();
         },
         onTabClosed: () => {
           this.updateTabBar();
           this.updateHistoryDropdown();
+          this.updateInputLocation();
           this.persistTabState();
         },
         onTabStreamingChanged: () => {
@@ -243,6 +255,7 @@ export class ClaudianView extends ItemView {
 
     await this.persistTabStateImmediate();
 
+    this.restoreActiveInputToTabContent();
     await this.tabManager?.destroy();
     this.tabManager = null;
 
@@ -341,15 +354,26 @@ export class ClaudianView extends ItemView {
     return wrapper;
   }
 
+  private buildInputFooter(): void {
+    if (!this.viewContainerEl) return;
+
+    this.inputFooterEl = this.viewContainerEl.createDiv({ cls: 'claudian-input-footer' });
+    this.inputNavRowHostEl = this.inputFooterEl.createDiv({
+      cls: 'claudian-input-nav-row claudian-view-input-nav-row',
+    });
+    this.activeInputSlotEl = this.inputFooterEl.createDiv({ cls: 'claudian-active-input-slot' });
+  }
+
   /**
    * Moves nav row content based on tabBarPosition setting.
-   * - 'input' mode: Both tab badges and actions go to active tab's navRowEl
+   * - 'input' mode: Both tab badges and actions stay in the view-owned footer row
    * - 'header' mode: Tab badges go to title slot (after logo), actions go to header right side
    */
   private updateNavRowLocation(): void {
-    if (!this.tabBarContainerEl || !this.headerActionsContent) return;
+    if (!this.tabBarContainerEl || !this.headerActionsContent || !this.navRowContent) return;
 
     const isHeaderMode = this.plugin.settings.tabBarPosition === 'header';
+    this.tabBar?.captureScrollPosition();
 
     if (isHeaderMode) {
       // Header mode: Tab badges go to title slot, actions go to header right side
@@ -361,19 +385,60 @@ export class ClaudianView extends ItemView {
         this.headerActionsEl.removeClass('claudian-hidden');
       }
     } else {
-      // Input mode: Both go to active tab's navRowEl via the wrapper
-      const activeTab = this.tabManager?.getActiveTab();
-      if (activeTab && this.navRowContent) {
-        // Re-assemble the nav row content wrapper
+      if (this.inputNavRowHostEl) {
         this.navRowContent.appendChild(this.tabBarContainerEl);
         this.navRowContent.appendChild(this.headerActionsContent);
-        activeTab.dom.navRowEl.appendChild(this.navRowContent);
+        this.inputNavRowHostEl.appendChild(this.navRowContent);
       }
       // Hide header actions slot when in input mode
       if (this.headerActionsEl) {
         this.headerActionsEl.addClass('claudian-hidden');
       }
     }
+
+    if (this.tabBar) {
+      this.tabBar.restoreScrollPosition();
+    }
+  }
+
+  private updateInputLocation(): void {
+    const activeTab = this.tabManager?.getActiveTab();
+    if (!this.activeInputSlotEl) return;
+
+    if (!activeTab) {
+      this.activeInputSlotEl.empty();
+      this.activeInputTabId = null;
+      return;
+    }
+
+    if (this.activeInputTabId && this.activeInputTabId !== activeTab.id) {
+      const previousTab = this.tabManager?.getTab(this.activeInputTabId);
+      if (previousTab) {
+        previousTab.dom.contentEl.appendChild(previousTab.dom.inputComposerEl);
+      }
+    }
+
+    if (this.activeInputTabId === activeTab.id) {
+      if (activeTab.dom.inputComposerEl.parentElement !== this.activeInputSlotEl) {
+        this.activeInputSlotEl.appendChild(activeTab.dom.inputComposerEl);
+      }
+      return;
+    }
+
+    this.activeInputSlotEl.empty();
+    this.activeInputSlotEl.appendChild(activeTab.dom.inputComposerEl);
+    this.activeInputTabId = activeTab.id;
+  }
+
+  private restoreActiveInputToTabContent(): void {
+    if (!this.activeInputTabId) return;
+
+    const activeInputTab = this.tabManager?.getTab(this.activeInputTabId);
+    if (activeInputTab) {
+      activeInputTab.dom.contentEl.appendChild(activeInputTab.dom.inputComposerEl);
+    }
+    this.activeInputSlotEl?.empty();
+    this.activeInputTabId = null;
   }
 
   /**
@@ -390,6 +455,7 @@ export class ClaudianView extends ItemView {
 
     // Move nav content to appropriate location
     this.updateNavRowLocation();
+    this.updateInputLocation();
 
     // Update tab bar and title visibility
     this.updateTabBarVisibility();
@@ -763,5 +829,14 @@ export class ClaudianView extends ItemView {
   /** Gets the tab manager. */
   getTabManager(): TabManager | null {
     return this.tabManager;
+  }
+
+  /** Gets shared view controls that should preserve active tab selection context. */
+  getSharedSelectionFocusScopeEls(): HTMLElement[] {
+    return [
+      this.inputNavRowHostEl,
+      this.titleSlotEl,
+      this.headerActionsEl,
+    ].filter((el): el is HTMLElement => el !== null);
   }
 }
