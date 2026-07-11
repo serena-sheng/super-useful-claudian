@@ -410,7 +410,7 @@ export function renderProviderModelPicker(options: ProviderModelPickerOptions): 
       await loadCatalog(false);
     }
   });
-  if (catalogEl.open && options.loadCatalogOnRender) {
+  if (options.loadCatalogOnRender) {
     void loadCatalog(false);
   }
 }

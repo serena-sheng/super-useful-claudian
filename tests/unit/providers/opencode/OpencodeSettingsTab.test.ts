@@ -606,6 +606,42 @@ describe('OpencodeSettingsTab', () => {
     expect(context.refreshModelSelectors).toHaveBeenCalledTimes(1);
   });
 
+  it('loads the OpenCode catalog when saved models start with the browser collapsed', async () => {
+    mockRuntimeEnsureReady.mockImplementation(async (plugin: any) => {
+      plugin.settings.providerConfigs.opencode.discoveredModels = [
+        { label: 'DeepSeek/DeepSeek V4 Pro', rawId: 'deepseek/deepseek-v4-pro' },
+      ];
+      return true;
+    });
+    const plugin = createPlugin({
+      providerConfigs: {
+        opencode: {
+          availableModes: [],
+          cliPath: '',
+          cliPathsByHost: {},
+          discoveredModels: [],
+          enabled: true,
+          environmentVariables: OPENCODE_DEFAULT_ENVIRONMENT_VARIABLES,
+          modelAliases: {},
+          preferredThinkingByModel: {},
+          selectedMode: '',
+          visibleModels: ['deepseek/deepseek-v4-pro'],
+        },
+      },
+    });
+    const context = createContext(plugin);
+
+    opencodeSettingsTabRenderer.render(createContainer(), context);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockRuntimeEnsureReady).toHaveBeenCalledWith(
+      plugin,
+      { allowSessionCreation: true },
+    );
+    expect(context.refreshModelSelectors).toHaveBeenCalledTimes(1);
+  });
+
   it('warms and persists thinking metadata when a model is added to the visible list', async () => {
     mockRuntimeWarmModelMetadata.mockResolvedValue(true);
     const plugin = createPlugin({
