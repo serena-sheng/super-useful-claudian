@@ -61,7 +61,7 @@ export const opencodeChatUIConfig: ProviderChatUIConfig = {
 
     const seenValues = new Set<string>();
     const options: ProviderUIOption[] = [];
-    for (const rawModelId of opencodeSettings.visibleModels) {
+    for (const rawModelId of [...opencodeSettings.visibleModels].reverse()) {
       const encodedModelId = encodeOpencodeModelId(rawModelId);
       pushOption(
         options,

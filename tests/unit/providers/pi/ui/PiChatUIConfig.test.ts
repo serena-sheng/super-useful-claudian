@@ -36,7 +36,34 @@ const settings: Record<string, unknown> = {
 };
 
 describe('PiChatUIConfig', () => {
-  it('returns visible model options with aliases and pins saved selections', () => {
+  it('returns visible model options in reverse order with aliases', () => {
+    const piSettings = (settings.providerConfigs as Record<string, Record<string, unknown>>).pi;
+    const options = piChatUIConfig.getModelOptions({
+      ...settings,
+      providerConfigs: {
+        pi: {
+          ...piSettings,
+          visibleModels: [
+            'pi:anthropic/claude-sonnet-4',
+            'pi:openai/gpt-5',
+          ],
+        },
+      },
+    });
+
+    expect(options).toEqual([
+      expect.objectContaining({
+        label: 'GPT-5',
+        value: 'pi:openai/gpt-5',
+      }),
+      expect.objectContaining({
+        label: 'Sonnet',
+        value: 'pi:anthropic/claude-sonnet-4',
+      }),
+    ]);
+  });
+
+  it('pins saved selections after visible model options', () => {
     const options = piChatUIConfig.getModelOptions({
       ...settings,
       savedProviderModel: {

@@ -49,7 +49,7 @@ export const piChatUIConfig: ProviderChatUIConfig = {
 
     const options: ProviderUIOption[] = [];
     const seen = new Set<string>();
-    for (const encodedId of piSettings.visibleModels) {
+    for (const encodedId of [...piSettings.visibleModels].reverse()) {
       pushOption(
         options,
         seen,
