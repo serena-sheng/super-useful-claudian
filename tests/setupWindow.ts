@@ -103,7 +103,7 @@ function applyDomElementInfo(el: Element, info: unknown): void {
   return el;
 };
 
-if (globalThis.HTMLElement && !('createDiv' in globalThis.HTMLElement.prototype)) {
+if (globalThis.HTMLElement && !Reflect.has(globalThis.HTMLElement.prototype, 'createDiv')) {
   globalThis.HTMLElement.prototype.createDiv = function (this: HTMLElement, info?, callback?) {
     const el = createDiv(info, callback);
     this.appendChild(el);
@@ -126,7 +126,7 @@ if (globalThis.HTMLElement && !('createDiv' in globalThis.HTMLElement.prototype)
   };
 }
 
-if (globalThis.SVGElement && !('createSvg' in globalThis.SVGElement.prototype)) {
+if (globalThis.SVGElement && !Reflect.has(globalThis.SVGElement.prototype, 'createSvg')) {
   globalThis.SVGElement.prototype.createSvg = function (this: SVGElement, tag, info?, callback?) {
     const el = createSvg(tag, info, callback);
     this.appendChild(el);
