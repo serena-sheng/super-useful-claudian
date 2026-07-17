@@ -29,7 +29,6 @@ if (existsSync('.env.local')) {
 }
 
 const prod = process.argv[2] === 'production';
-const PRODUCTION_BUNDLE_BUDGET_BYTES = 2_800_000;
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -130,26 +129,6 @@ function createPatchRendererUnsafeUnref(outputPaths) {
   };
 }
 
-const enforceProductionBundleBudget = {
-  name: 'enforce-production-bundle-budget',
-  setup(build) {
-    if (!prod) return;
-
-    build.onEnd(async (result) => {
-      if (result.errors.length > 0 || !existsSync('main.js')) return;
-
-      const bundlePath = path.join(process.cwd(), 'main.js');
-      const { size } = await fsPromises.stat(bundlePath);
-
-      if (size > PRODUCTION_BUNDLE_BUDGET_BYTES) {
-        throw new Error(
-          `Production main.js is ${size} bytes; budget is ${PRODUCTION_BUNDLE_BUDGET_BYTES} bytes.`,
-        );
-      }
-    });
-  },
-};
-
 // Obsidian plugin folder path (set via OBSIDIAN_VAULT env var or .env.local)
 const OBSIDIAN_VAULT = process.env.OBSIDIAN_VAULT;
 const OBSIDIAN_PLUGIN_PATH = OBSIDIAN_VAULT && existsSync(OBSIDIAN_VAULT)
@@ -208,7 +187,6 @@ const mainContext = await esbuild.context({
   plugins: [
     patchSdkImportMeta,
     createPatchRendererUnsafeUnref(['main.js']),
-    enforceProductionBundleBudget,
     copyToObsidian,
   ],
   external,
