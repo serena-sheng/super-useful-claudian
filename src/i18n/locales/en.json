@@ -376,9 +376,8 @@
     },
     "agentSkills": {
       "sectionTitle": "Skills",
-      "header": "Shared skills",
       "fixedRoot": "Managed in .agents/skills",
-      "sharedExpectation": "Manage skills shared across all enabled providers in .agents/skills/.",
+      "sharedExpectation": "Manage shared skills in .agents/skills/ for compatible providers.",
       "noSkills": "No shared skills configured. Click + to create one.",
       "skillBadge": "skill",
       "diagnosticsTitle": "Skills needing attention",

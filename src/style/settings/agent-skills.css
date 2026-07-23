@@ -1,11 +1,20 @@
+.claudian-agent-skills-header {
+  gap: 12px;
+}
+
 .claudian-agent-skills-help {
-  padding: 0 12px;
+  flex: 1;
+  min-width: 0;
   color: var(--text-muted);
   font-size: var(--font-ui-small);
 }
 
 .claudian-agent-skills-help p {
-  margin: 0 0 8px;
+  margin: 0;
+}
+
+.claudian-agent-skills-header .claudian-sp-header-actions {
+  flex-shrink: 0;
 }
 
 .claudian-agent-skill-instructions {

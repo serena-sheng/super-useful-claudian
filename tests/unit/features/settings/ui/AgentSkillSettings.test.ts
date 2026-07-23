@@ -133,6 +133,17 @@ function flattenText(element: MockElement): string {
   return [element.textContent, ...element.children.map(flattenText)].join(' ');
 }
 
+function findByClass(element: MockElement, className: string): MockElement | undefined {
+  if (element.cls?.split(/\s+/).includes(className)) {
+    return element;
+  }
+  for (const child of element.children) {
+    const match = findByClass(child, className);
+    if (match) return match;
+  }
+  return undefined;
+}
+
 describe('AgentSkillModal', () => {
   beforeEach(() => {
     mockNotices.length = 0;
@@ -239,12 +250,19 @@ describe('AgentSkillSettings', () => {
     expect(text).toContain('shared-skill');
     expect(text).not.toContain('$shared-skill');
     expect(text).toContain(
-      'Manage skills shared across all enabled providers in .agents/skills/.',
+      'Manage shared skills in .agents/skills/ for compatible providers.',
     );
+    expect(text).not.toContain('Shared skills');
     expect(text).not.toMatch(/Shared skills\s+\.agents\/skills\s+/);
     expect(text).not.toContain('provider compatibility issue');
     expect(text).toContain('.agents/skills/broken');
     expect(text).toContain('Missing description');
+    const header = findByClass(container, 'claudian-agent-skills-header');
+    expect(header).toBeDefined();
+    expect(flattenText(header!)).toContain(
+      'Manage shared skills in .agents/skills/ for compatible providers.',
+    );
+    expect(findByClass(header!, 'claudian-sp-header-actions')).toBeDefined();
     expect(coordinator.subscribe).toHaveBeenCalledTimes(1);
   });
 

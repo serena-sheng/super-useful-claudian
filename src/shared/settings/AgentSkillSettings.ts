@@ -263,8 +263,6 @@ export class AgentSkillSettings {
 
     this.rootEl.empty();
     this.renderHeader();
-    const help = this.rootEl.createDiv({ cls: 'claudian-agent-skills-help' });
-    help.createEl('p', { text: t('settings.agentSkills.sharedExpectation') });
 
     if (result.skills.length === 0) {
       this.rootEl.createDiv({
@@ -293,8 +291,11 @@ export class AgentSkillSettings {
   }
 
   private renderHeader(): void {
-    const header = this.rootEl.createDiv({ cls: 'claudian-sp-header' });
-    header.createSpan({ text: t('settings.agentSkills.header'), cls: 'claudian-sp-label' });
+    const header = this.rootEl.createDiv({
+      cls: 'claudian-sp-header claudian-agent-skills-header',
+    });
+    const help = header.createDiv({ cls: 'claudian-agent-skills-help' });
+    help.createEl('p', { text: t('settings.agentSkills.sharedExpectation') });
 
     const actions = header.createDiv({ cls: 'claudian-sp-header-actions' });
     const refreshButton = actions.createEl('button', {

@@ -55,7 +55,7 @@ describe('i18n', () => {
     it('keeps shared skill management help concise', () => {
       expect(t('settings.agentSkills.sharedExpectation' as TranslationKey))
         .toBe(
-          'Manage skills shared across all enabled providers in .agents/skills/.',
+          'Manage shared skills in .agents/skills/ for compatible providers.',
         );
     });
 
