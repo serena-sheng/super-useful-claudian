@@ -16,7 +16,7 @@ body:
       options:
         - label: I searched existing issues and did not find the same problem.
           required: true
-        - label: I removed API keys, tokens, private vault content, personal paths, and other sensitive information.
+        - label: I have read the relevant documentation (e.g., the README) but could not resolve this issue.
           required: true
 
   - type: textarea
