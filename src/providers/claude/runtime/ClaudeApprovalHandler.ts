@@ -8,7 +8,7 @@ import type {
   ApprovalCallback,
   AskUserQuestionCallback,
 } from '../../../core/runtime/types';
-import { getActionDescription } from '../../../core/security/ApprovalManager';
+import { getActionDescription } from '../../../core/security/approvalRules';
 import {
   TOOL_ASK_USER_QUESTION,
   TOOL_EXIT_PLAN_MODE,

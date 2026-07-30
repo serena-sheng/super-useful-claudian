@@ -1,4 +1,4 @@
-import { createMockEl } from '@test/helpers/mockElement';
+import { createMockEl } from '@test/helpers/MockElement';
 
 import type { ToolCallInfo, ToolDiffData } from '@/core/types';
 import {

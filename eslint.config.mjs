@@ -13,6 +13,56 @@ const jestRecommended = jestPlugin.configs['flat/recommended'];
 const tsconfigRootDir = dirname(fileURLToPath(import.meta.url));
 const obsidianRuleSeverity = 'warn';
 
+// Enforces the file naming conventions from AGENTS.md without extra dependencies.
+const fileNamingRule = {
+  meta: {
+    type: 'suggestion',
+    docs: { description: 'Enforce the file naming conventions from AGENTS.md' },
+    messages: {
+      invalidCase:
+        "Filename '{{name}}' must use camelCase, PascalCase, or kebab-case (see AGENTS.md naming conventions).",
+      conceptMismatch:
+        "File '{{name}}' exports '{{concept}}'; modules with a primary named concept use a PascalCase filename ('{{concept}}.ts').",
+    },
+  },
+  create(context) {
+    const filename = context.physicalFilename ?? context.filename;
+    const base = filename.split('/').pop() ?? '';
+    if (!base.endsWith('.ts')) return {};
+    const first = base.split('.')[0];
+    if (first === 'index' || first === 'types') return {};
+    const isCamel = /^[a-z][a-zA-Z0-9]*$/.test(first);
+    const isPascal = /^[A-Z][a-zA-Z0-9]*$/.test(first);
+    const isKebab = /^[a-z0-9]+(-[a-z0-9]+)*$/.test(first);
+    return {
+      Program(node) {
+        if (!isCamel && !isPascal && !isKebab) {
+          context.report({ node, messageId: 'invalidCase', data: { name: base } });
+          return;
+        }
+        if (!isCamel) return;
+        const concept = first.charAt(0).toUpperCase() + first.slice(1);
+        for (const statement of node.body) {
+          if (statement.type !== 'ExportNamedDeclaration' || !statement.declaration) continue;
+          const declaration = statement.declaration;
+          const declared =
+            declaration.type === 'VariableDeclaration'
+              ? declaration.declarations.map((d) => d.id).filter((id) => id.type === 'Identifier')
+              : declaration.id
+                ? [declaration.id]
+                : [];
+          if (declared.some((id) => id.name === concept)) {
+            context.report({ node: statement, messageId: 'conceptMismatch', data: { name: base, concept } });
+            return;
+          }
+        }
+      },
+    };
+  },
+};
+
+const localPlugin = { rules: { 'file-naming': fileNamingRule } };
+
 const stagedObsidianRules = {
   'obsidianmd/commands/no-command-in-command-id': obsidianRuleSeverity,
   'obsidianmd/commands/no-command-in-command-name': obsidianRuleSeverity,
@@ -75,8 +125,10 @@ export default defineConfig([
     files: ['src/**/*.ts', 'tests/**/*.ts'],
     plugins: {
       'simple-import-sort': simpleImportSort,
+      local: localPlugin,
     },
     rules: {
+      'local/file-naming': 'error',
       '@typescript-eslint/consistent-type-imports': [
         'error',
         { prefer: 'type-imports', fixStyle: 'separate-type-imports' },
@@ -104,6 +156,17 @@ export default defineConfig([
     rules: {
       ...stagedObsidianRules,
       'obsidianmd/prefer-create-el': 'error',
+      '@typescript-eslint/naming-convention': [
+        'error',
+        { selector: 'default', format: ['camelCase'], leadingUnderscore: 'allow', trailingUnderscore: 'allow' },
+        { selector: 'variable', format: ['camelCase', 'UPPER_CASE', 'PascalCase'], leadingUnderscore: 'allow' },
+        { selector: 'typeLike', format: ['PascalCase'] },
+        { selector: 'enumMember', format: ['PascalCase'] },
+        { selector: 'classProperty', format: ['camelCase', 'UPPER_CASE'], leadingUnderscore: 'allow', trailingUnderscore: 'allow' },
+        { selector: 'import', format: ['camelCase', 'PascalCase'] },
+        { selector: 'objectLiteralProperty', format: null },
+        { selector: 'typeProperty', format: null },
+      ],
       '@typescript-eslint/no-duplicate-type-constituents': 'error',
       '@typescript-eslint/no-misused-promises': 'error',
       '@typescript-eslint/only-throw-error': 'error',

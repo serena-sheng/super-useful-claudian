@@ -101,6 +101,29 @@ The feature layer depends on `core/` contracts, not provider internals. Provider
 - Refactor after the test is green, preserving the provider and feature ownership boundaries above.
 - If a change cannot be tested directly, document why and cover the closest stable contract instead.
 
+## Naming Conventions
+
+- **Symbols**
+  - `PascalCase` for classes, interfaces, type aliases, enums, and decorators.
+  - `camelCase` for variables, functions, methods, and properties.
+  - `SCREAMING_SNAKE_CASE` for module-level constants and values in enum-like const objects. TypeScript `enum` members use `PascalCase` (enforced by ESLint).
+  - Do not prefix interfaces with `I` (e.g. `ProviderCapabilities`, not `IProviderCapabilities`).
+  - Treat acronyms as words: `Sdk`, `Mcp`, `Cli`, `Rpc`, `Url` (e.g. `SdkSessionReadResult`).
+  - Exception: keep an external SDK's own acronym casing for types that mirror it (e.g. `SDKMessage` from `@anthropic-ai/claude-agent-sdk`).
+- **Files**
+  - Use `PascalCase.ts` when the module exports a primary named concept: a class, interface, type, enum, or a single dominant service/config/adapter/manager/renderer/reconciler object. Name the file after that concept.
+  - Use `camelCase.ts` only for generic utility modules that export a bag of unrelated helper functions/constants with no single dominant named object (e.g. `src/utils/date.ts`, `src/utils/path.ts`).
+  - When in doubt, prefer `PascalCase.ts`. A misleadingly generic-looking `camelCase` name is worse than a `PascalCase` name on a utility module.
+  - Use `kebab-case.ts` only for files that mirror an external package name (e.g. `tests/__mocks__/claude-agent-sdk.ts`, `src/types/smol-toml.d.ts`).
+  - Keep barrel files as `index.ts`.
+  - Keep shared type-bucket files as `types.ts`.
+  - Test files mirror the source filename exactly, plus `.test.ts` (e.g. `approvalRules.test.ts` for `approvalRules.ts`). Optional qualifier suffixes go between the name and `.test.ts` (e.g. `fileLink.dom.test.ts`).
+- **Folders**
+  - Use `kebab-case` for all directory names. Single lowercase words (`chat`, `core`, `utils`) are acceptable because they are valid kebab-case.
+- **Imports**
+  - Do not include `.ts` extensions in import paths.
+  - Prefer path aliases (`@/...`) where they exist over deep relative paths.
+
 ## Review Expectations
 
 - Findings first: correctness, regression risk, API or contract ambiguity, and missing tests.

@@ -1,4 +1,4 @@
-import { createMockEl } from '@test/helpers/mockElement';
+import { createMockEl } from '@test/helpers/MockElement';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';

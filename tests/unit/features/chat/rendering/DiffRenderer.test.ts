@@ -1,4 +1,4 @@
-import { createMockEl } from '@test/helpers/mockElement';
+import { createMockEl } from '@test/helpers/MockElement';
 
 import type { DiffLine, StructuredPatchHunk } from '@/core/types/diff';
 import { renderDiffContent, splitIntoHunks } from '@/features/chat/rendering/DiffRenderer';

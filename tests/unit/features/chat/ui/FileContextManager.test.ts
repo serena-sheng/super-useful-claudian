@@ -1,4 +1,4 @@
-import { createMockEl, type MockElement } from '@test/helpers/mockElement';
+import { createMockEl, type MockElement } from '@test/helpers/MockElement';
 import { TFile } from 'obsidian';
 
 import type { FileContextCallbacks } from '@/features/chat/ui/FileContext';

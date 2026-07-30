@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
-import { CLAUDIAN_STORAGE_PATH } from '../../../core/bootstrap/StoragePaths';
+import { CLAUDIAN_STORAGE_PATH } from '../../../core/bootstrap/storagePaths';
 import {
   buildSystemPrompt,
   computeSystemPromptKey,

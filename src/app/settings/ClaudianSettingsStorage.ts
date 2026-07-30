@@ -1,7 +1,7 @@
 import {
   CLAUDIAN_SETTINGS_PATH,
   LEGACY_CLAUDIAN_SETTINGS_PATH,
-} from '../../core/bootstrap/StoragePaths';
+} from '../../core/bootstrap/storagePaths';
 import {
   normalizeHiddenCommandList,
   normalizeHiddenProviderCommands,

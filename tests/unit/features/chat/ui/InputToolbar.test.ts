@@ -2,7 +2,7 @@ import {
   TEST_CODEX_MODEL,
   TEST_CODEX_MODEL_LABEL,
 } from '@test/helpers/codexModels';
-import { createMockEl } from '@test/helpers/mockElement';
+import { createMockEl } from '@test/helpers/MockElement';
 
 import type { UsageInfo } from '@/core/types';
 import {

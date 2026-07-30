@@ -3,7 +3,7 @@ import {
   getActionDescription,
   getActionPattern,
   matchesRulePattern,
-} from '../../../../src/core/security/ApprovalManager';
+} from '../../../../src/core/security/approvalRules';
 
 describe('getActionPattern', () => {
   it('extracts command from Bash tool input', () => {

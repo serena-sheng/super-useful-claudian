@@ -11,7 +11,7 @@ import type {
   ConversationMeta,
   SessionMetadata,
 } from '../types';
-import { LEGACY_SESSIONS_PATH, SESSIONS_PATH } from './StoragePaths';
+import { LEGACY_SESSIONS_PATH, SESSIONS_PATH } from './storagePaths';
 
 export {
   LEGACY_SESSIONS_PATH,

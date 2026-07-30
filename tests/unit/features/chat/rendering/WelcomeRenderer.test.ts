@@ -1,9 +1,9 @@
-import { createMockEl } from '@test/helpers/mockElement';
+import { createMockEl } from '@test/helpers/MockElement';
 
 import {
   createWelcomeElement,
   renderWelcomeContent,
-} from '@/features/chat/rendering/Welcome';
+} from '@/features/chat/rendering/WelcomeRenderer';
 
 describe('Welcome', () => {
   it('renders Claudian branding before the dynamic greeting', () => {

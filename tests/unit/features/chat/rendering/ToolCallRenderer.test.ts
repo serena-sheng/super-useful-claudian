@@ -1,4 +1,4 @@
-import { createMockEl } from '@test/helpers/mockElement';
+import { createMockEl } from '@test/helpers/MockElement';
 import { setIcon } from 'obsidian';
 
 import type { ToolCallInfo } from '@/core/types';

@@ -1,4 +1,4 @@
-import { createMockEl } from '@test/helpers/mockElement';
+import { createMockEl } from '@test/helpers/MockElement';
 
 import { SelectableDropdown, type SelectableDropdownRenderOptions } from '@/shared/components/SelectableDropdown';
 

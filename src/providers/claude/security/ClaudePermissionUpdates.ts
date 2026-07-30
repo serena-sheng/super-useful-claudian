@@ -1,6 +1,6 @@
 import type { PermissionUpdate, PermissionUpdateDestination } from '@anthropic-ai/claude-agent-sdk';
 
-import { getActionPattern } from '../../../core/security/ApprovalManager';
+import { getActionPattern } from '../../../core/security/approvalRules';
 
 export function buildPermissionUpdates(
   toolName: string,

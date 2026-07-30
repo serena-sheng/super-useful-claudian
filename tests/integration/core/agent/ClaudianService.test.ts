@@ -19,7 +19,7 @@ jest.mock('fs');
 // Now import after all mocks are set up
 import { buildResultErrorMessage } from '@test/helpers/sdkMessages';
 
-import { getActionDescription, getActionPattern } from '@/core/security/ApprovalManager';
+import { getActionDescription, getActionPattern } from '@/core/security/approvalRules';
 import { getPathFromToolInput } from '@/core/tools/toolInput';
 import { ClaudianService } from '@/providers/claude/runtime/ClaudeChatRuntime';
 import { resolveClaudeCliPath } from '@/providers/claude/runtime/ClaudeCliResolver';
