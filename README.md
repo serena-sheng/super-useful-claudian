@@ -82,12 +82,6 @@ npm run dev
 npm run build
 ```
 
-## Contributing
-
-Issues and focused pull requests are welcome. Issues are the preferred starting point: describe the problem, reproduction steps, and environment clearly so it can be investigated.
-
-Before opening a pull request, please read the [contribution guide](CONTRIBUTING.md). Pull requests must explain the problem, the proposed solution, why the approach is appropriate, and how the change was validated. Pull requests that add a new provider are not accepted; the guide explains this maintenance and product-quality boundary in detail.
-
 ## Privacy & Data Use
 
 - **Sent to API**: Your input, attached files, images, and tool call outputs. Default: Anthropic (Claude), OpenAI (Codex), xAI (Grok), or the provider configured in Opencode/Pi; configurable via provider settings and environment variables.
@@ -167,9 +161,9 @@ src/
 
 <a href="https://www.star-history.com/?repos=YishenTu%2Fclaudian&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=YishenTu/claudian&type=date&theme=dark&legend=top-left&sealed_token=gXv_vWhYBwlA0DehVo1Lwkf2jquI2mMAgmTawJA0nVFNaSdTkokMxxdjqk3zfUqWZKVuPlPi9e5hzWb3265cHWdgwm8Y-n3D7X4pyPM6w0sKWGE_WlHHTO-Gf3zoeP3XG8p3cHVEg_7oq3rhjLXpNFrluGUDWtFP3bwenzBJhHvoLmJaHUPD6KGHLqyO" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=YishenTu/claudian&type=date&legend=top-left&sealed_token=gXv_vWhYBwlA0DehVo1Lwkf2jquI2mMAgmTawJA0nVFNaSdTkokMxxdjqk3zfUqWZKVuPlPi9e5hzWb3265cHWdgwm8Y-n3D7X4pyPM6w0sKWGE_WlHHTO-Gf3zoeP3XG8p3cHVEg_7oq3rhjLXpNFrluGUDWtFP3bwenzBJhHvoLmJaHUPD6KGHLqyO" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=YishenTu/claudian&type=date&legend=top-left&sealed_token=gXv_vWhYBwlA0DehVo1Lwkf2jquI2mMAgmTawJA0nVFNaSdTkokMxxdjqk3zfUqWZKVuPlPi9e5hzWb3265cHWdgwm8Y-n3D7X4pyPM6w0sKWGE_WlHHTO-Gf3zoeP3XG8p3cHVEg_7oq3rhjLXpNFrluGUDWtFP3bwenzBJhHvoLmJaHUPD6KGHLqyO" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=YishenTu/claudian&type=date&theme=dark&legend=top-left&sealed_token=UAS9n3qO4GyhCCkOr9kcAl7msVtDEz-DoQTkpFuPrAELxMEK9PQWj9zG566afbx0CkF5OoIbLRkxiDIoMRCK5Q-HXbLUiimg1lT8wKDdcc_eP48_EodHFrR6UtY8jS7Mzik4lLd_sY8oVj2I42lISFB1tSlr4gnXwOCNwtTn6iQakbru7yKPIO3uVYpP" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=YishenTu/claudian&type=date&legend=top-left&sealed_token=UAS9n3qO4GyhCCkOr9kcAl7msVtDEz-DoQTkpFuPrAELxMEK9PQWj9zG566afbx0CkF5OoIbLRkxiDIoMRCK5Q-HXbLUiimg1lT8wKDdcc_eP48_EodHFrR6UtY8jS7Mzik4lLd_sY8oVj2I42lISFB1tSlr4gnXwOCNwtTn6iQakbru7yKPIO3uVYpP" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=YishenTu/claudian&type=date&legend=top-left&sealed_token=UAS9n3qO4GyhCCkOr9kcAl7msVtDEz-DoQTkpFuPrAELxMEK9PQWj9zG566afbx0CkF5OoIbLRkxiDIoMRCK5Q-HXbLUiimg1lT8wKDdcc_eP48_EodHFrR6UtY8jS7Mzik4lLd_sY8oVj2I42lISFB1tSlr4gnXwOCNwtTn6iQakbru7yKPIO3uVYpP" />
  </picture>
 </a>
 
@@ -183,6 +177,12 @@ Claudian is proudly sponsored by Ke Holdings Inc. (BEIKE) and the MOMA team. The
 improve through ongoing development and maintenance.
 
 > Want to support Claudian or appear here? Contact me: [tysk01213@gmail.com](mailto:tysk01213@gmail.com).
+
+## Contributing
+
+Issues and focused pull requests are welcome. Issues are the preferred starting point: describe the problem, reproduction steps, and environment clearly so it can be investigated.
+
+Before opening a pull request, please read the [contribution guide](CONTRIBUTING.md). Pull requests must explain the problem, the proposed solution, why the approach is appropriate, and how the change was validated. Pull requests that add a new provider are not accepted; the guide explains this maintenance and product-quality boundary in detail.
 
 ## License
 
