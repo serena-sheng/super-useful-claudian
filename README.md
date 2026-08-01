@@ -37,8 +37,13 @@ Open the chat sidebar from the ribbon icon or command palette. Select text and u
 
 ## Requirements
 
-- **Claude provider**: [Claude Code CLI](https://code.claude.com/docs/en/overview) installed (native install recommended). Claude subscription/API or compatible provider ([Openrouter](https://openrouter.ai/docs/guides/guides/claude-code-integration), [Kimi](https://platform.kimi.ai/docs/guide/claude-code-kimi), [GLM](https://docs.z.ai/devpack/tool/claude) etc.).
-- **Optional providers**: [Codex CLI](https://github.com/openai/codex), [Grok Build](https://github.com/xai-org/grok-build), [Opencode](https://github.com/anomalyco/opencode), [Pi](https://github.com/earendil-works/pi).
+- At least one of the following harnesses:
+  - [Claude Code CLI](https://code.claude.com/docs/en/overview)
+  - [Codex CLI](https://github.com/openai/codex)
+  - [Grok Build](https://github.com/xai-org/grok-build)
+  - [OpenCode](https://github.com/anomalyco/opencode)
+  - [Pi](https://github.com/earendil-works/pi)
+- A compatible subscription or API provider, such as [OpenRouter](https://openrouter.ai/docs/guides/guides/claude-code-integration), [Kimi](https://platform.kimi.ai/docs/guide/claude-code-kimi), [GLM](https://docs.z.ai/devpack/tool/claude), or [DeepSeek](https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code).
 - Obsidian v1.7.2+
 - Desktop only (macOS, Linux, Windows)
 
@@ -51,17 +56,6 @@ Open the chat sidebar from the ribbon icon or command palette. Select text and u
 3. Enable the plugin
 
 Or install directly from the [community plugin page](https://community.obsidian.md/plugins/realclaudian).
-
-### From GitHub Release
-
-1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/YishenTu/claudian/releases/latest)
-2. Create a folder called `claudian` in your vault's plugins folder:
-   ```
-   /path/to/vault/.obsidian/plugins/claudian/
-   ```
-3. Copy the downloaded files into the `claudian` folder
-4. Enable the plugin in Obsidian:
-   - Settings → Community plugins → Enable "Claudian"
 
 ### From source (development)
 
@@ -93,19 +87,18 @@ npm run build
 
 ## Privacy & Data Use
 
-- **Sent to API**: Your input, attached files, images, and tool call outputs. Default: Anthropic (Claude), OpenAI (Codex), xAI (Grok), or the provider configured in Opencode/Pi; configurable via provider settings and environment variables.
-- **Local storage**: Claudian settings and session metadata in `vault/.claudian/`; Claude provider files in `vault/.claude/`; shared skills for Codex, Grok, Opencode, and Pi in `vault/.agents/skills/`; transcripts in `~/.claude/projects/` (Claude), `~/.codex/sessions/` (Codex), `~/.grok/sessions/` or `$GROK_HOME/sessions/` (Grok), and `.pi/agent/sessions/` or `~/.pi/agent/sessions/` (Pi).
-- **Environment variables**: Provider subprocesses inherit the Obsidian process environment plus any variables you configure in Claudian. This is needed for CLI authentication, proxies, certificates, and PATH resolution.
-- **Device-specific paths**: Per-device CLI paths use an opaque local key stored in browser local storage, not your system hostname.
-- **Background activity**: Claudian does not run telemetry beacons. UI polling timers read local Obsidian/editor selection state only. Network activity is limited to explicit provider runtime work, configured MCP endpoints, and provider SDK/CLI calls needed to answer your requests.
+- **Sent to API**: Your input, attached files, images, and tool call outputs. Depending on the selected provider, data is sent to Anthropic (Claude), OpenAI (Codex), xAI (Grok), or the providers configured in OpenCode or Pi. The destination can be configured through provider settings and environment variables.
+- **No telemetry or unsolicited background activity**: Claudian does not run telemetry beacons. UI polling timers read local Obsidian/editor selection state only. Network activity is limited to explicit provider runtime work, configured MCP endpoints, and provider SDK/CLI calls needed to answer your requests.
 
 ## Troubleshooting
 
-### Claude CLI not found
+The following sections use Claude Code as an example.
 
-If you encounter `spawn claude ENOENT` or `Claude CLI not found`, the plugin can't auto-detect your Claude installation. Common with Node version managers (nvm, fnm, volta).
+### Provider CLI not found
 
-**Solution**: Leave the setting empty first so Claudian can auto-detect Claude Code. If auto-detection fails, find your CLI path and set it in Settings → Advanced → Claude CLI path.
+If Claudian cannot auto-detect a provider CLI, verify that the CLI is installed and available to GUI applications through PATH. Typical errors include `spawn claude ENOENT` and `Claude CLI not found`. This issue is common with Node version managers (nvm, fnm, volta).
+
+Leave the CLI path setting empty first so Claudian can auto-detect the CLI. If auto-detection fails, find the executable path and set it in Settings → Advanced → Claude CLI path.
 
 | Platform | Command | Example Path |
 |----------|---------|--------------|
@@ -117,23 +110,25 @@ If you encounter `spawn claude ENOENT` or `Claude CLI not found`, the plugin can
 
 **Alternative**: Add your Node.js bin directory to PATH in Settings → Environment → Custom variables.
 
-### npm CLI and Node.js not in same directory
+### npm CLI and Node.js not in the same directory
 
-If using npm-installed CLI, check if `claude` and `node` are in the same directory:
+When using an npm-installed provider CLI, make sure its executable and Node.js are available from the same environment. Check their paths:
+
 ```bash
 dirname $(which claude)
 dirname $(which node)
 ```
 
-If different, GUI apps like Obsidian may not find Node.js.
+If the paths differ, GUI apps like Obsidian may not find Node.js.
 
-**Solutions**:
-1. Install native binary (recommended)
-2. Add Node.js path to Settings → Environment: `PATH=/path/to/node/bin`
+Either:
 
-### Other providers
+1. Install the native binary (recommended).
+2. Add the Node.js path in Settings → Environment: `PATH=/path/to/node/bin`.
 
-Codex, Grok, Opencode, and Pi support are live but still need more testing across platforms and installation methods. If you have a feature request or run into any bugs, please [submit a GitHub issue](https://github.com/YishenTu/claudian/issues).
+### More help
+
+For provider-specific installation and configuration guidance, refer to the provider documentation linked in the [Requirements](#requirements) section. If you have a feature request or run into a bug, please [submit a GitHub issue](https://github.com/YishenTu/claudian/issues).
 
 ## Architecture
 
