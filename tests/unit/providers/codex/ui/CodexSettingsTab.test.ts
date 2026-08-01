@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 
 import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
+import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
 import { DEFAULT_CODEX_PROVIDER_SETTINGS } from '@/providers/codex/settings';
 import { codexSettingsTabRenderer } from '@/providers/codex/ui/CodexSettingsTab';
 
@@ -8,7 +9,12 @@ const mockGetHostnameKey = jest.fn(() => 'host-a');
 const mockRenderEnvironmentSettingsSection = jest.fn();
 const mockSaveSettings = jest.fn().mockResolvedValue(undefined);
 const mockCodexCliResolverReset = jest.fn();
-const mockRenderCodexModelPicker = jest.fn();
+const mockRefreshCodexModelPicker = jest.fn();
+const mockRenderCodexModelPicker = jest.fn((
+  _container: unknown,
+  _context: { notifyProviderModelOptionsChanged: (providerId: string) => void },
+  _workspace: unknown,
+) => ({ refresh: mockRefreshCodexModelPicker }));
 const mockRefreshModelCatalog = jest.fn().mockResolvedValue({ changed: false });
 
 jest.mock('fs');
@@ -31,6 +37,7 @@ jest.mock('@/core/providers/ProviderSettingsCoordinator', () => ({
       }
       return false;
     }),
+    normalizeAllModelVariants: jest.fn(),
   },
 }));
 jest.mock('obsidian', () => {
@@ -117,7 +124,11 @@ jest.mock('@/providers/codex/app/CodexWorkspaceServices', () => ({
 }));
 
 jest.mock('@/providers/codex/ui/CodexModelPicker', () => ({
-  renderCodexModelPicker: (...args: unknown[]) => mockRenderCodexModelPicker(...args),
+  renderCodexModelPicker: (
+    container: unknown,
+    context: { notifyProviderModelOptionsChanged: (providerId: string) => void },
+    workspace: unknown,
+  ) => mockRenderCodexModelPicker(container, context, workspace),
 }));
 
 jest.mock('@/providers/codex/ui/CodexSubagentSettings', () => ({
@@ -462,6 +473,27 @@ describe('CodexSettingsTab', () => {
 
     const headings = createdSettings.filter(setting => setting.heading).map(setting => setting.name);
     expect(headings.indexOf('Models')).toBeLessThan(headings.indexOf('Safety'));
+  });
+
+  it('renders a default-off ultra effort toggle and publishes changes to chat consumers', async () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    const plugin = createPlugin();
+    const context = createContext(plugin);
+
+    codexSettingsTabRenderer.render(createContainer(), context);
+
+    const setting = findSetting('Enable ultra effort');
+    const toggle = setting.toggleComponents[0];
+    expect(toggle.value).toBe(false);
+
+    await toggle.onChangeCallback?.(true);
+
+    expect(plugin.settings.providerConfigs.codex.enableUltraEffort).toBe(true);
+    expect(ProviderSettingsCoordinator.normalizeAllModelVariants).toHaveBeenCalledWith(
+      plugin.settings,
+    );
+    expect(mockRefreshCodexModelPicker).toHaveBeenCalledTimes(1);
+    expect(context.notifyProviderModelOptionsChanged).toHaveBeenCalledWith('codex');
   });
 
   it('refreshes title model options after Codex enablement changes', async () => {

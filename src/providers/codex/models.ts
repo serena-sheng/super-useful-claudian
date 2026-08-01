@@ -28,8 +28,16 @@ export interface CodexDiscoveredModel {
   isDefault: boolean;
 }
 
+export const CODEX_FALLBACK_REASONING_EFFORT_VALUES = [
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+] as const;
+
 const DEFAULT_INPUT_MODALITIES: Array<'text' | 'image'> = ['text', 'image'];
-const EXCLUDED_REASONING_EFFORTS = new Set(['ultra']);
+const ULTRA_REASONING_EFFORT = 'ultra';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -57,7 +65,7 @@ function normalizeReasoningEfforts(value: unknown): CodexReasoningEffortOption[]
     }
 
     const effort = normalizeNonEmptyString(entry.value ?? entry.reasoningEffort);
-    if (!effort || EXCLUDED_REASONING_EFFORTS.has(effort.toLowerCase()) || seen.has(effort)) {
+    if (!effort || seen.has(effort)) {
       continue;
     }
 
@@ -134,23 +142,12 @@ export function normalizeCodexDiscoveredModels(value: unknown): CodexDiscoveredM
     }
 
     const supportedReasoningEfforts = normalizeReasoningEfforts(entry.supportedReasoningEfforts);
-    let defaultReasoningEffort = normalizeNonEmptyString(entry.defaultReasoningEffort);
+    const defaultReasoningEffort = normalizeNonEmptyString(entry.defaultReasoningEffort);
     if (
       !defaultReasoningEffort
       || !supportedReasoningEfforts.some(option => option.value === defaultReasoningEffort)
     ) {
-      if (
-        defaultReasoningEffort
-        && EXCLUDED_REASONING_EFFORTS.has(defaultReasoningEffort.toLowerCase())
-        && supportedReasoningEfforts.length > 0
-      ) {
-        defaultReasoningEffort = resolvePreferredReasoningDefault(
-          supportedReasoningEfforts.map(option => option.value),
-          supportedReasoningEfforts[0].value,
-        );
-      } else {
-        continue;
-      }
+      continue;
     }
 
     const serviceTiers = normalizeServiceTiers(entry.serviceTiers);
@@ -199,11 +196,58 @@ export function getCodexModelsInPickerOrder(
 
 export function getCodexDefaultReasoningEffort(
   model: CodexDiscoveredModel,
-): string {
+  enableUltraEffort: boolean,
+): string | null {
+  const supportedReasoningEfforts = getCodexReasoningEffortOptions(model, enableUltraEffort);
+  const supportedValues = supportedReasoningEfforts.map(option => option.value);
+  if (supportedValues.length === 0) {
+    return null;
+  }
+  const fallbackValue = supportedValues.includes(model.defaultReasoningEffort)
+    ? model.defaultReasoningEffort
+    : DEFAULT_REASONING_VALUE;
   return resolvePreferredReasoningDefault(
-    model.supportedReasoningEfforts.map(option => option.value),
-    model.defaultReasoningEffort || DEFAULT_REASONING_VALUE,
+    supportedValues,
+    fallbackValue,
   );
+}
+
+export function getCodexReasoningEffortOptions(
+  model: CodexDiscoveredModel,
+  enableUltraEffort: boolean,
+): CodexReasoningEffortOption[] {
+  return enableUltraEffort
+    ? model.supportedReasoningEfforts
+    : model.supportedReasoningEfforts.filter(
+      option => option.value.toLowerCase() !== ULTRA_REASONING_EFFORT,
+    );
+}
+
+export function isCodexModelAvailable(
+  model: CodexDiscoveredModel,
+  enableUltraEffort: boolean,
+): boolean {
+  return getCodexReasoningEffortOptions(model, enableUltraEffort).length > 0;
+}
+
+export function resolveCodexReasoningEffort(
+  model: CodexDiscoveredModel | null,
+  enableUltraEffort: boolean,
+  requestedEffort: string | null,
+): string | null {
+  if (!model) {
+    const fallbackValues: readonly string[] = CODEX_FALLBACK_REASONING_EFFORT_VALUES;
+    return requestedEffort && fallbackValues.includes(requestedEffort)
+      ? requestedEffort
+      : resolvePreferredReasoningDefault(fallbackValues, DEFAULT_REASONING_VALUE);
+  }
+
+  const supportedValues = getCodexReasoningEffortOptions(model, enableUltraEffort)
+    .map(option => option.value);
+  if (requestedEffort && supportedValues.includes(requestedEffort)) {
+    return requestedEffort;
+  }
+  return getCodexDefaultReasoningEffort(model, enableUltraEffort);
 }
 
 export function getCodexFastServiceTier(
