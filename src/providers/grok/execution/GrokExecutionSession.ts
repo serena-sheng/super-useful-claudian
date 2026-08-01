@@ -33,17 +33,22 @@ import {
   AcpInteractionController,
   type AcpPromptResponse,
   type AcpSessionConfigOption,
+  type AcpSessionModelState,
   type AcpSessionNotification,
   AcpToolStreamAdapter,
   buildAcpUsageInfo,
 } from '../../acp';
 import type { GrokCommandCatalog } from '../commands/GrokCommandCatalog';
+import { computeGrokEnvironmentHash } from '../env/GrokSettingsReconciler';
 import {
   resolveGrokSessionCwd,
   resolveGrokSessionDirectory,
 } from '../history/GrokHistoryPathResolver';
-import { decodeGrokModelId } from '../models';
 import {
+  decodeGrokModelId,
+  findGrokModel,
+  getGrokAvailableReasoningEfforts,
+  type GrokDiscoveredModel,
   normalizeGrokDiscoveredModels,
 } from '../models';
 import {
@@ -56,12 +61,18 @@ import { waitForGrokCancelDelivery } from '../runtime/GrokCancelDelivery';
 import type { GrokModelCatalogCoordinator } from '../runtime/GrokModelCatalogCoordinator';
 import { buildGrokRuntimeEnv } from '../runtime/GrokRuntimeEnvironment';
 import { GrokSessionNotificationMirrorDeduplicator } from '../runtime/GrokSessionNotificationMirrorDeduplicator';
+import { getGrokProviderSettings } from '../settings';
 import { parseGrokProviderState } from '../types';
 import type {
   GrokExecutionNativeConnection,
   GrokExecutionNativeFactory,
 } from './GrokExecutionBackend';
 import { GrokExecutionInteractionRouter } from './GrokExecutionInteractionRouter';
+import {
+  normalizeGrokModelUpdateMetadata,
+  normalizeGrokSessionModelMetadata,
+  normalizeGrokSetModelMetadata,
+} from './GrokSessionModelMetadata';
 
 interface GrokExecutionSessionOptions {
   readonly commandCatalog?: Pick<GrokCommandCatalog, 'setCommandSnapshot'>;
@@ -164,6 +175,8 @@ interface GrokNativeOwner {
   loadedSessionConfigurationKey: string | null;
   loadedSessionId: string | null;
   modeUnsubscribe: () => void;
+  readonly modelContextKey: string;
+  modelsUnsubscribe: () => void;
   readonly native: GrokExecutionNativeConnection;
   notificationUnsubscribe: () => void;
   shutdownFlight: Promise<void> | null;
@@ -498,6 +511,8 @@ RewindableExecutionSession {
       loadedSessionConfigurationKey: null,
       loadedSessionId: null,
       modeUnsubscribe: () => {},
+      modelContextKey: computeGrokEnvironmentHash(this.plugin.settings),
+      modelsUnsubscribe: () => {},
       native,
       notificationUnsubscribe: () => {},
       shutdownFlight: null,
@@ -512,6 +527,12 @@ RewindableExecutionSession {
         if (!this.isCurrentNativeOwner(owner)) return;
         this.updateSnapshot(this.active ? 'executing' : 'idle');
         this.emitSessionMode(mode);
+      }) ?? (() => {});
+      owner.modelsUnsubscribe = native.onModelsChanged?.(models => {
+        if (!this.isCurrentNativeOwner(owner)) return;
+        void this.publishModelUpdate(owner, models).catch(() => {
+          // Catalog synchronization is best-effort and cannot disrupt the session.
+        });
       }) ?? (() => {});
       await native.initialize();
       if (
@@ -573,7 +594,7 @@ RewindableExecutionSession {
       owner.loadedSessionConfigurationKey = sessionConfigurationKey;
       this.updateSnapshot(this.active ? 'executing' : 'idle');
       this.emitCurrentSnapshot();
-      await this.publishModels(response.models);
+      await this.publishSessionModels(response, owner.modelContextKey);
       this.throwIfCancellationRequested(active);
       return this.providerSessionId;
     }
@@ -623,7 +644,7 @@ RewindableExecutionSession {
     owner.loadedSessionConfigurationKey = sessionConfigurationKey;
     this.updateSnapshot(this.active ? 'executing' : 'idle');
     this.emitCurrentSnapshot();
-    await this.publishModels(response.models);
+    await this.publishSessionModels(response, owner.modelContextKey);
     this.throwIfCancellationRequested(active);
     return response.sessionId;
   }
@@ -638,14 +659,29 @@ RewindableExecutionSession {
       ? decodeGrokModelId(request.configuration.model)
       : null;
     if (rawModel) {
-      await native.setModel({
-        ...(request.configuration.reasoning
-          ? { _meta: { reasoningEffort: request.configuration.reasoning } }
+      // The request can predate model discovery, so validate again after
+      // ensureSession has published the live model catalog.
+      const reasoningEffort = this.resolveReasoningEffort(
+        rawModel,
+        request.configuration.reasoning,
+      );
+      const response = await native.setModel({
+        ...(reasoningEffort
+          ? { _meta: { reasoningEffort } }
           : {}),
         modelId: rawModel,
         sessionId,
       });
       this.throwIfCancellationRequested(active);
+      const model = normalizeGrokSetModelMetadata(rawModel, response._meta);
+      if (model) {
+        await this.mergeModelMetadataBestEffort(
+          [model],
+          undefined,
+          this.getNativeOwner(native).modelContextKey,
+        );
+        this.throwIfCancellationRequested(active);
+      }
     }
     const requestedMode = resolveGrokNativeMode(request);
     if (requestedMode) {
@@ -655,6 +691,23 @@ RewindableExecutionSession {
       });
       this.throwIfCancellationRequested(active);
     }
+  }
+
+  private resolveReasoningEffort(
+    rawModelId: string,
+    requestedReasoning: string | undefined,
+  ): string | null {
+    const settings = getGrokProviderSettings(this.plugin.settings);
+    const model = findGrokModel(settings.currentCatalog?.models ?? [], rawModelId);
+    if (model?.reasoningMetadataResolved !== true) return null;
+    const advertisedValues = getGrokAvailableReasoningEfforts(model)
+      .map(effort => effort.value);
+    const requested = requestedReasoning?.trim() ?? '';
+    if (!requested) return null;
+    if (advertisedValues.includes(requested)) return requested;
+
+    const preferred = settings.preferredReasoningByModel[rawModelId]?.trim() ?? '';
+    return advertisedValues.includes(preferred) ? preferred : null;
   }
 
   private handleNotification(
@@ -676,7 +729,8 @@ RewindableExecutionSession {
       return;
     }
     if (result.metadata?.type === 'config_options') {
-      void this.publishModelsFromConfig(result.metadata.configOptions);
+      const owner = this.nativeOwner;
+      if (owner) void this.publishModelsFromConfig(result.metadata.configOptions, owner);
       return;
     }
     if (result.metadata?.type === 'current_mode') {
@@ -881,6 +935,11 @@ RewindableExecutionSession {
       } catch {
         // Listener cleanup cannot prevent process shutdown.
       }
+      try {
+        owner.modelsUnsubscribe();
+      } catch {
+        // Listener cleanup cannot prevent process shutdown.
+      }
     }
     if (!owner.shutdownFlight) {
       owner.shutdownFlight = Promise.resolve().then(() => owner.native.shutdown());
@@ -973,28 +1032,42 @@ RewindableExecutionSession {
     };
   }
 
-  private async publishModels(
-    state: Awaited<ReturnType<GrokExecutionNativeConnection['newSession']>>['models'],
+  private async publishSessionModels(
+    response: Pick<
+      Awaited<ReturnType<GrokExecutionNativeConnection['newSession']>>,
+      '_meta' | 'configOptions' | 'models'
+    >,
+    sourceContextKey: string,
   ): Promise<void> {
-    if (!state) return;
-    const models = normalizeGrokDiscoveredModels(state.availableModels.map(model => ({
-      description: model.description ?? undefined,
-      displayName: model.name,
-      rawId: model.modelId ?? model.id,
-      reasoningEfforts: [],
-      supportsReasoning: false,
-    })));
+    const { currentModelId, models } = normalizeGrokSessionModelMetadata(response);
     if (models.length > 0) {
-      await this.options.modelCatalogCoordinator?.mergeLiveModels(
+      await this.mergeModelMetadataBestEffort(
         models,
-        state.currentModelId,
+        currentModelId ?? undefined,
+        sourceContextKey,
       );
     }
   }
 
+  private async publishModelUpdate(
+    owner: GrokNativeOwner,
+    state: AcpSessionModelState,
+  ): Promise<void> {
+    if (!this.isCurrentNativeOwner(owner)) return;
+    const update = normalizeGrokModelUpdateMetadata(state);
+    if (!update || !this.isCurrentNativeOwner(owner)) return;
+    await this.mergeModelMetadataBestEffort(
+      update.models,
+      update.currentModelId ?? undefined,
+      owner.modelContextKey,
+    );
+  }
+
   private async publishModelsFromConfig(
     options: readonly AcpSessionConfigOption[],
+    owner: GrokNativeOwner,
   ): Promise<void> {
+    if (!this.isCurrentNativeOwner(owner)) return;
     const modelOption = options.find(option => option.id === 'model' && option.type === 'select');
     if (!modelOption || modelOption.type !== 'select') return;
     const flat = modelOption.options.flatMap(option => (
@@ -1007,10 +1080,27 @@ RewindableExecutionSession {
       supportsReasoning: false,
     })));
     if (models.length > 0) {
-      await this.options.modelCatalogCoordinator?.mergeLiveModels(
+      await this.mergeModelMetadataBestEffort(
         models,
         modelOption.currentValue,
+        owner.modelContextKey,
       );
+    }
+  }
+
+  private async mergeModelMetadataBestEffort(
+    models: GrokDiscoveredModel[],
+    defaultModelId: string | undefined,
+    sourceContextKey: string,
+  ): Promise<void> {
+    try {
+      await this.options.modelCatalogCoordinator?.mergeLiveModels(
+        models,
+        defaultModelId,
+        sourceContextKey,
+      );
+    } catch {
+      // Catalog synchronization is best-effort and cannot disrupt execution.
     }
   }
 
