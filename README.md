@@ -1,8 +1,17 @@
 # Claudian
 
-![GitHub stars](https://img.shields.io/github/stars/YishenTu/claudian?style=social)
-![GitHub release](https://img.shields.io/github/v/release/YishenTu/claudian)
-![License](https://img.shields.io/github/license/YishenTu/claudian)
+<p>
+  <a href="https://trendshift.io/repositories/21115?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-21115">
+    <img align="right" src="https://trendshift.io/api/badge/repositories/21115" alt="Claudian on Trendshift" width="180">
+  </a>
+  <img src="https://img.shields.io/github/stars/YishenTu/claudian" alt="GitHub stars" vspace="10">
+  <a href="https://community.obsidian.md/plugins/realclaudian">
+    <img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json&amp;query=%24%5B%22realclaudian%22%5D.downloads&amp;label=downloads&amp;logo=obsidian&amp;color=7C3AED" alt="Obsidian downloads" vspace="10">
+  </a>
+  <img src="https://img.shields.io/github/v/release/YishenTu/claudian" alt="GitHub release" vspace="10">
+  <img src="https://img.shields.io/github/license/YishenTu/claudian" alt="License" vspace="10">
+  <br clear="both">
+</p>
 
 ![Preview](assets/Preview.png)
 
