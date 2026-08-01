@@ -1,3 +1,4 @@
+import { mergePersistedProviderState } from '../../../core/providers/providerState';
 import type {
   ProviderConversationHistoryService,
   ProviderHistoryPathContext,
@@ -9,6 +10,13 @@ import {
 } from '../types';
 import { resolveGrokSessionDirectory } from './GrokHistoryPathResolver';
 import { loadGrokHistory } from './GrokHistoryStore';
+
+const GROK_PROVIDER_STATE_KEYS = [
+  'forkSource',
+  'forkSourceSessionDirectory',
+  'nativeConversationContextEstablished',
+  'sessionDirectory',
+] as const;
 
 export class GrokConversationHistoryService implements ProviderConversationHistoryService {
   private readonly hydratedKeys = new Map<string, string>();
@@ -32,10 +40,14 @@ export class GrokConversationHistoryService implements ProviderConversationHisto
         pathContext,
       );
       if (sourceSessionDirectory !== state.forkSourceSessionDirectory) {
-        conversation.providerState = buildPersistedGrokProviderState({
-          ...state,
-          forkSourceSessionDirectory: sourceSessionDirectory ?? undefined,
-        }) as Record<string, unknown> | undefined;
+        conversation.providerState = mergePersistedProviderState(
+          conversation.providerState,
+          GROK_PROVIDER_STATE_KEYS,
+          buildPersistedGrokProviderState({
+            ...state,
+            forkSourceSessionDirectory: sourceSessionDirectory ?? undefined,
+          }) as Record<string, unknown> | undefined,
+        );
       }
       if (conversation.messages.length > 0) return;
       if (!sourceSessionDirectory) {
@@ -68,10 +80,14 @@ export class GrokConversationHistoryService implements ProviderConversationHisto
       pathContext,
     );
     if (sessionDirectory !== state.sessionDirectory) {
-      conversation.providerState = buildPersistedGrokProviderState({
-        ...state,
-        sessionDirectory: sessionDirectory ?? undefined,
-      }) as Record<string, unknown> | undefined;
+      conversation.providerState = mergePersistedProviderState(
+        conversation.providerState,
+        GROK_PROVIDER_STATE_KEYS,
+        buildPersistedGrokProviderState({
+          ...state,
+          sessionDirectory: sessionDirectory ?? undefined,
+        }) as Record<string, unknown> | undefined,
+      );
     }
     if (!sessionDirectory) {
       this.hydratedKeys.delete(conversation.id);
@@ -91,20 +107,46 @@ export class GrokConversationHistoryService implements ProviderConversationHisto
       return;
     }
     conversation.messages = parsed.messages;
+    const hydratedState = parseGrokProviderState(conversation.providerState);
+    if (hydratedState.nativeConversationContextEstablished === false) {
+      conversation.providerState = mergePersistedProviderState(
+        conversation.providerState,
+        GROK_PROVIDER_STATE_KEYS,
+        buildPersistedGrokProviderState({
+          ...hydratedState,
+          nativeConversationContextEstablished: true,
+        }) as Record<string, unknown> | undefined,
+      );
+    }
     this.hydratedKeys.set(conversation.id, hydrationKey);
-  }
-
-  async deleteConversationSession(
-    _conversation: Conversation,
-    _vaultPath: string | null,
-    _pathContext?: ProviderHistoryPathContext,
-  ): Promise<void> {
-    // Grok-native history is read-only from Claudian.
   }
 
   resolveSessionIdForConversation(conversation: Conversation | null): string | null {
     const state = parseGrokProviderState(conversation?.providerState);
     return conversation?.sessionId ?? state.forkSource?.sessionId ?? null;
+  }
+
+  async resolveMissingConversationSession(
+    conversation: Conversation,
+    _vaultPath: string | null,
+    missingProviderSessionId?: string,
+  ): Promise<'delete' | 'reset' | 'preserve'> {
+    if (
+      !conversation.sessionId
+      || !missingProviderSessionId
+      || conversation.sessionId !== missingProviderSessionId
+    ) {
+      return 'preserve';
+    }
+
+    const providerState = { ...conversation.providerState };
+    for (const key of GROK_PROVIDER_STATE_KEYS) delete providerState[key];
+    conversation.sessionId = null;
+    conversation.providerState = Object.keys(providerState).length > 0
+      ? providerState
+      : undefined;
+    this.hydratedKeys.delete(conversation.id);
+    return 'reset';
   }
 
   isPendingForkConversation(conversation: Conversation): boolean {
@@ -132,8 +174,12 @@ export class GrokConversationHistoryService implements ProviderConversationHisto
   buildPersistedProviderState(
     conversation: Conversation,
   ): Record<string, unknown> | undefined {
-    return buildPersistedGrokProviderState(
-      parseGrokProviderState(conversation.providerState),
-    ) as Record<string, unknown> | undefined;
+    return mergePersistedProviderState(
+      conversation.providerState,
+      GROK_PROVIDER_STATE_KEYS,
+      buildPersistedGrokProviderState(
+        parseGrokProviderState(conversation.providerState),
+      ) as Record<string, unknown> | undefined,
+    );
   }
 }

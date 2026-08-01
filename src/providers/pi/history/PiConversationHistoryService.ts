@@ -1,5 +1,6 @@
 import * as fs from 'node:fs/promises';
 
+import { mergePersistedProviderState } from '../../../core/providers/providerState';
 import type {
   ProviderConversationHistoryService,
   ProviderHistoryPathContext,
@@ -8,6 +9,15 @@ import type { Conversation } from '../../../core/types';
 import { buildPersistedPiState, getPiState } from '../types';
 import { resolvePiSessionFileHint } from './PiHistoryPathResolver';
 import { parsePiSessionContent } from './PiHistoryStore';
+
+const PI_PROVIDER_STATE_KEYS = [
+  'forkSource',
+  'forkSourceSessionFile',
+  'leafEntryId',
+  'parentSession',
+  'sessionFile',
+  'sessionId',
+] as const;
 
 export class PiConversationHistoryService implements ProviderConversationHistoryService {
   private hydratedKeys = new Map<string, string>();
@@ -106,13 +116,6 @@ export class PiConversationHistoryService implements ProviderConversationHistory
     }
   }
 
-  async deleteConversationSession(
-    _conversation: Conversation,
-    _vaultPath: string | null,
-  ): Promise<void> {
-    // Never mutate Pi native history.
-  }
-
   resolveSessionIdForConversation(conversation: Conversation | null): string | null {
     const state = getPiState(conversation?.providerState);
     return state.sessionFile
@@ -120,6 +123,45 @@ export class PiConversationHistoryService implements ProviderConversationHistory
       ?? conversation?.sessionId
       ?? state.forkSource?.sessionId
       ?? null;
+  }
+
+  async resolveMissingConversationSession(
+    conversation: Conversation,
+    _vaultPath: string | null,
+    missingProviderSessionId?: string,
+  ): Promise<'delete' | 'reset' | 'preserve'> {
+    const state = getPiState(conversation.providerState);
+    const currentTarget = state.sessionFile
+      ?? state.sessionId
+      ?? conversation.sessionId
+      ?? null;
+    if (
+      !missingProviderSessionId
+      || !currentTarget
+      || missingProviderSessionId !== currentTarget
+    ) {
+      return 'preserve';
+    }
+
+    const providerState = { ...(conversation.providerState ?? {}) };
+    if (state.sessionFile === currentTarget) delete providerState.sessionFile;
+    if (state.sessionId === currentTarget) delete providerState.sessionId;
+    if (conversation.sessionId === currentTarget) conversation.sessionId = null;
+
+    const remainingState = getPiState(providerState);
+    if (
+      !remainingState.sessionFile
+      && !remainingState.sessionId
+      && !conversation.sessionId
+    ) {
+      delete providerState.leafEntryId;
+      delete providerState.parentSession;
+    }
+    conversation.providerState = Object.keys(providerState).length > 0
+      ? providerState
+      : undefined;
+    this.hydratedKeys.delete(conversation.id);
+    return 'reset';
   }
 
   isPendingForkConversation(_conversation: Conversation): boolean {
@@ -143,7 +185,13 @@ export class PiConversationHistoryService implements ProviderConversationHistory
   buildPersistedProviderState(
     conversation: Conversation,
   ): Record<string, unknown> | undefined {
-    return buildPersistedPiState(getPiState(conversation.providerState)) as Record<string, unknown> | undefined;
+    return mergePersistedProviderState(
+      conversation.providerState,
+      PI_PROVIDER_STATE_KEYS,
+      buildPersistedPiState(
+        getPiState(conversation.providerState),
+      ) as Record<string, unknown> | undefined,
+    );
   }
 
   private replaceResolvedPath(
@@ -162,6 +210,10 @@ export class PiConversationHistoryService implements ProviderConversationHistory
     } else {
       delete nextState[field];
     }
-    conversation.providerState = buildPersistedPiState(nextState) as Record<string, unknown> | undefined;
+    conversation.providerState = mergePersistedProviderState(
+      conversation.providerState,
+      PI_PROVIDER_STATE_KEYS,
+      buildPersistedPiState(nextState) as Record<string, unknown> | undefined,
+    );
   }
 }
