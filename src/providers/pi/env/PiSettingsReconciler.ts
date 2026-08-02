@@ -1,7 +1,13 @@
+import {
+  type CliPathFingerprintInputs,
+  createCliPathFingerprintInputs,
+  hasCliPathFingerprintInputs,
+} from '../../../core/providers/cli/CliPathFingerprintInputs';
 import { getRuntimeEnvironmentText } from '../../../core/providers/providerEnvironment';
+import { createRuntimeInputFingerprint } from '../../../core/providers/settings/RuntimeInputFingerprint';
 import type { ProviderSettingsReconciler } from '../../../core/providers/types';
 import type { Conversation } from '../../../core/types';
-import { parseEnvironmentVariables } from '../../../utils/env';
+import { getHostnameKey, parseEnvironmentVariables } from '../../../utils/env';
 import { sameStringList } from '../internal/compareCollections';
 import {
   clampPiThinkingLevel,
@@ -26,15 +32,18 @@ const PI_ENV_HASH_KEYS = [
   'PI_SKIP_VERSION_CHECK',
   'PI_TELEMETRY',
   'PI_CACHE_RETENTION',
+  'PATH',
 ] as const;
 
-function computePiEnvHash(envText: string): string {
-  const envVars = parseEnvironmentVariables(envText || '');
-  return PI_ENV_HASH_KEYS
-    .filter((key) => envVars[key])
-    .map((key) => `${key}=${envVars[key]}`)
-    .sort()
-    .join('|');
+function computePiRuntimeFingerprint(
+  environmentText: string,
+  cliPathInputs: CliPathFingerprintInputs,
+): string {
+  return createRuntimeInputFingerprint({
+    additionalInputs: cliPathInputs,
+    environmentKeys: PI_ENV_HASH_KEYS,
+    environmentText,
+  });
 }
 
 function invalidatePiConversationSessions(conversations: Conversation[]): Conversation[] {
@@ -75,9 +84,22 @@ export const piSettingsReconciler: ProviderSettingsReconciler = {
     conversations: Conversation[],
   ): { changed: boolean; invalidatedConversations: Conversation[] } {
     const envText = getRuntimeEnvironmentText(settings, 'pi');
-    const currentHash = computePiEnvHash(envText);
-    const savedHash = getPiProviderSettings(settings).environmentHash;
+    const piSettings = getPiProviderSettings(settings);
+    const cliPathInputs = createCliPathFingerprintInputs(
+      piSettings.cliPathsByHost[getHostnameKey()],
+      piSettings.cliPath,
+    );
+    const currentHash = computePiRuntimeFingerprint(envText, cliPathInputs);
+    const savedHash = piSettings.environmentHash;
 
+    const environment = parseEnvironmentVariables(envText);
+    const hasFingerprintInputs = Boolean(
+      hasCliPathFingerprintInputs(cliPathInputs)
+      || PI_ENV_HASH_KEYS.some(key => Object.prototype.hasOwnProperty.call(environment, key))
+    );
+    if (!savedHash && !hasFingerprintInputs) {
+      return { changed: false, invalidatedConversations: [] };
+    }
     if (currentHash === savedHash) {
       return { changed: false, invalidatedConversations: [] };
     }

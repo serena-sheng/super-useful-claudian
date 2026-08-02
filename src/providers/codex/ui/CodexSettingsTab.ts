@@ -5,7 +5,9 @@ import { ProviderSettingsCoordinator } from '../../../core/providers/ProviderSet
 import type { ProviderSettingsTabRenderer } from '../../../core/providers/types';
 import { t } from '../../../i18n/i18n';
 import { renderEnvironmentSettingsSection } from '../../../shared/settings/EnvironmentSettingsSection';
+import { renderHostnameCliPathSetting } from '../../../shared/settings/HostnameCliPathSetting';
 import { renderNativeMcpSettingsSection } from '../../../shared/settings/NativeMcpSettingsSection';
+import { renderProviderEnablementSetting } from '../../../shared/settings/ProviderEnablementSetting';
 import {
   renderLastEnabledProviderWarning,
   renderProviderModelEnablementWarning,
@@ -42,45 +44,39 @@ export const codexSettingsTabRenderer: ProviderSettingsTabRenderer = {
 
     new Setting(container).setName(t('settings.setup')).setHeading();
 
-    new Setting(container)
-      .setName(t('settings.providerEnablement.name', { provider: 'Codex' }))
-      .setDesc(t('settings.providerEnablement.desc', { provider: 'Codex' }))
-      .addToggle((toggle) =>
-        toggle
-          .setValue(codexSettings.enabled)
-          .onChange(async (value) => {
-            if (!ProviderSettingsCoordinator.canApplyProviderEnablement(
-              settingsBag,
+    renderProviderEnablementSetting({
+      container,
+      description: t('settings.providerEnablement.desc', { provider: 'Codex' }),
+      getValue: () => getCodexProviderSettings(settingsBag).enabled,
+      name: t('settings.providerEnablement.name', { provider: 'Codex' }),
+      onChange: async (value) => {
+        if (!ProviderSettingsCoordinator.canApplyProviderEnablement(
+          settingsBag,
+          'codex',
+          value,
+        )) {
+          lastProviderWarning.showFor();
+          return;
+        }
+
+        let accepted = true;
+        await context.plugin.runProviderExecutionTransition(['codex'], async () => {
+          await context.plugin.mutateSettings((settings) => {
+            accepted = ProviderSettingsCoordinator.applyProviderEnablement(
+              settings,
               'codex',
               value,
-            )) {
-              lastProviderWarning.showFor();
-              toggle.setValue(getCodexProviderSettings(settingsBag).enabled);
-              return;
-            }
-
-            let accepted = true;
-            try {
-              await context.plugin.runProviderExecutionTransition(['codex'], async () => {
-                await context.plugin.mutateSettings((settings) => {
-                  accepted = ProviderSettingsCoordinator.applyProviderEnablement(
-                    settings,
-                    'codex',
-                    value,
-                  );
-                });
-              });
-              if (accepted) {
-                lastProviderWarning.hide();
-              } else {
-                lastProviderWarning.showFor();
-              }
-              modelWarning.context.notifyProviderModelOptionsChanged('codex');
-            } finally {
-              toggle.setValue(getCodexProviderSettings(settingsBag).enabled);
-            }
-          })
-      );
+            );
+          });
+        });
+        if (accepted) {
+          lastProviderWarning.hide();
+        } else {
+          lastProviderWarning.showFor();
+        }
+        modelWarning.context.notifyProviderModelOptionsChanged('codex');
+      },
+    });
 
     const lastProviderWarning = renderLastEnabledProviderWarning(container);
 
@@ -102,12 +98,13 @@ export const codexSettingsTabRenderer: ProviderSettingsTabRenderer = {
             .setValue(installationMethod)
             .onChange(async (value) => {
               installationMethod = value === 'wsl' ? 'wsl' : 'native-windows';
-              await context.plugin.runProviderExecutionTransition(['codex'], async () => {
-                await context.plugin.mutateSettings((settings) => {
+              await context.plugin.applyProviderRuntimeSettings(
+                ['codex'],
+                (settings) => {
                   updateCodexProviderSettings(settings, { installationMethod });
-                });
-                codexWorkspace.cliResolver.reset();
-              });
+                },
+                () => codexWorkspace.cliResolver.reset(),
+              );
               refreshInstallationMethodUI();
               await refreshCodexModelCatalog();
             });
@@ -137,14 +134,6 @@ export const codexSettingsTabRenderer: ProviderSettingsTabRenderer = {
 
     const shouldValidateCliPathAsFile = (): boolean => !isWindowsHost || installationMethod !== 'wsl';
 
-    const cliPathSetting = new Setting(container)
-      .setName(t('settings.codex.cliPath.name'))
-      .setDesc(getCliPathCopy().desc);
-
-    const validationEl = container.createDiv({
-      cls: 'claudian-cli-path-validation claudian-setting-validation claudian-setting-validation-error claudian-hidden',
-    });
-
     const validatePath = (value: string): string | null => {
       const trimmed = value.trim();
       if (!trimmed) return null;
@@ -168,36 +157,41 @@ export const codexSettingsTabRenderer: ProviderSettingsTabRenderer = {
       return null;
     };
 
-    const updateCliPathValidation = (value: string, inputEl?: HTMLInputElement): boolean => {
-      const error = validatePath(value);
-      if (error) {
-        validationEl.setText(error);
-        validationEl.toggleClass('claudian-hidden', false);
-        if (inputEl) {
-          inputEl.toggleClass('claudian-input-error', true);
-        }
-        return false;
-      }
-
-      validationEl.toggleClass('claudian-hidden', true);
-      if (inputEl) {
-        inputEl.toggleClass('claudian-input-error', false);
-      }
-      return true;
-    };
-
-    const cliPathsByHost = { ...codexSettings.cliPathsByHost };
-    let cliPathInputEl: HTMLInputElement | null = null;
     let wslDistroSettingEl: HTMLElement | null = null;
     let wslDistroInputEl: HTMLInputElement | null = null;
 
+    const cliPathControl = renderHostnameCliPathSetting({
+      container,
+      description: getCliPathCopy().desc,
+      getValue: () => getCodexProviderSettings(settingsBag).cliPathsByHost[hostnameKey] || '',
+      name: t('settings.codex.cliPath.name'),
+      onChange: async (value) => {
+        const cliPathsByHost = {
+          ...getCodexProviderSettings(settingsBag).cliPathsByHost,
+        };
+        if (value) {
+          cliPathsByHost[hostnameKey] = value;
+        } else {
+          delete cliPathsByHost[hostnameKey];
+        }
+
+        await context.plugin.applyProviderRuntimeSettings(
+          ['codex'],
+          (settings) => {
+            updateCodexProviderSettings(settings, { cliPathsByHost });
+          },
+          () => codexWorkspace.cliResolver.reset(),
+        );
+      },
+      placeholder: getCliPathCopy().placeholder,
+      validate: validatePath,
+    });
+
     const refreshInstallationMethodUI = (): void => {
       const cliCopy = getCliPathCopy();
-      cliPathSetting.setDesc(cliCopy.desc);
-      if (cliPathInputEl) {
-        cliPathInputEl.placeholder = cliCopy.placeholder;
-        updateCliPathValidation(cliPathInputEl.value, cliPathInputEl);
-      }
+      cliPathControl.setDescription(cliCopy.desc);
+      cliPathControl.setPlaceholder(cliCopy.placeholder);
+      cliPathControl.revalidate();
       if (wslDistroSettingEl) {
         wslDistroSettingEl.toggleClass('claudian-hidden', installationMethod !== 'wsl');
       }
@@ -205,43 +199,6 @@ export const codexSettingsTabRenderer: ProviderSettingsTabRenderer = {
         wslDistroInputEl.disabled = installationMethod !== 'wsl';
       }
     };
-
-    const persistCliPath = async (value: string): Promise<boolean> => {
-      const isValid = updateCliPathValidation(value, cliPathInputEl ?? undefined);
-      if (!isValid) {
-        return false;
-      }
-
-      const trimmed = value.trim();
-      if (trimmed) {
-        cliPathsByHost[hostnameKey] = trimmed;
-      } else {
-        delete cliPathsByHost[hostnameKey];
-      }
-
-      await context.plugin.runProviderExecutionTransition(['codex'], async () => {
-        await context.plugin.mutateSettings((settings) => {
-          updateCodexProviderSettings(settings, { cliPathsByHost: { ...cliPathsByHost } });
-        });
-        codexWorkspace.cliResolver.reset();
-      });
-      return true;
-    };
-
-    const currentValue = codexSettings.cliPathsByHost[hostnameKey] || '';
-
-    cliPathSetting.addText((text) => {
-      text
-        .setPlaceholder(getCliPathCopy().placeholder)
-        .setValue(currentValue)
-        .onChange(async (value) => {
-          await persistCliPath(value);
-        });
-      text.inputEl.addClass('claudian-settings-cli-path-input');
-      cliPathInputEl = text.inputEl;
-
-      updateCliPathValidation(currentValue, text.inputEl);
-    });
 
     if (isWindowsHost) {
       const wslDistroSetting = new Setting(container)
@@ -254,12 +211,13 @@ export const codexSettingsTabRenderer: ProviderSettingsTabRenderer = {
           .setPlaceholder('Ubuntu')
           .setValue(codexSettings.wslDistroOverride)
           .onChange(async (value) => {
-            await context.plugin.runProviderExecutionTransition(['codex'], async () => {
-              await context.plugin.mutateSettings((settings) => {
+            await context.plugin.applyProviderRuntimeSettings(
+              ['codex'],
+              (settings) => {
                 updateCodexProviderSettings(settings, { wslDistroOverride: value });
-              });
-              codexWorkspace.cliResolver.reset();
-            });
+              },
+              () => codexWorkspace.cliResolver.reset(),
+            );
           });
 
         text.inputEl.addClass('claudian-settings-cli-path-input');

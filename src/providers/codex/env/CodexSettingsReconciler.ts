@@ -1,21 +1,28 @@
+import {
+  createCliPathFingerprintInputs,
+  hasCliPathFingerprintInputs,
+} from '../../../core/providers/cli/CliPathFingerprintInputs';
 import { getRuntimeEnvironmentText } from '../../../core/providers/providerEnvironment';
+import { createRuntimeInputFingerprint } from '../../../core/providers/settings/RuntimeInputFingerprint';
 import type { ProviderSettingsReconciler } from '../../../core/providers/types';
 import type { Conversation } from '../../../core/types';
-import { parseEnvironmentVariables } from '../../../utils/env';
+import { getHostnameKey, parseEnvironmentVariables } from '../../../utils/env';
 import { resolveCodexModelSelection } from '../modelOptions';
 import { getCodexProviderSettings, updateCodexProviderSettings } from '../settings';
 import { getCodexState } from '../types';
 import { codexChatUIConfig } from '../ui/CodexChatUIConfig';
 
-const ENV_HASH_KEYS = ['OPENAI_MODEL', 'OPENAI_BASE_URL', 'OPENAI_API_KEY'];
+const ENV_HASH_KEYS = ['OPENAI_MODEL', 'OPENAI_BASE_URL', 'OPENAI_API_KEY', 'PATH'];
 
-export function computeCodexEnvHash(envText: string): string {
-  const envVars = parseEnvironmentVariables(envText || '');
-  return ENV_HASH_KEYS
-    .filter(key => envVars[key])
-    .map(key => `${key}=${envVars[key]}`)
-    .sort()
-    .join('|');
+export function computeCodexEnvHash(
+  environmentText: string,
+  additionalInputs: Readonly<Record<string, string | undefined>> = {},
+): string {
+  return createRuntimeInputFingerprint({
+    additionalInputs,
+    environmentKeys: ENV_HASH_KEYS,
+    environmentText,
+  });
 }
 
 function invalidateCodexConversationSessions(conversations: Conversation[]): Conversation[] {
@@ -39,9 +46,28 @@ export const codexSettingsReconciler: ProviderSettingsReconciler = {
     conversations: Conversation[],
   ): { changed: boolean; invalidatedConversations: Conversation[] } {
     const envText = getRuntimeEnvironmentText(settings, 'codex');
-    const currentHash = computeCodexEnvHash(envText);
-    const savedHash = getCodexProviderSettings(settings).environmentHash;
+    const codexSettings = getCodexProviderSettings(settings);
+    const cliPathInputs = createCliPathFingerprintInputs(
+      codexSettings.cliPathsByHost[getHostnameKey()],
+      codexSettings.cliPath,
+    );
+    const currentHash = computeCodexEnvHash(envText, {
+      ...cliPathInputs,
+      installationMethod: codexSettings.installationMethod,
+      wslDistroOverride: codexSettings.wslDistroOverride,
+    });
+    const savedHash = codexSettings.environmentHash;
 
+    const environment = parseEnvironmentVariables(envText);
+    const hasFingerprintInputs = Boolean(
+      hasCliPathFingerprintInputs(cliPathInputs)
+      || codexSettings.installationMethod === 'wsl'
+      || codexSettings.wslDistroOverride
+      || ENV_HASH_KEYS.some(key => Object.prototype.hasOwnProperty.call(environment, key))
+    );
+    if (!savedHash && !hasFingerprintInputs) {
+      return { changed: false, invalidatedConversations: [] };
+    }
     if (currentHash === savedHash) {
       return { changed: false, invalidatedConversations: [] };
     }

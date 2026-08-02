@@ -1,6 +1,6 @@
-import { createHash } from 'crypto';
-
+import { createCliPathFingerprintInputs } from '../../../core/providers/cli/CliPathFingerprintInputs';
 import { getRuntimeEnvironmentText } from '../../../core/providers/providerEnvironment';
+import { createRuntimeInputFingerprint } from '../../../core/providers/settings/RuntimeInputFingerprint';
 import type { ProviderSettingsReconciler } from '../../../core/providers/types';
 import { getHostnameKey, parseEnvironmentVariables } from '../../../utils/env';
 import {
@@ -15,14 +15,18 @@ import {
 
 export function computeGrokEnvironmentHash(settings: Record<string, unknown>): string {
   const providerSettings = getGrokProviderSettings(settings);
-  const currentHostPath = providerSettings.cliPathsByHost[getHostnameKey()] ?? '';
-  const cliPath = currentHostPath.trim() || providerSettings.cliPath.trim();
+  const cliPathInputs = createCliPathFingerprintInputs(
+    providerSettings.cliPathsByHost[getHostnameKey()],
+    providerSettings.cliPath,
+  );
   const environment = Object.entries(parseEnvironmentVariables(
     getRuntimeEnvironmentText(settings, 'grok'),
   )).sort(([left], [right]) => left.localeCompare(right));
-  const constructionInputs = JSON.stringify({ cliPath, environment });
-
-  return createHash('sha256').update(constructionInputs, 'utf8').digest('hex');
+  return createRuntimeInputFingerprint({
+    additionalInputs: cliPathInputs,
+    environmentKeys: environment.map(([key]) => key),
+    environmentText: getRuntimeEnvironmentText(settings, 'grok'),
+  });
 }
 
 export const grokSettingsReconciler: ProviderSettingsReconciler = {

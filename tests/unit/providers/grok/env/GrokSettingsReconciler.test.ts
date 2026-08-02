@@ -1,3 +1,4 @@
+import { isVersionedRuntimeInputFingerprint } from '@/core/providers/settings/RuntimeInputFingerprint';
 import type { Conversation } from '@/core/types';
 import {
   computeGrokEnvironmentHash,
@@ -44,10 +45,26 @@ describe('GrokSettingsReconciler', () => {
       sharedEnvironmentVariables: 'HTTPS_PROXY=https://proxy.example.com',
     });
 
-    expect(first).toMatch(/^[a-f0-9]{64}$/);
+    expect(isVersionedRuntimeInputFingerprint(first)).toBe(true);
     expect(first).toBe(reordered);
     expect(first).not.toContain('super-secret');
     expect(first).not.toContain('/tmp/grok');
+  });
+
+  it('fingerprints the legacy CLI fallback independently from the hostname candidate', () => {
+    const createSettings = (legacyCliPath: string): Record<string, unknown> => ({
+      providerConfigs: {
+        grok: {
+          cliPath: legacyCliPath,
+          cliPathsByHost: { 'current-host': '/missing/hostname-grok' },
+          environmentVariables: '',
+        },
+      },
+    });
+
+    expect(computeGrokEnvironmentHash(createSettings('/bin/grok-a'))).not.toBe(
+      computeGrokEnvironmentHash(createSettings('/bin/grok-b')),
+    );
   });
 
   it('declares reload and preserves all conversation bindings', () => {
