@@ -68,7 +68,9 @@ describe('CodexAppServerProcess', () => {
     it('spawns codex app-server with correct arguments', () => {
       const server = new CodexAppServerProcess(createLaunchSpec());
       server.start();
+      server.start();
 
+      expect(mockSpawn).toHaveBeenCalledTimes(1);
       expect(mockSpawn).toHaveBeenCalledWith(
         '/usr/bin/codex',
         ['app-server', '--listen', 'stdio://'],
@@ -281,10 +283,23 @@ describe('CodexAppServerProcess', () => {
       await server.shutdown();
       expect(server.isAlive()).toBe(false);
     });
+
+    it('shares one shutdown sequence across repeated calls', async () => {
+      const server = new CodexAppServerProcess(createLaunchSpec());
+      server.start();
+
+      const first = server.shutdown();
+      const second = server.shutdown();
+      expect(mockProc.kill).toHaveBeenCalledTimes(1);
+
+      mockProc.emit('exit', 0, 'SIGTERM');
+      await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+    });
   });
 
   describe('error handling', () => {
     it('marks process as not alive on spawn error', () => {
+      (mockProc as any).pid = undefined;
       const server = new CodexAppServerProcess(createLaunchSpec());
       server.start();
 

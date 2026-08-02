@@ -27,6 +27,7 @@ function createMockServerProcess(): CodexAppServerProcess & {
     stderr: new Readable({ read() {} }),
     isAlive: jest.fn().mockReturnValue(true),
     onExit: jest.fn(),
+    offExit: jest.fn(),
     getStderrSnapshot: jest.fn().mockReturnValue(''),
     _stdout: stdout,
     _stdin: stdin,
@@ -250,6 +251,18 @@ describe('CodexRpcTransport', () => {
     expect(proc._written).toEqual([]);
   });
 
+  it('starts once and unregisters its process exit listener during repeated disposal', () => {
+    transport.start();
+    expect(proc.onExit).toHaveBeenCalledTimes(1);
+
+    const exitHandler = (proc.onExit as jest.Mock).mock.calls[0][0];
+    transport.dispose();
+    transport.dispose();
+
+    expect(proc.offExit).toHaveBeenCalledTimes(1);
+    expect(proc.offExit).toHaveBeenCalledWith(exitHandler);
+  });
+
   describe('cleanup on process exit', () => {
     it('rejects all pending requests when the process exits', async () => {
       const exitCb = (proc.onExit as jest.Mock).mock.calls[0][0];
@@ -273,6 +286,26 @@ describe('CodexRpcTransport', () => {
       exitCb(1, null);
 
       await expect(promise).rejects.toThrow('unknown variant priority');
+    });
+
+    it('preserves late stderr when stdout ends before process close', async () => {
+      const exitCb = (proc.onExit as jest.Mock).mock.calls[0][0];
+      const promise = transport.request('initialize', {});
+      const outcome = promise.then(
+        () => null,
+        (error: Error) => error,
+      );
+
+      proc._stdout.push(null);
+      await new Promise(resolve => setImmediate(resolve));
+      (proc.getStderrSnapshot as jest.Mock).mockReturnValue(
+        'failed to load configuration: unknown variant priority',
+      );
+      exitCb(1, null);
+
+      await expect(outcome).resolves.toEqual(expect.objectContaining({
+        message: expect.stringContaining('unknown variant priority'),
+      }));
     });
   });
 
