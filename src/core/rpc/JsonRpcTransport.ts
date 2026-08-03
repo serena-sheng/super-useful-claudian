@@ -57,7 +57,7 @@ export type JsonRpcNotificationHandler = (params: unknown) => void | Promise<voi
 export type JsonRpcRequestHandler = (
   params: unknown,
   context: JsonRpcRequestHandlerContext,
-) => unknown | Promise<unknown>;
+) => unknown;
 
 interface PendingRequest {
   cleanup: () => void;
