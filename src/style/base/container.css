@@ -7,10 +7,9 @@
   font-family: var(--font-text);
 }
 
-/* Obsidian adds asymmetric padding and scrolling to non-Markdown view content. */
-.workspace-leaf-content .view-content.claudian-container {
-  padding: 0;
-  overflow: hidden;
+/* Obsidian reserves a vault-profile footer only in the left sidebar. */
+.workspace-split.mod-left-split:has(.workspace-leaf.mod-active .view-content.claudian-container) {
+  --vault-profile-display: none;
 }
 
 .claudian-chat-panel {
