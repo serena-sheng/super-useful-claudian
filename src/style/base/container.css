@@ -7,9 +7,10 @@
   font-family: var(--font-text);
 }
 
-/* Obsidian reserves a vault-profile footer only in the left sidebar. */
-.workspace-split.mod-left-split:has(.workspace-leaf.mod-active .view-content.claudian-container) {
-  --vault-profile-display: none;
+/* Compensate for Obsidian's left-only footer without changing other placements. */
+.workspace-split.mod-left-split .view-content.claudian-container {
+  padding-bottom: 0;
+  overflow: hidden;
 }
 
 .claudian-chat-panel {

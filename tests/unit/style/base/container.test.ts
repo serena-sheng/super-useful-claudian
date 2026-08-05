@@ -10,11 +10,12 @@ describe('Claudian view container styles', () => {
     );
   });
 
-  it('releases the left-only vault profile space for the active Claudian view', () => {
+  it('compensates for left-only footer spacing without an ancestor query', () => {
     const css = readFileSync(path.resolve('src/style/base/container.css'), 'utf8');
 
+    expect(css).not.toContain(':has(');
     expect(css).toMatch(
-      /\.workspace-split\.mod-left-split:has\(\.workspace-leaf\.mod-active \.view-content\.claudian-container\)\s*{[^}]*--vault-profile-display:\s*none;/,
+      /\.workspace-split\.mod-left-split \.view-content\.claudian-container\s*{[^}]*padding-bottom:\s*0;[^}]*overflow:\s*hidden;/,
     );
   });
 });
