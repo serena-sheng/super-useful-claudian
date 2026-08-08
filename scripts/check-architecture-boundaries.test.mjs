@@ -251,3 +251,95 @@ test('renderer source does not import AsyncLocalStorage', () => {
   const pattern = /import\s*\{[^}]*\bAsyncLocalStorage\b[^}]*\}\s*from\s*['"](?:node:)?async_hooks['"]/s;
   assert.deepEqual(findMatches([sourceRoot], pattern), []);
 });
+
+test('tab runtime construction stays private to the factory boundary', () => {
+  const chatRoot = path.join(featuresRoot, 'chat');
+  const tabsRoot = path.join(chatRoot, 'tabs');
+  const tabSource = path.join(tabsRoot, 'Tab.ts');
+  const factorySource = path.join(featuresRoot, 'chat', 'tabs', 'TabRuntimeFactory.ts');
+  const runtimeRoot = path.join(tabsRoot, 'runtime');
+  const assemblySymbol = ['assemble', 'TabRuntime'].join('');
+  const assemblyReferences = findMatches(
+    [sourceRoot],
+    new RegExp(`\\b${assemblySymbol}\\b`),
+  ).sort();
+
+  assert.deepEqual(assemblyReferences, [path.relative(process.cwd(), factorySource)]);
+  assert.equal(fs.existsSync(tabSource), false);
+
+  const factory = fs.readFileSync(factorySource, 'utf8');
+  assert.match(factory, new RegExp(`\\bfunction\\s+${assemblySymbol}\\b`));
+  assert.doesNotMatch(
+    factory,
+    new RegExp(`\\bexport\\s+(?:async\\s+)?function\\s+${assemblySymbol}\\b`),
+  );
+
+  const internalImportViolations = [];
+  const factoryImportViolations = [];
+  for (const file of listTypeScriptFiles(sourceRoot)) {
+    for (const sourceImport of listSourceImports(file)) {
+      const target = resolveSourceImport(file, sourceImport.specifier);
+      if (!target) continue;
+      if (
+        isPathWithin(target, runtimeRoot)
+        && file !== factorySource
+        && !isPathWithin(file, runtimeRoot)
+      ) {
+        internalImportViolations.push(
+          `${path.relative(process.cwd(), file)}:${sourceImport.line} -> ${sourceImport.specifier}`,
+        );
+      }
+      if (
+        isPathWithin(file, runtimeRoot)
+        && normalizeModuleTarget(target) === normalizeModuleTarget(factorySource)
+      ) {
+        factoryImportViolations.push(
+          `${path.relative(process.cwd(), file)}:${sourceImport.line} -> ${sourceImport.specifier}`,
+        );
+      }
+    }
+  }
+  assert.deepEqual(internalImportViolations, []);
+  assert.deepEqual(factoryImportViolations, []);
+
+  const retiredConstructionExports = findMatches(
+    [chatRoot],
+    /export\s+(?:async\s+)?function\s+(?:createTab|initializeTabUI|initializeTabControllers|wireTabInputEvents)\b/,
+  );
+  assert.deepEqual(retiredConstructionExports, []);
+
+  for (const retiredConstructionHelper of [
+    'ReadyTabData',
+    'setControllers',
+    'setUI',
+  ]) {
+    assert.deepEqual(
+      findMatches([chatRoot], new RegExp(`\\b${retiredConstructionHelper}\\b`)),
+      [],
+    );
+  }
+});
+
+test('only TabRuntimeFactory can register runtime resource ownership', () => {
+  const lifecycleSource = path.join(
+    featuresRoot,
+    'chat',
+    'tabs',
+    'TabLifecycle.ts',
+  );
+  const factorySource = path.join(
+    featuresRoot,
+    'chat',
+    'tabs',
+    'TabRuntimeFactory.ts',
+  );
+  const registrationReferences = findMatches(
+    [sourceRoot],
+    /\bregisterTabRuntimeResourceOwner\b/,
+  ).sort();
+
+  assert.deepEqual(registrationReferences, [
+    path.relative(process.cwd(), factorySource),
+    path.relative(process.cwd(), lifecycleSource),
+  ].sort());
+});
