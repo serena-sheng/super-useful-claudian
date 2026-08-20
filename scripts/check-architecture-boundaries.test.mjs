@@ -739,9 +739,15 @@ test('CI gates releases, cross-platform behavior, protocol changes, and security
   assert.match(ci, /tests\/\*collab\/\*/);
   assert.match(ci, /needs:\s*cross-platform-collab-scope/);
   assert.match(ci, /needs\.cross-platform-collab-scope\.outputs\.run == 'true'/);
+  assert.match(ci, /actions\/upload-artifact@v4/);
+  assert.match(ci, /name:\s*release-bundle/);
 
   assert.match(release, /uses:\s*\.\/\.github\/workflows\/ci\.yml/);
   assert.match(release, /needs:\s*verify/);
+  assert.match(release, /actions\/download-artifact@v4/);
+  assert.match(release, /name:\s*release-bundle/);
+  assert.doesNotMatch(release, /run:\s*npm ci/);
+  assert.doesNotMatch(release, /run:\s*npm run build/);
 
   assert.match(nightly, /schedule:/);
   assert.match(nightly, /ubuntu-latest/);

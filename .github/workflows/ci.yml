@@ -242,3 +242,15 @@ jobs:
 
       - name: Build and inspect production artifacts
         run: npm run build && npm run check:performance
+
+      - name: Upload release bundle
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle
+          path: |
+            main.js
+            manifest.json
+            styles.css
+          if-no-files-found: error
+          retention-days: 1
