@@ -10,6 +10,7 @@ import {
   historicalMainWarningBytes,
   inspectArtifactSize,
   inspectEvaluationDuration,
+  inspectPluginArtifactReferences,
   mainReviewThresholdBytes,
   preCollabReferenceMainBytes,
 } from './check-startup-performance.mjs';
@@ -838,5 +839,20 @@ test('performance policy reports the pre-Collab delta and review thresholds', ()
   assert.equal(
     inspectEvaluationDuration(evaluationReviewThresholdMs + 1),
     'review-required',
+  );
+});
+
+test('production bundle policy rejects plugin artifact filename references', () => {
+  assert.deepEqual(
+    inspectPluginArtifactReferences('writeFile("manifest.json")'),
+    ['manifest.json'],
+  );
+  assert.deepEqual(
+    inspectPluginArtifactReferences('copyFile("main.js")'),
+    ['main.js'],
+  );
+  assert.deepEqual(
+    inspectPluginArtifactReferences('writeFile("host-transfer-metadata.json")'),
+    [],
   );
 });

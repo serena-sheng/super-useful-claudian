@@ -146,6 +146,15 @@ describe('NativeHostTransferPackagePreparation', () => {
       authoritySchemaVersion: COLLAB_AUTHORITY_SCHEMA_VERSION,
       protocolVersion: COLLAB_HOST_TRANSFER_PROTOCOL_VERSION,
     });
+    await expect(readFile(
+      path.join(
+        authorityDirectory,
+        'host-transfers',
+        'transfer-alpha',
+        'host-transfer-metadata.json',
+      ),
+      'utf8',
+    )).resolves.toBe(JSON.stringify(prepared.manifest));
     expect(restored.manifest).toEqual(prepared.manifest);
     expect(restored.proof).toEqual(proof);
   });
@@ -188,7 +197,12 @@ describe('NativeHostTransferPackagePreparation', () => {
       authoritySchemaVersion: 8 as const,
     };
     await writeFile(
-      path.join(authorityDirectory, 'host-transfers', 'transfer-alpha', 'manifest.json'),
+      path.join(
+        authorityDirectory,
+        'host-transfers',
+        'transfer-alpha',
+        'host-transfer-metadata.json',
+      ),
       JSON.stringify(legacyManifest),
     );
 

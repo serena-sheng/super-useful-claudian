@@ -12,6 +12,7 @@ import type { CollabHostTrustTransitionProof } from '@/core/collab';
 import { CollabError } from '@/core/collab/ClaudianCollabError';
 
 export const HOST_TRANSFER_MANIFEST_SCHEMA_VERSION = 1 as const;
+export const HOST_TRANSFER_MANIFEST_FILE = 'host-transfer-metadata.json' as const;
 export const HOST_TRANSFER_MAX_GIT_BUNDLE_BYTES = 1024 * 1024 * 1024;
 export const HOST_TRANSFER_MAX_AUTHORITY_SNAPSHOT_BYTES = 256 * 1024 * 1024;
 export const HOST_TRANSFER_MAX_MANIFEST_BYTES = 64 * 1024;

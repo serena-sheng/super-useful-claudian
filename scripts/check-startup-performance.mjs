@@ -14,6 +14,7 @@ export const historicalMainWarningBytes = 5_000_000;
 export const mainReviewThresholdBytes = 20_000_000;
 export const evaluationIndicatorMs = 50;
 export const evaluationReviewThresholdMs = 150;
+const pluginArtifactNames = ['main.js', 'manifest.json'];
 
 export function inspectArtifactSize(mainBytes) {
   return {
@@ -29,6 +30,10 @@ export function inspectEvaluationDuration(medianMs) {
     : medianMs > evaluationIndicatorMs
       ? 'warning'
       : 'within-indicator';
+}
+
+export function inspectPluginArtifactReferences(mainContents) {
+  return pluginArtifactNames.filter(artifactName => mainContents.includes(artifactName));
 }
 
 function signed(value) {
@@ -55,6 +60,12 @@ function run() {
   const mainContents = readFileSync(mainPath, 'utf8');
   if (mainContents.includes('ws does not work in the browser')) {
     throw new Error('main.js resolved the browser-only ws stub instead of the desktop runtime');
+  }
+  const pluginArtifactReferences = inspectPluginArtifactReferences(mainContents);
+  if (pluginArtifactReferences.length > 0) {
+    throw new Error(
+      `main.js contains plugin artifact filename references that can be mistaken for a self-update mechanism: ${pluginArtifactReferences.join(', ')}`,
+    );
   }
   const unsupportedChunkReferences = [
     './chunks/providers/',

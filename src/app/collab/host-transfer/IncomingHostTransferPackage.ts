@@ -19,6 +19,7 @@ import { HostTransferAuthoritySnapshot } from '@/app/collab/host-transfer/HostTr
 import type { IncomingHostTransferPackagePort } from '@/app/collab/host-transfer/HostTransferCoordinatorPorts';
 import {
   digestHostTransferPackageManifest,
+  HOST_TRANSFER_MANIFEST_FILE,
   HOST_TRANSFER_MAX_AUTHORITY_SNAPSHOT_BYTES,
   HOST_TRANSFER_MAX_GIT_BUNDLE_BYTES,
   HostTransferArtifactStore,
@@ -31,7 +32,6 @@ import type { HostTransferRecoveryRecord } from '@/app/collab/host-transfer/Host
 import { SerialTaskQueue } from '@/app/collab/SerialTaskQueue';
 import { CollabError } from '@/core/collab/ClaudianCollabError';
 
-const MANIFEST_FILE = 'manifest.json';
 const INSTALL_OWNER_FILE = '.host-transfer-install-owner.json';
 const INSTALL_COMPLETE_FILE = '.host-transfer-installed.json';
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -278,7 +278,7 @@ export class IncomingHostTransferPackage implements IncomingHostTransferPackageP
       });
     }
     await writeOrValidate(
-      path.join(directory, MANIFEST_FILE),
+      path.join(directory, HOST_TRANSFER_MANIFEST_FILE),
       serializeHostTransferPackageManifest(input.manifest),
     );
     return Object.freeze({
@@ -607,7 +607,7 @@ export class IncomingHostTransferPackage implements IncomingHostTransferPackageP
   private async loadManifest(directory: string): Promise<HostTransferPackageManifest> {
     try {
       return parseHostTransferRecoveryPackageManifest(await readFile(
-        path.join(directory, MANIFEST_FILE),
+        path.join(directory, HOST_TRANSFER_MANIFEST_FILE),
         'utf8',
       ));
     } catch (error) {

@@ -24,6 +24,7 @@ import {
   createHostTransferPackageManifest,
   digestHostTransferPackageManifest,
   digestHostTransitionProofChain,
+  HOST_TRANSFER_MANIFEST_FILE,
   HOST_TRANSFER_MAX_AUTHORITY_SNAPSHOT_BYTES,
   HOST_TRANSFER_MAX_GIT_BUNDLE_BYTES,
   HostTransferGitBundleBuilder,
@@ -37,7 +38,6 @@ import type { CollabHostTrustTransitionProof } from '@/core/collab';
 import { CollabError } from '@/core/collab/ClaudianCollabError';
 
 const OWNER_FILE = 'owner.json';
-const MANIFEST_FILE = 'manifest.json';
 const PROOF_FILE = 'proof.json';
 const BUNDLE_FILE = 'authority.bundle';
 const SNAPSHOT_FILE = 'authority.db';
@@ -131,7 +131,7 @@ export class NativeHostTransferPackagePreparation implements HostTransferPackage
     if (input.signal?.aborted) throw new CollabError({ code: 'cancelled' });
     this.assertIdentity(input.projectId, input.transferId);
     const directory = await this.ensureOperationDirectory(input.projectId, input.transferId);
-    const manifestPath = path.join(directory, MANIFEST_FILE);
+    const manifestPath = path.join(directory, HOST_TRANSFER_MANIFEST_FILE);
     if (await lstat(manifestPath).catch(() => null)) {
       const restored = await this.restoreUnlocked({
         manifestDigest: digestHostTransferPackageManifest(
@@ -222,7 +222,7 @@ export class NativeHostTransferPackagePreparation implements HostTransferPackage
     let proof: CollabHostTrustTransitionProof;
     try {
       manifest = parseHostTransferRecoveryPackageManifest(await readFile(
-        path.join(directory, MANIFEST_FILE),
+        path.join(directory, HOST_TRANSFER_MANIFEST_FILE),
         'utf8',
       ));
       proof = JSON.parse(

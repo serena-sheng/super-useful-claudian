@@ -16,6 +16,7 @@ describe('IncomingHostTransferPackage', () => {
   let root: string;
   let workspace: CollabWorkspaceService;
   let authorityDirectory: string;
+  let stagingDirectory: string;
   let run: jest.Mock;
 
   beforeEach(async () => {
@@ -28,7 +29,8 @@ describe('IncomingHostTransferPackage', () => {
       projectId: 'project-alpha',
       purpose: 'host-transfer-staging',
     });
-    await mkdir(reserved.absolutePath);
+    stagingDirectory = reserved.absolutePath;
+    await mkdir(stagingDirectory);
     authorityDirectory = path.join(root, '.claudian', 'collab', 'authorities', 'project-alpha');
     run = jest.fn(async ({ args }: { readonly args: readonly string[] }) => {
       if (args[0] === 'bundle' && args[1] === 'list-heads') {
@@ -99,6 +101,10 @@ describe('IncomingHostTransferPackage', () => {
       manifest,
       record: acceptedRecord(),
     })).resolves.toEqual({ manifestDigest: digestHostTransferPackageManifest(manifest) });
+    await expect(readFile(
+      path.join(stagingDirectory, 'host-transfer-metadata.json'),
+      'utf8',
+    )).resolves.toBe(JSON.stringify(manifest));
     const certificate = {
       cutoverAt: NOW,
       manifestDigest: digestHostTransferPackageManifest(manifest),
