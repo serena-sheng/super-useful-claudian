@@ -112,7 +112,7 @@ Provider-specific session fields belong behind typed helpers in the owning provi
 - Do not use `console.*` in production code.
 - Settings writers must merge rather than replace provider-owned configuration.
 - Put non-committed notes, handoff files, traces, and throwaway scripts in `.context/`.
-- Production bundling inlines locale JSON and the canonical `sql.js/dist/sql-wasm.wasm` import through esbuild's JSON and binary loaders. Keep those import paths or update the build round-trip test with the bundler.
+- Production bundling Brotli-compresses locale JSON and the canonical `sql.js/dist/sql-wasm.wasm` import through `scripts/compressedStaticAssets.js`. Keep those import paths or update the build round-trip test with the bundler.
 
 ## TDD Workflow
 
