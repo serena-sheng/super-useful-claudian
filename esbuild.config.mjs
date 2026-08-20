@@ -13,7 +13,6 @@ import {
 import rendererSafeUnrefHelpers from './scripts/rendererSafeUnref.js';
 import desktopRuntimeAliasHelpers from './scripts/desktopRuntimeAliases.js';
 import pierreShikiBundleHelpers from './scripts/pierreShikiBundle.js';
-import compressedStaticAssetsHelpers from './scripts/compressedStaticAssets.js';
 
 const {
   findUnsafeTimerUnrefSites,
@@ -21,7 +20,6 @@ const {
 } = rendererSafeUnrefHelpers;
 const { createDesktopRuntimeAliases } = desktopRuntimeAliasHelpers;
 const { createPierreShikiBundlePlugin } = pierreShikiBundleHelpers;
-const { createCompressedStaticAssetsPlugin } = compressedStaticAssetsHelpers;
 
 // Load .env.local if it exists
 if (existsSync('.env.local')) {
@@ -193,7 +191,6 @@ const mainContext = await esbuild.context({
   bundle: true,
   plugins: [
     patchSdkImportMeta,
-    createCompressedStaticAssetsPlugin(),
     createPierreShikiBundlePlugin(),
     createPatchRendererUnsafeUnref(['main.js']),
     copyToObsidian,

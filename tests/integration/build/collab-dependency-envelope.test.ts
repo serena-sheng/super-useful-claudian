@@ -11,12 +11,10 @@ import path from 'node:path';
 
 import { build, stop } from 'esbuild';
 
-import * as compressedStaticAssetsHelpers from '../../../scripts/compressedStaticAssets.js';
 import * as desktopRuntimeAliasHelpers from '../../../scripts/desktopRuntimeAliases.js';
 import * as pierreShikiBundleHelpers from '../../../scripts/pierreShikiBundle.js';
 
 const { createDesktopRuntimeAliases } = desktopRuntimeAliasHelpers;
-const { createCompressedStaticAssetsPlugin } = compressedStaticAssetsHelpers;
 const {
   createPierreShikiBundlePlugin,
   inspectPierreThemeContract,
@@ -48,7 +46,6 @@ describe('Collab dependency envelope', () => {
       outfile: bundlePath,
       platform: 'browser',
       plugins: [
-        createCompressedStaticAssetsPlugin(),
         createPierreShikiBundlePlugin({ root }),
       ],
       stdin: {
@@ -118,7 +115,8 @@ describe('Collab dependency envelope', () => {
     const config = readFileSync(esbuildConfigPath, 'utf8');
 
     expect(config).toContain("'.wasm': 'binary'");
-    expect(config).toContain('createCompressedStaticAssetsPlugin()');
+    expect(config).not.toContain('createCompressedStaticAssetsPlugin');
+    expect(config).not.toContain('compressedStaticAssets');
     expect(config).toContain("target: 'es2022'");
     expect(config).toContain("charset: 'utf8'");
   });
@@ -240,15 +238,15 @@ describe('Collab dependency envelope', () => {
     ]);
   });
 
-  it('Brotli-compresses static SQL and locale payloads without changing them', () => {
+  it('inlines static SQL and locale payloads without runtime Brotli decompression', () => {
     const bundle = readFileSync(bundlePath, 'utf8');
     const localeResult = runBundle(`
       const dependencyEnvelope = require(process.argv[1]);
       process.stdout.write(dependencyEnvelope.probeLocale());
     `);
 
-    expect(bundle).toContain('brotliDecompressSync');
-    expect(bundle).not.toContain('Create Collab project');
+    expect(bundle).not.toContain('brotliDecompressSync');
+    expect(bundle).toContain('Create Collab project');
     expect(localeResult).toBe('Create Collab project');
   });
 
