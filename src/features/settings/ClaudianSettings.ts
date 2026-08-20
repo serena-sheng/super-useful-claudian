@@ -10,7 +10,10 @@ import { ProviderSettingsCoordinator } from '../../core/providers/ProviderSettin
 import { ProviderWorkspaceRegistry } from '../../core/providers/ProviderWorkspaceRegistry';
 import type { ProviderId } from '../../core/providers/types';
 import { AgentSkillRepository } from '../../core/skills/AgentSkillRepository';
-import type { ChatViewPlacement, DualPaneSide } from '../../core/types/settings';
+import type {
+  ChatViewPlacement,
+  DualPaneSide,
+} from '../../core/types/settings';
 import { getAvailableLocales, getLocaleDisplayName, setLocale, t } from '../../i18n/i18n';
 import type { Locale, TranslationKey } from '../../i18n/types';
 import { AgentSkillSettings } from '../../shared/settings/AgentSkillSettings';
@@ -347,6 +350,19 @@ export class ClaudianSettingTab extends PluginSettingTab {
             })
         );
     }
+
+    new Setting(container)
+      .setName(t('settings.restoreTabsOnStartup.name'))
+      .setDesc(t('settings.restoreTabsOnStartup.desc'))
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.restoreTabsOnStartup)
+          .onChange(async (value) => {
+            await this.plugin.mutateSettings((settings) => {
+              settings.restoreTabsOnStartup = value;
+            });
+          });
+      });
 
     new Setting(container)
       .setName(t('settings.enableAutoScroll.name'))

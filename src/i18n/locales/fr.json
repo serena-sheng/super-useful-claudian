@@ -288,6 +288,10 @@
       "name": "Activer le mode double volet",
       "desc": "Afficher automatiquement le gestionnaire de sessions à côté du chat lorsque la vue mesure au moins 600 px de large."
     },
+    "restoreTabsOnStartup": {
+      "name": "Restaurer les onglets au démarrage",
+      "desc": "Rouvrir tous les onglets en mode volet unique, ou uniquement le dernier onglet actif en mode double volet."
+    },
     "enableFilePane": {
       "name": "Activer le volet des fichiers",
       "desc": "Afficher un onglet Fichiers dans le gestionnaire de sessions du mode double volet."

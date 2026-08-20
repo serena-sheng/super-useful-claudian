@@ -1033,7 +1033,12 @@ describe('Tab provider execution ownership', () => {
       observe: jest.fn(),
     })) as unknown as typeof ResizeObserver;
     const plugin = createPlugin();
-    const tab = await createTestTab({ plugin, containerEl: createMockEl() as any });
+    const onDraftModelChanged = jest.fn();
+    const tab = await createTestTab({
+      plugin,
+      containerEl: createMockEl() as any,
+      onDraftModelChanged,
+    });
     const modelOptions = Array.from(
       tab.dom.inputWrapper.querySelectorAll(
         '.claudian-model-option',
@@ -1051,6 +1056,7 @@ describe('Tab provider execution ownership', () => {
       providerId: 'claude',
       model: 'claude-alternate',
     });
+    expect(onDraftModelChanged).toHaveBeenCalledWith(tab, 'claude-alternate');
     globalThis.ResizeObserver = originalResizeObserver;
   });
 

@@ -60,6 +60,10 @@ export interface TabRuntimeFactoryOptions {
     tab: AssembledTabRuntime,
     conversationId: string | null,
   ) => void;
+  onDraftModelChanged?: (
+    tab: AssembledTabRuntime,
+    draftModel: string | null,
+  ) => void;
   onProviderChanged?: (
     tab: AssembledTabRuntime,
     providerId: ProviderId,

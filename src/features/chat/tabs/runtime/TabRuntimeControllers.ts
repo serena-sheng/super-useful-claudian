@@ -286,10 +286,11 @@ export function buildTabRuntimeControllers(
         const previousProviderId = tab.providerId;
         const nextModel = resolveNewConversationModel(plugin.settings);
         void shell.executionCoordinator.bindConversation(null);
-        tab.lifecycleState = 'cold';
+        commitProvisionalTab(tab);
         tab.draftModel = nextModel?.model ?? null;
         tab.conversationId = null;
         tab.providerId = nextModel?.providerId ?? DEFAULT_CHAT_PROVIDER_ID;
+        options.onDraftModelChanged?.(tab, tab.draftModel);
         if (tab.providerId !== previousProviderId) {
           syncTabProviderServices(tab, services, plugin);
         }

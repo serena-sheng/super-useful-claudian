@@ -288,6 +288,10 @@
       "name": "Zwei-Spalten-Modus aktivieren",
       "desc": "Den Sitzungsmanager automatisch neben dem Chat anzeigen, wenn die Ansicht mindestens 600 px breit ist."
     },
+    "restoreTabsOnStartup": {
+      "name": "Tabs beim Start wiederherstellen",
+      "desc": "Im Einzelbereichsmodus alle Tabs, im Zwei-Spalten-Modus nur den zuletzt aktiven Tab erneut öffnen."
+    },
     "enableFilePane": {
       "name": "Dateibereich aktivieren",
       "desc": "Im Sitzungsmanager des Zwei-Spalten-Modus einen Tab „Dateien“ anzeigen."

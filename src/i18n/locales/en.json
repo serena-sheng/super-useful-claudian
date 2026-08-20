@@ -288,6 +288,10 @@
       "name": "Enable dual-pane mode",
       "desc": "Automatically show the session manager beside the chat when the view is at least 600 px wide."
     },
+    "restoreTabsOnStartup": {
+      "name": "Restore tabs on startup",
+      "desc": "Reopen all tabs in single-pane mode or the last active tab in dual-pane mode."
+    },
     "enableFilePane": {
       "name": "Enable file pane",
       "desc": "Show a Files tab in the dual-pane session manager."

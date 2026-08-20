@@ -284,6 +284,7 @@ function buildInputToolbar(
 
         syncSlashCommandDropdownForProvider(tab, plugin, shell.providerCatalogResolver);
         onUserModified();
+        options.onDraftModelChanged?.(tab, tab.draftModel);
         await uiConfig.prepareModelMetadata?.(
           model,
           getProviderSettingsSnapshotWithModel(plugin.settings, newProvider, model),
@@ -434,7 +435,9 @@ export function buildTabRuntimeUI(
 ): TabUIComponents {
   const { dom } = shell;
   const { plugin } = options;
-  const onUserModified = (): void => commitProvisionalTab(runtimeRef.requirePublished());
+  const onUserModified = (): void => {
+    commitProvisionalTab(runtimeRef.requirePublished());
+  };
   const contextTray = new ComposerContextTray(dom.contextRowEl, {
     onDidChange: () => {
       autoResizeTextarea(dom.inputEl);

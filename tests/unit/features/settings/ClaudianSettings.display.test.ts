@@ -159,6 +159,8 @@ describe('ClaudianSettingTab display settings', () => {
     expect(mockRenderedSettingNames).toContain(t('settings.enableFilePane.name'));
     expect(mockRenderedSettingNames.indexOf(t('settings.dualPaneSide.name')))
       .toBeLessThan(mockRenderedSettingNames.indexOf(t('settings.enableFilePane.name')));
+    expect(mockRenderedSettingNames.indexOf(t('settings.enableFilePane.name')))
+      .toBeLessThan(mockRenderedSettingNames.indexOf(t('settings.restoreTabsOnStartup.name')));
 
     mockRenderedSettingNames.length = 0;
     const disabled = createTab(false);
@@ -166,6 +168,7 @@ describe('ClaudianSettingTab display settings', () => {
 
     expect(mockRenderedSettingNames).not.toContain(t('settings.dualPaneSide.name'));
     expect(mockRenderedSettingNames).not.toContain(t('settings.enableFilePane.name'));
+    expect(mockRenderedSettingNames).toContain(t('settings.restoreTabsOnStartup.name'));
   });
 
   it('updates the file pane setting and refreshes open dual-pane views', async () => {
@@ -189,5 +192,16 @@ describe('ClaudianSettingTab display settings', () => {
 
     expect(plugin.settings.enableDualPane).toBe(false);
     expect(display).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders and updates the startup tab restore toggle', async () => {
+    const { tab, plugin } = createTab(true);
+    (tab as any).renderGeneralTab(createContainer());
+
+    expect(mockRenderedSettingNames).toContain(t('settings.restoreTabsOnStartup.name'));
+
+    await mockToggleChanges.get(t('settings.restoreTabsOnStartup.name'))?.(false);
+
+    expect(plugin.settings.restoreTabsOnStartup).toBe(false);
   });
 });

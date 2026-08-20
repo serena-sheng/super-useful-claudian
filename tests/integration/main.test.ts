@@ -1,6 +1,7 @@
 
 import { Notice, TFile, TFolder } from 'obsidian';
 
+import { SharedStorageService } from '@/app/storage/SharedStorageService';
 import { ConversationPersistenceStore } from '@/core/bootstrap/ConversationPersistenceStore';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
@@ -135,6 +136,7 @@ describe('ClaudianPlugin', () => {
         },
       },
       workspace: {
+        layoutReady: true,
         on: jest.fn().mockReturnValue({ id: 'workspace-event' }),
         onLayoutReady: jest.fn(),
         getLeavesOfType: jest.fn().mockReturnValue([]),
@@ -213,7 +215,7 @@ describe('ClaudianPlugin', () => {
       expect(plugin.registerEvent).toHaveBeenCalledWith({ id: 'workspace-event' });
     });
 
-    it('loads only current-tab metadata before the full history scan', async () => {
+    it('does not preload legacy tab metadata before a view claims migration', async () => {
       type EmptyMetadataScan = {
         metadata: [];
         complete: true;
@@ -260,8 +262,63 @@ describe('ClaudianPlugin', () => {
       loadSourceSpy.mockRestore();
 
       expect(completedBeforeHistoryScan).toBe(true);
-      expect(didLoadRestoredMetadata).toBe(true);
-      expect(cachedConversation?.title).toBe(restoredMetadata.title);
+      expect(didLoadRestoredMetadata).toBe(false);
+      expect(cachedConversation).toBeNull();
+    });
+
+    it('loads metadata requested by a view-scoped tab workspace', async () => {
+      const restoredMetadata = {
+        id: 'view-restored-conversation',
+        providerId: 'claude' as const,
+        title: 'View restored conversation',
+        createdAt: 1,
+        lastActivityAt: 2,
+      };
+      const loadSourceSpy = mockMetadataSources(restoredMetadata);
+
+      await plugin.onload();
+      expect(plugin.getCachedConversation(restoredMetadata.id)).toBeNull();
+
+      await plugin.ensureConversationMetadataLoaded([restoredMetadata.id]);
+
+      expect(plugin.getCachedConversation(restoredMetadata.id)?.title)
+        .toBe(restoredMetadata.title);
+      expect(loadSourceSpy).toHaveBeenCalledWith(restoredMetadata.id);
+      loadSourceSpy.mockRestore();
+    });
+
+    it('discards stale global tab state after a view-scoped restore succeeds', async () => {
+      const clearLegacyState = jest.spyOn(
+        SharedStorageService.prototype,
+        'clearTabManagerState',
+      ).mockResolvedValue(undefined);
+      (plugin.loadData as jest.Mock).mockResolvedValue({
+        tabManagerState: {
+          activeTabId: 'legacy-tab',
+          openTabs: [{ conversationId: null, tabId: 'legacy-tab' }],
+        },
+      });
+      mockApp.workspace.getLeavesOfType.mockReturnValue([{
+        getViewState: jest.fn().mockReturnValue({
+          state: {
+            tabWorkspace: {
+              version: 1,
+              activeTabId: 'view-tab',
+              openTabs: [{ conversationId: null, tabId: 'view-tab' }],
+            },
+          },
+        }),
+      }]);
+      await plugin.onload();
+
+      expect(clearLegacyState).toHaveBeenCalledTimes(1);
+      await expect(plugin.claimLegacyTabManagerState()).resolves.toBeNull();
+      expect(clearLegacyState).toHaveBeenCalledTimes(1);
+
+      await plugin.completeLegacyTabManagerStateMigration();
+
+      expect(clearLegacyState).toHaveBeenCalledTimes(1);
+      clearLegacyState.mockRestore();
     });
 
     it('publishes the remaining conversation metadata after layout readiness', async () => {

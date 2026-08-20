@@ -288,6 +288,10 @@
       "name": "Activar modo de panel doble",
       "desc": "Mostrar automáticamente el gestor de sesiones junto al chat cuando la vista tenga al menos 600 px de ancho."
     },
+    "restoreTabsOnStartup": {
+      "name": "Restaurar pestañas al iniciar",
+      "desc": "Volver a abrir todas las pestañas en el modo de panel único o solo la última pestaña activa en el modo de panel doble."
+    },
     "enableFilePane": {
       "name": "Activar panel de archivos",
       "desc": "Mostrar una pestaña Archivos en el gestor de sesiones del modo de panel doble."

@@ -118,11 +118,18 @@ function normalizeDualPaneSide(value: unknown): DualPaneSide {
     : DEFAULT_CLAUDIAN_SETTINGS.dualPaneSide;
 }
 
-function shouldPersistDualPaneNormalization(
+function normalizeRestoreTabsOnStartup(value: unknown): boolean {
+  return typeof value === 'boolean'
+    ? value
+    : DEFAULT_CLAUDIAN_SETTINGS.restoreTabsOnStartup;
+}
+
+function shouldPersistChatViewNormalization(
   stored: Record<string, unknown>,
   enableDualPane: boolean,
   enableFilePane: boolean,
   dualPaneSide: DualPaneSide,
+  restoreTabsOnStartup: boolean,
 ): boolean {
   return (
     'enableDualPane' in stored
@@ -133,6 +140,9 @@ function shouldPersistDualPaneNormalization(
   ) || (
     'dualPaneSide' in stored
     && stored.dualPaneSide !== dualPaneSide
+  ) || (
+    'restoreTabsOnStartup' in stored
+    && stored.restoreTabsOnStartup !== restoreTabsOnStartup
   );
 }
 
@@ -393,6 +403,9 @@ export class ClaudianSettingsStorage {
     const enableDualPane = normalizeEnableDualPane(stored.enableDualPane);
     const enableFilePane = normalizeEnableFilePane(stored.enableFilePane);
     const dualPaneSide = normalizeDualPaneSide(stored.dualPaneSide);
+    const restoreTabsOnStartup = normalizeRestoreTabsOnStartup(
+      stored.restoreTabsOnStartup,
+    );
     const legacyProviderSettings = {
       ...stored,
       hiddenProviderCommands,
@@ -413,6 +426,7 @@ export class ClaudianSettingsStorage {
       enableDualPane,
       enableFilePane,
       dualPaneSide,
+      restoreTabsOnStartup,
       lastSelectedChatModel,
     };
 
@@ -446,11 +460,12 @@ export class ClaudianSettingsStorage {
       || 'enableBlocklist' in stored
       || 'blockedCommands' in stored
       || shouldPersistChatViewPlacementMigration(stored, chatViewPlacement)
-      || shouldPersistDualPaneNormalization(
+      || shouldPersistChatViewNormalization(
         stored,
         enableDualPane,
         enableFilePane,
         dualPaneSide,
+        restoreTabsOnStartup,
       )
       || JSON.stringify(envSnippets) !== JSON.stringify(stored.envSnippets ?? [])
       || (

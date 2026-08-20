@@ -181,6 +181,7 @@ export interface ClaudianSettings {
   enableDualPane: boolean;
   enableFilePane: boolean;
   dualPaneSide: DualPaneSide;
+  restoreTabsOnStartup: boolean;
   sessionManagerOrganization?: SessionManagerOrganization;
   sessionManagerSort?: SessionManagerSort;
   pinnedLinkedNotePaths?: string[];

@@ -269,11 +269,14 @@ export interface TabManagerCallbacks {
   /** Skips the target prompt when the active layout always forks into a new runtime tab. */
   shouldForkToNewTab?: () => boolean;
 
-  /** Called when a tab is created. */
+  /** Called after a newly created tab completes admission. */
   onTabCreated?: (tab: AssembledTabRuntime) => void;
 
   /** Called immediately after the active tab changes, before async tab loading completes. */
   onActiveTabChanged?: (fromTabId: TabId | null, toTabId: TabId) => void;
+
+  /** Called after an explicit active-tab switch completes without rollback. */
+  onActiveTabCommitted?: (fromTabId: TabId | null, toTabId: TabId) => void;
 
   /** Called when switching to a different tab. */
   onTabSwitched?: (fromTabId: TabId | null, toTabId: TabId) => void;
@@ -298,6 +301,9 @@ export interface TabManagerCallbacks {
 
   /** Called when a tab's conversation changes (loaded different conversation in same tab). */
   onTabConversationChanged?: (tabId: TabId, conversationId: string | null) => void;
+
+  /** Called when the selected model for a blank retained tab changes. */
+  onTabDraftChanged?: (tabId: TabId, draftModel: string | null) => void;
 
   /** Called when the active provider changes within a tab (blank tab model selection). */
   onTabProviderChanged?: (tabId: TabId, providerId: ProviderId) => void;
