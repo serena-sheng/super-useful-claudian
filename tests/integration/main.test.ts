@@ -169,6 +169,7 @@ describe('ClaudianPlugin', () => {
         layoutReady: true,
         detachLeavesOfType: jest.fn(),
         on: jest.fn().mockReturnValue({ id: 'workspace-event' }),
+        offref: jest.fn(),
         onLayoutReady: jest.fn(),
         getLeavesOfType: jest.fn().mockReturnValue([]),
         getMostRecentLeaf: jest.fn().mockReturnValue(null),
@@ -1889,13 +1890,21 @@ describe('ClaudianPlugin', () => {
 
   describe('activateView', () => {
     it('should reveal existing leaf if view already exists', async () => {
-      const mockLeaf = { id: 'existing-leaf' };
+      const focusActiveInput = jest.fn();
+      const mockLeaf = {
+        id: 'existing-leaf',
+        view: {
+          getTabManager: jest.fn(),
+          focusActiveInput,
+        },
+      };
       mockApp.workspace.getLeavesOfType.mockReturnValue([mockLeaf]);
 
       await plugin.onload();
       await plugin.activateView();
 
       expect(mockApp.workspace.revealLeaf).toHaveBeenCalledWith(mockLeaf);
+      expect(focusActiveInput).toHaveBeenCalledTimes(1);
     });
 
     it('should create new leaf in right sidebar by default if view does not exist', async () => {
@@ -1913,6 +1922,68 @@ describe('ClaudianPlugin', () => {
         type: VIEW_TYPE_CLAUDIAN,
         active: true,
       });
+    });
+
+    it('focuses a newly revealed right-sidebar chat even when the root editor stays most recent', async () => {
+      const focusActiveInput = jest.fn();
+      const mockRightLeaf = {
+        setViewState: jest.fn().mockResolvedValue(undefined),
+        view: {
+          getTabManager: jest.fn(),
+          focusActiveInput,
+        },
+      };
+      mockApp.workspace.getLeavesOfType.mockReturnValue([]);
+      mockApp.workspace.getRightLeaf.mockReturnValue(mockRightLeaf);
+      mockApp.workspace.getMostRecentLeaf.mockReturnValue({ id: 'previous-editor-leaf' });
+
+      await plugin.onload();
+      await plugin.activateView();
+
+      expect(mockApp.workspace.revealLeaf).toHaveBeenCalledWith(mockRightLeaf);
+      expect(focusActiveInput).toHaveBeenCalledTimes(1);
+      expect(mockApp.workspace.revealLeaf.mock.invocationCallOrder[0]).toBeLessThan(
+        focusActiveInput.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('does not reclaim focus when another leaf activates during cold view setup', async () => {
+      let resolveViewSetup!: () => void;
+      const focusActiveInput = jest.fn();
+      const mockRightLeaf = {
+        setViewState: jest.fn().mockImplementation(() => new Promise<void>((resolve) => {
+          resolveViewSetup = resolve;
+        })),
+        view: {
+          getTabManager: jest.fn(),
+          focusActiveInput,
+        },
+      };
+      const activeLeafListeners = new Map<object, (leaf: unknown) => void>();
+      mockApp.workspace.getLeavesOfType.mockReturnValue([]);
+      mockApp.workspace.getRightLeaf.mockReturnValue(mockRightLeaf);
+      mockApp.workspace.on.mockImplementation((event: string, listener: (leaf: unknown) => void) => {
+        const eventRef = { event, listener };
+        if (event === 'active-leaf-change') {
+          activeLeafListeners.set(eventRef, listener);
+        }
+        return eventRef;
+      });
+      mockApp.workspace.offref = jest.fn((eventRef: object) => {
+        activeLeafListeners.delete(eventRef);
+      });
+
+      await plugin.onload();
+      const activation = plugin.activateView();
+      for (const listener of activeLeafListeners.values()) {
+        listener({ id: 'newer-editor-leaf' });
+      }
+      resolveViewSetup();
+      await activation;
+
+      expect(mockApp.workspace.revealLeaf).toHaveBeenCalledWith(mockRightLeaf);
+      expect(focusActiveInput).not.toHaveBeenCalled();
+      expect(activeLeafListeners.size).toBe(0);
     });
 
     it('should create new leaf in left sidebar when chatViewPlacement is left-sidebar', async () => {
