@@ -34,6 +34,7 @@ import {
 } from '../../../utils/markdownMath';
 import type { FeatureHost } from '../../FeatureHost';
 import { findRewindContext } from '../rewind';
+import { ImagePreviewModal } from '../ui/ImagePreviewModal';
 import { formatConversationDirectoryTitle } from '../utils/conversationDirectoryTitle';
 import { renderCitationGroup as renderCitationBlock } from './CitationRenderer';
 import {
@@ -76,7 +77,7 @@ export class MessageRenderer {
   private forkCallback?: (messageId: string) => Promise<void>;
   private liveMessageEls = new Map<string, HTMLElement>();
   private removeFileLinkHandler: () => void;
-  private closeImageModal: (() => void) | null = null;
+  private readonly imagePreviewModal = new ImagePreviewModal();
   private isDisposed = false;
 
   constructor(
@@ -122,7 +123,7 @@ export class MessageRenderer {
   dispose(): void {
     if (this.isDisposed) return;
     this.isDisposed = true;
-    this.closeImageModal?.();
+    this.imagePreviewModal.close();
     this.removeFileLinkHandler();
     this.removeFileLinkHandler = () => {};
     this.liveMessageEls.clear();
@@ -676,7 +677,13 @@ export class MessageRenderer {
     const imagesEl = containerEl.createDiv({ cls: 'claudian-message-images' });
 
     for (const image of images) {
-      const imageWrapper = imagesEl.createDiv({ cls: 'claudian-message-image' });
+      const imageWrapper = imagesEl.createEl('button', {
+        cls: 'claudian-message-image',
+        attr: {
+          'aria-label': `Preview ${image.name}`,
+          type: 'button',
+        },
+      });
       const imgEl = imageWrapper.createEl('img', {
         attr: {
           alt: image.name,
@@ -685,8 +692,7 @@ export class MessageRenderer {
 
       void this.setImageSrc(imgEl, image);
 
-      // Click to view full size
-      imgEl.addEventListener('click', () => {
+      imageWrapper.addEventListener('click', () => {
         void this.showFullImage(image);
       });
     }
@@ -697,47 +703,9 @@ export class MessageRenderer {
    */
   showFullImage(image: ImageAttachment): void {
     if (this.isDisposed) return;
-    this.closeImageModal?.();
-
-    const dataUri = `data:${image.mediaType};base64,${image.data}`;
 
     const ownerDocument = this.messagesEl.ownerDocument ?? window.document;
-    const overlay = ownerDocument.body.createDiv({ cls: 'claudian-image-modal-overlay' });
-    const modal = overlay.createDiv({ cls: 'claudian-image-modal' });
-
-    modal.createEl('img', {
-      attr: {
-        src: dataUri,
-        alt: image.name,
-      },
-    });
-
-    const closeBtn = modal.createDiv({ cls: 'claudian-image-modal-close' });
-    closeBtn.setText('\u00D7');
-
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        close();
-      }
-    };
-
-    let isClosed = false;
-    const close = () => {
-      if (isClosed) return;
-      isClosed = true;
-      ownerDocument.removeEventListener('keydown', handleEsc);
-      overlay.remove();
-      if (this.closeImageModal === close) {
-        this.closeImageModal = null;
-      }
-    };
-
-    closeBtn.addEventListener('click', close);
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) close();
-    });
-    ownerDocument.addEventListener('keydown', handleEsc);
-    this.closeImageModal = close;
+    this.imagePreviewModal.open(ownerDocument, image);
   }
 
   /**
