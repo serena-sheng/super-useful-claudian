@@ -175,9 +175,9 @@ describe('AuthorityTransferPersistence', () => {
   let vaultRoot: string;
 
   beforeEach(async () => {
-    jest.useFakeTimers();
-    jest.setSystemTime(new Date('2026-08-26T00:01:00.000Z'));
     vaultRoot = await mkdtemp(path.join(tmpdir(), 'claudian-authority-transfer-'));
+    jest.useFakeTimers();
+    jest.setSystemTime(Date.parse('2026-08-26T00:01:00.000Z'));
   });
 
   afterEach(async () => {
