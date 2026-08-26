@@ -213,7 +213,7 @@ describe('LocalCloudBootstrapBindingEffects', () => {
       gitRemoteUrl: record.newAuthority.gitRemoteUrl,
       kind: 'cloud',
       serverUrl: record.newAuthority.serverUrl,
-      wireVersion: 5,
+      wireVersion: 6,
     });
     expect(JSON.stringify(membership)).not.toContain('credential');
     expect(JSON.stringify(membership)).not.toContain('PRIVATE CA');
