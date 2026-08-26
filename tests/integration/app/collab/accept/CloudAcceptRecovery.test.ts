@@ -340,7 +340,7 @@ function membership(): CollabLocalCloudMembershipRecord {
       gitRemoteUrl: `https://cloud.example.test/v2/projects/${PROJECT_ID}/repository.git`,
       kind: 'cloud',
       serverUrl: 'https://cloud.example.test',
-      wireVersion: 5,
+      wireVersion: 6,
     },
     createdAt: CREATED_AT,
     lastEventSequence: 0,

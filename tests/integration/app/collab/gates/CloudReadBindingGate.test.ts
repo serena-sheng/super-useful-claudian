@@ -628,6 +628,7 @@ describe('Cloud read and binding gate', () => {
         const restartService = new CloudBootstrapService({
           createCoordinator: () => ({ recoverProject } as unknown as CloudBootstrapCoordinator),
           fenceUncertainProject,
+          projectRecoveryAdmission: async (_projectId, operation) => operation(),
           recoverLocalArtifacts: async () => undefined,
           transitions: client.store,
         });

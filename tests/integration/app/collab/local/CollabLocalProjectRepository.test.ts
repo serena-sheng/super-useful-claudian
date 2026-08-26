@@ -95,7 +95,7 @@ function cloudMembershipRecord(): CollabLocalCloudMembershipRecord {
       gitRemoteUrl: `http://127.0.0.1:8787/v2/projects/${PROJECT_ID}/repository.git`,
       kind: 'cloud',
       serverUrl: 'http://127.0.0.1:8787/',
-      wireVersion: 5,
+      wireVersion: 6,
     },
     createdAt: '2026-08-08T00:00:00.000Z',
     lastEventSequence: 7,

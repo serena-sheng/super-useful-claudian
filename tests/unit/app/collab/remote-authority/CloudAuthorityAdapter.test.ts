@@ -77,7 +77,7 @@ function membership(): CollabLocalCloudMembershipRecord {
       gitRemoteUrl: `https://cloud.example.test/v2/projects/${PROJECT_ID}/repository.git`,
       kind: 'cloud',
       serverUrl: 'https://cloud.example.test',
-      wireVersion: 5,
+      wireVersion: 6,
     },
     createdAt: '2026-08-22T00:00:00.000Z',
     lastEventSequence: 3,
@@ -313,7 +313,7 @@ describe('CloudAuthorityAdapter', () => {
           idempotencyKey: 'publish-head',
           projectId: PROJECT_ID,
         },
-        protocolVersion: 5,
+        protocolVersion: 6,
         requestId: 'request-ensure',
       },
       headers: { 'x-claudian-development-actor': ACTOR_ID },
@@ -371,7 +371,7 @@ describe('CloudAuthorityAdapter', () => {
           projectId: PROJECT_ID,
           requestId: 'request-one',
         },
-        protocolVersion: 5,
+        protocolVersion: 6,
         requestId: expect.any(String),
       },
       headers: { 'x-claudian-development-actor': ACTOR_ID },
@@ -823,7 +823,7 @@ describe('CloudProjectEventClient', () => {
       occurredAt: '2026-08-22T00:00:00.000Z',
       payload: { requestId: 'request-one' },
       projectId: PROJECT_ID,
-      protocolVersion: 5,
+      protocolVersion: 6,
       sequence: 4,
     }));
     sockets[0]!.closed(1006);
@@ -861,7 +861,7 @@ describe('CloudProjectEventClient', () => {
         occurredAt: '2026-08-22T00:00:00.000Z',
         payload: { requestId: `request-${sequence}` },
         projectId: PROJECT_ID,
-        protocolVersion: 5,
+        protocolVersion: 6,
         sequence,
       }));
     }
@@ -897,7 +897,7 @@ describe('CloudProjectEventClient', () => {
       occurredAt: '2026-08-22T00:00:00.000Z',
       payload: { requestId: 'request-four' },
       projectId: PROJECT_ID,
-      protocolVersion: 5,
+      protocolVersion: 6,
       sequence: 4,
     }));
     await flush();
