@@ -18,7 +18,6 @@ import {
   readFile,
   rename,
   rm,
-  writeFile,
 } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -50,6 +49,7 @@ import type {
   CloudToLanTargetEffects,
   CloudToLanTargetStageResult,
 } from '@/app/collab/authority-transfer/cloud-to-lan/CloudToLanTargetCoordinator';
+import { writeDurablePrivateFile } from '@/app/collab/authority-transfer/DurablePrivateFile';
 import type { AuthorityTransferPersistence } from '@/app/collab/authority-transfer/persistence/AuthorityTransferPersistence';
 import type {
   ClaudianCollabService,
@@ -298,12 +298,9 @@ async function readState(filePath: string): Promise<TargetPrivateState | null> {
 }
 
 async function writeState(filePath: string, state: TargetPrivateState): Promise<void> {
-  const temporary = `${filePath}.tmp`;
-  await rm(temporary, { force: true }).catch(() => undefined);
-  await writeFile(temporary, `${JSON.stringify(state)}\n`, { flag: 'wx', mode: 0o600 });
-  await rename(temporary, filePath).catch(async error => {
-    await rm(temporary, { force: true }).catch(() => undefined);
-    throw error;
+  await writeDurablePrivateFile(filePath, `${JSON.stringify(state)}\n`, {
+    invalidFile: () => targetError('authority-transfer-target-state-invalid'),
+    writeFailed: () => targetError('authority-transfer-target-state-write-failed'),
   });
 }
 

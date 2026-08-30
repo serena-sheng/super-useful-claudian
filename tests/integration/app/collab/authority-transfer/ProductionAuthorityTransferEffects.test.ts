@@ -414,8 +414,24 @@ describe('production authority-transfer effects', () => {
       stagingDirectoryName: `.claudian-authority-transfer-${TRANSFER_ID}`,
       status: status('cloud-to-lan', 'collecting-readiness', prepared.targetUrl),
     });
+    const targetStaging = await targetFoundation.local.workspace.reserveProjectsFolderChild(
+      'workspace',
+      {
+        childName: proposed.stagingDirectoryName,
+        operationId: proposed.transferId,
+        projectId: proposed.projectId,
+        purpose: 'authority-transfer-staging',
+      },
+    );
+    const interruptedTargetState = path.join(
+      targetStaging.absolutePath,
+      'target-private.json.partial',
+    );
+    await mkdir(targetStaging.absolutePath, { mode: 0o700 });
+    await writeFile(interruptedTargetState, '{"truncated":', { mode: 0o600 });
     const acceptance = await targetEffects.acceptanceRequest(proposed);
     expect(acceptance.targetHostMemberId).toBe(MEMBER_ID);
+    await expect(access(interruptedTargetState)).rejects.toMatchObject({ code: 'ENOENT' });
     const stagedRecord = createAuthorityTransferRecord({
       ownerInstallationKey: TEST_INSTALLATION_A,
       lifecycleOwnership: 'owned',
