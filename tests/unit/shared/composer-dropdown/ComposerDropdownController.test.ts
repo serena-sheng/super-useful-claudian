@@ -230,13 +230,10 @@ describe('ComposerDropdownController', () => {
       ];
       const getCachedVaultFiles = jest.fn(() => files);
       const getCachedVaultFolders = jest.fn(() => []);
-      const onAttachFile = jest.fn();
       const mention = new MentionSource({
         getCachedVaultFiles,
         getCachedVaultFolders,
-        getExternalContexts: () => [],
         normalizePathForVault: path => path ?? null,
-        onAttachFile,
       });
       const controller = new ComposerDropdownController(container, input, [mention]);
 
@@ -260,7 +257,6 @@ describe('ComposerDropdownController', () => {
 
       controller.handleKeydown(key('Enter'));
       expect(input.value).toBe('@Alpha.md ');
-      expect(onAttachFile).toHaveBeenCalledWith('Alpha.md');
       controller.destroy();
       mention.destroy();
     });

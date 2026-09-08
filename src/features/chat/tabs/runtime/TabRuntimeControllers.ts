@@ -156,7 +156,6 @@ export function buildTabRuntimeControllers(
     renderer,
     subagentManager: services.subagentManager,
     getMessagesEl: () => dom.messagesEl,
-    getFileContextManager: () => ui.fileContextManager,
     updateQueueIndicator: () => (
       runtimeRef.requirePublished().controllers.inputController.updateQueueIndicator()
     ),
@@ -237,10 +236,8 @@ export function buildTabRuntimeControllers(
         runtimeRef.requirePublished().controllers.inputController
           .restoreRewoundMessageToComposer(message)
       ),
-      getFileContextManager: () => ui.fileContextManager,
       getLinkedContentController: () => ui.linkedContentController,
       getImageContextManager: () => ui.imageContextManager,
-      getExternalContextSelector: () => ui.externalContextSelector,
       clearQueuedMessage: () => (
         runtimeRef.requirePublished().controllers.inputController.clearQueuedMessage()
       ),
@@ -333,10 +330,8 @@ export function buildTabRuntimeControllers(
     getInputContainerEl: () => dom.inputContainerEl,
     getWelcomeEl: () => dom.welcomeEl,
     getMessagesEl: () => dom.messagesEl,
-    getFileContextManager: () => ui.fileContextManager,
     getLinkedContentController: () => ui.linkedContentController,
     getImageContextManager: () => ui.imageContextManager,
-    getExternalContextSelector: () => ui.externalContextSelector,
     getInstructionModeManager: () => ui.instructionModeManager,
     getInstructionRefineService: () => services.instructionRefineService,
     getTitleGenerationService: () => services.titleGenerationService,
