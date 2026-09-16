@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { TEST_INSTALLATION_A } from '@test/helpers/installations';
 
+import { digestHostTransitionProofChain } from '@/app/collab/host-transfer/HostTransferPackage';
 import {
   HostTrustTransitionService,
 } from '@/app/collab/host-transfer/HostTrustTransitionService';
@@ -141,5 +142,84 @@ describe('HostTrustTransitionService', () => {
       sourceSigner.caCertificatePem,
       { ...input, manifestDigest: 'c'.repeat(64) },
     )).toThrow();
+  });
+
+  it('binds committed Host activation evidence to its authority generation', async () => {
+    const source = await identity('activation-generation');
+    const signer = await source.hostCaSigner();
+    const input = {
+      authorityGeneration: 7,
+      cutoverAt: '2026-08-08T00:05:00.000Z', manifestDigest: 'a'.repeat(64),
+      projectId: 'project-1', targetCaFingerprint: 'b'.repeat(64),
+      targetHostMemberId: 'member-2', transferId: 'transfer-1',
+    } as const;
+    const certificate = await service.signActivation(signer, input);
+    expect(certificate.authorityProof).toMatchObject({
+      authorityGeneration: 7, caCertificatePem: signer.caCertificatePem,
+      manifestSha256: input.manifestDigest, targetHostMemberId: 'member-2',
+    });
+    expect(() => service.verifyActivation(certificate, signer.caCertificatePem, input)).not.toThrow();
+    expect(() => service.verifyActivation(certificate, signer.caCertificatePem, {
+      ...input, authorityGeneration: 8,
+    })).toThrow();
+    expect(() => service.verifyActivation({ ...certificate, authorityProof: {
+      ...certificate.authorityProof!, targetHostMemberId: 'member-attacker',
+    } }, signer.caCertificatePem, input)).toThrow();
+  });
+
+  it('continues full retained history from a Member already trusting an intermediate Host', async () => {
+    const [first, second, third] = await Promise.all([
+      identity('history-first'), identity('history-second'), identity('history-third'),
+    ]);
+    const [a, b, c] = await Promise.all([first.hostCaSigner(), second.hostCaSigner(), third.hostCaSigner()]);
+    const ab = await service.signTransition(a, {
+      issuedAt: '2026-08-08T00:00:00.000Z', nextCaCertificatePem: b.caCertificatePem,
+      projectId: 'project-1', transferId: 'transfer-ab',
+    });
+    const bc = await service.signTransition(b, {
+      issuedAt: '2026-08-08T00:01:00.000Z', nextCaCertificatePem: c.caCertificatePem,
+      projectId: 'project-1', transferId: 'transfer-bc',
+    });
+    expect(service.verifyChain({
+      expectedCurrentCaFingerprint: c.caFingerprint, pinnedCaCertificatePem: b.caCertificatePem,
+      projectId: 'project-1', proofs: [ab, bc],
+    })).toBe(c.caCertificatePem);
+  });
+
+  it('distinguishes a continuous return to a Host installation from competing successor proofs', async () => {
+    const [first, second, third] = await Promise.all([
+      identity('return-first'), identity('return-second'), identity('return-third'),
+    ]);
+    const [a, b, c] = await Promise.all([first.hostCaSigner(), second.hostCaSigner(), third.hostCaSigner()]);
+    const ab = await service.signTransition(a, {
+      issuedAt: '2026-08-08T00:00:00.000Z', nextCaCertificatePem: b.caCertificatePem,
+      projectId: 'project-1', transferId: 'transfer-ab',
+    });
+    const ba = await service.signTransition(b, {
+      issuedAt: '2026-08-08T00:01:00.000Z', nextCaCertificatePem: a.caCertificatePem,
+      projectId: 'project-1', transferId: 'transfer-ba',
+    });
+    const ac = await service.signTransition(a, {
+      issuedAt: '2026-08-08T00:02:00.000Z', nextCaCertificatePem: c.caCertificatePem,
+      projectId: 'project-1', transferId: 'transfer-ac',
+    });
+    const checkpoint = {
+      transferId: ba.transferId,
+      proofChainDigest: digestHostTransitionProofChain([ab, ba]),
+    };
+    expect(() => service.verifyChain({
+      checkpoint,
+      expectedCurrentCaFingerprint: c.caFingerprint, pinnedCaCertificatePem: a.caCertificatePem,
+      projectId: 'project-1', proofs: [ac],
+    })).toThrow();
+    expect(service.verifyChain({
+      checkpoint,
+      expectedCurrentCaFingerprint: c.caFingerprint, pinnedCaCertificatePem: a.caCertificatePem,
+      projectId: 'project-1', proofs: [ab, ba, ac],
+    })).toBe(c.caCertificatePem);
+    expect(() => service.verifyChain({
+      expectedCurrentCaFingerprint: c.caFingerprint, pinnedCaCertificatePem: a.caCertificatePem,
+      projectId: 'project-1', proofs: [ab, ac],
+    })).toThrow();
   });
 });
