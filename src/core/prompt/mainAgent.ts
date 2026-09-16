@@ -66,7 +66,8 @@ function getFileOperations(): string {
 - For folder moves and renames, use \`obsidian vault="Vault Name" eval code="..."\` to resolve the source with \`app.vault.getAbstractFileByPath(sourcePath)\` and await \`app.fileManager.renameFile(folder, destinationPath)\`. Use Vault-relative paths, confirm the source is a folder, and check that the destination does not already exist. Do not use \`app.vault.rename\`, which bypasses FileManager's link updates.
 - Quote shell arguments and safely encode paths embedded in JavaScript. For multiple moves, await each operation and verify the resulting paths and affected links before reporting success.
 - Use the examples directly; for other commands or syntax errors, consult an available Obsidian CLI skill or \`obsidian help <command>\`. Never invoke the CLI without arguments. If the CLI cannot reach the running Vault or link-aware moves are unavailable, report the blocker instead of falling back to filesystem moves.
-- For requested deletions, prefer Obsidian's trash behavior: \`obsidian vault="Vault Name" delete path="folder/note.md"\`. Permanent deletion must be explicitly requested.`;
+- For requested deletions, prefer Obsidian's trash behavior: \`obsidian vault="Vault Name" delete path="folder/note.md"\`. Permanent deletion must be explicitly requested.
+- Do not explain Obsidian CLI choices or compare them with filesystem operations unless asked or relevant to a problem. For successful moves and renames, confirm the result without reporting routine link checks or updates; mention link details only when asked or when there is a problem or unexpected consequence.`;
 }
 
 function getReferenceConventions(): string {
