@@ -84,9 +84,10 @@ jobs:
         with:
           fail-on-severity: high
 
-  test:
+  selected-tests:
+    needs: test-scope
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -101,19 +102,18 @@ jobs:
 
       - name: Test
         id: tests
+        env:
+          TEST_SELECTION: ${{ needs.test-scope.outputs.test-files }}
         run: |
           mkdir -p test-results
-          npm run test -- --json --outputFile=test-results/jest.json
-
-      - name: Verify published LAN compatibility
-        run: npm run test:lan-compatibility
+          npm run test -- --selection "$TEST_SELECTION" --json --outputFile=test-results/jest.json
 
       - name: Summarize test timings
-        if: always() && steps.tests.outcome != 'skipped'
+        if: always() && steps.tests.outcome != 'skipped' && needs.test-scope.outputs.test-files != '[]'
         run: node scripts/summarize-jest-results.mjs test-results/jest.json test-results/timings
 
       - name: Upload test timings
-        if: always() && steps.tests.outcome != 'skipped'
+        if: always() && steps.tests.outcome != 'skipped' && needs.test-scope.outputs.test-files != '[]'
         uses: actions/upload-artifact@v7
         with:
           name: jest-timings
@@ -121,67 +121,73 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  cross-platform-collab-scope:
+  test-scope:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     outputs:
-      run: ${{ steps.scope.outputs.run }}
+      test-files: ${{ steps.scope.outputs.test-files }}
+      lan: ${{ steps.scope.outputs.lan }}
+      cross-platform: ${{ steps.scope.outputs.cross-platform }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Determine whether cross-platform Collab smoke is required
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Select affected tests and platform checks
         id: scope
-        shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          EVENT_NAME: ${{ github.event_name }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/ciTestSelection.mjs
+
+  lan-compatibility:
+    needs: test-scope
+    if: needs.test-scope.outputs.lan == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify published LAN compatibility
+        run: npm run test:lan-compatibility
+
+  test:
+    needs: [test-scope, selected-tests, lan-compatibility]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require selected tests and applicable LAN compatibility
+        env:
+          SCOPE_RESULT: ${{ needs.test-scope.result }}
+          TEST_RESULT: ${{ needs.selected-tests.result }}
+          LAN_RESULT: ${{ needs.lan-compatibility.result }}
         run: |
-          if [ "$EVENT_NAME" != "pull_request" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          run_smoke=false
-          while IFS= read -r changed_path; do
-            case "$changed_path" in
-              src/app/collab/* | \
-              src/core/collab/* | \
-              src/features/collab/* | \
-              src/style/features/collab-* | \
-              tests/*collab/* | \
-              src/utils/windowsCmdShim.ts | \
-              src/core/process/ManagedStdioProcess.ts | \
-              tests/unit/utils/windowsCmdShim.test.ts | \
-              tests/unit/core/process/ManagedStdioProcess.test.ts | \
-              src/providers/pi/runtime/PiSubprocess.ts | \
-              tests/unit/providers/pi/runtime/PiSubprocess.test.ts | \
-              tests/integration/providers/pi/PiSubprocess.windows.test.ts | \
-              scripts/*collab* | \
-              scripts/build* | \
-              scripts/check-architecture-boundaries.test.mjs | \
-              scripts/compressedStaticAssets.js | \
-              esbuild.config.mjs | \
-              package.json | \
-              package-lock.json | \
-              .node-version | \
-              tsconfig*.json | \
-              .github/workflows/ci.yml | \
-              .github/workflows/release.yml | \
-              .github/workflows/nightly.yml)
-                run_smoke=true
-                break
-                ;;
-            esac
-          done < <(git diff --name-only "$BASE_SHA...$HEAD_SHA")
-
-          echo "run=$run_smoke" >> "$GITHUB_OUTPUT"
+          test "$SCOPE_RESULT" = success
+          test "$TEST_RESULT" = success
+          test "$LAN_RESULT" = success || test "$LAN_RESULT" = skipped
 
   cross-platform-smoke:
-    needs: cross-platform-collab-scope
-    if: needs.cross-platform-collab-scope.outputs.run == 'true'
+    needs: test-scope
+    if: needs.test-scope.outputs.cross-platform == 'true'
     name: Cross-platform Collab smoke (${{ matrix.os }})
     strategy:
       fail-fast: false

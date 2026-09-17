@@ -849,13 +849,10 @@ test('CI gates releases, cross-platform behavior, and security', () => {
   assert.match(ci, /cross-platform-smoke:/);
   assert.match(ci, /windows-latest/);
   assert.match(ci, /macos-latest/);
-  assert.match(ci, /cross-platform-collab-scope:/);
-  assert.match(ci, /src\/app\/collab\/\*/);
-  assert.match(ci, /src\/core\/collab\/\*/);
-  assert.match(ci, /src\/features\/collab\/\*/);
-  assert.match(ci, /tests\/\*collab\/\*/);
-  assert.match(ci, /needs:\s*cross-platform-collab-scope/);
-  assert.match(ci, /needs\.cross-platform-collab-scope\.outputs\.run == 'true'/);
+  assert.match(ci, /test-scope:/);
+  assert.match(ci, /node scripts\/ciTestSelection\.mjs/);
+  assert.match(ci, /needs:\s*test-scope/);
+  assert.match(ci, /needs\.test-scope\.outputs\.cross-platform == 'true'/);
 
   assert.match(release, /^on:\n {2}push:\n {4}tags:\n {6}- '\*'\n\njobs:/m);
   assert.match(release, /uses:\s*\.\/\.github\/workflows\/ci\.yml/);
