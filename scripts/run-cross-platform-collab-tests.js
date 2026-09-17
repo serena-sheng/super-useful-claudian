@@ -3,44 +3,20 @@ const path = require('node:path');
 
 const root = path.join(__dirname, '..');
 const runJest = path.join(__dirname, 'run-jest.js');
-const tests = [
-  'tests/unit/utils/windowsCmdShim.test.ts',
-  'tests/unit/core/process/ManagedStdioProcess.test.ts',
-  'tests/unit/core/collab/CollabProjectsFolder.test.ts',
-  'tests/unit/app/collab/local/CollabPathPolicy.test.ts',
-  'tests/unit/app/collab/git/CollabGitOriginPolicy.test.ts',
-  'tests/unit/app/collab/git/CollabGitTreePolicy.test.ts',
-  'tests/unit/app/collab/git/GitCommandRunner.test.ts',
-  'tests/unit/app/collab/git/GitCommandRunner.windows.test.ts',
-  'tests/unit/app/collab/git/GitRepositoryService.test.ts',
-  'tests/unit/app/collab/git/GitRuntimeResolver.test.ts',
-  'tests/unit/app/collab/git/collabGitRefs.test.ts',
-  'tests/unit/app/collab/lan/LanTlsIdentity.test.ts',
-  'tests/unit/app/collab/remote-authority/CloudAuthorityAdapter.test.ts',
-  'tests/unit/app/collab/remote-authority/CloudAuthorityUrls.test.ts',
-  'tests/unit/app/collab/publish/NativeGitPublicationCandidateRepository.test.ts',
-  'tests/unit/app/collab/publish/CollabPublicationService.test.ts',
-  'tests/unit/app/collab/publish/NativeGitPublishRepository.test.ts',
-  'tests/unit/app/collab/review/NativeGitReviewRepository.test.ts',
-  'tests/unit/app/collab/review/NativeGitWorkingTreeReviewRepository.test.ts',
-  'tests/integration/app/collab/CollabFilesystemBoundary.test.ts',
-  'tests/integration/app/collab/CollabFeatureService.test.ts',
-  'tests/integration/app/collab/conflicts/ConflictScratchGitRepository.test.ts',
-  'tests/integration/app/collab/git/GitRepositoryService.test.ts',
-  'tests/integration/app/collab/git/GitRuntimeResolver.test.ts',
-  'tests/integration/app/collab/lan/GitHttpBackendProxy.test.ts',
-  'tests/integration/app/collab/lan/git/GitHttpRoute.test.ts',
-  'tests/integration/app/collab/lan/git/GitReceiveHookPolicy.test.ts',
-  'tests/integration/app/collab/join/JoinProjectCoordinator.test.ts',
-  'tests/integration/app/collab/join/JoinProjectLanIntegration.test.ts',
-  'tests/integration/app/collab/project/CloudProjectEntryCoordinator.test.ts',
-  'tests/integration/app/collab/remote-authority/CloudProjectCredentialStore.test.ts',
-  'tests/integration/app/collab/reconciliation/NativeGitAcceptedStateIntegrator.test.ts',
-  'tests/integration/app/collab/publish/NativeGitPublicationCandidateRepository.test.ts',
-  'tests/integration/app/collab/review/NativeGitReviewRepository.test.ts',
-];
+const { crossPlatformTests: tests } = require('./testSuites.cjs');
 
-const result = spawnSync(process.execPath, [runJest, '--runInBand', ...tests], {
+const args = process.argv.slice(2);
+let selected = tests;
+if (args[0] === '--selection') {
+  const selection = JSON.parse(args[1]);
+  if (selection !== null && (!Array.isArray(selection) || selection.some(file => !tests.includes(file)))) {
+    throw new Error('Unknown cross-platform test selection');
+  }
+  selected = selection ?? tests;
+  args.splice(0, 2);
+}
+if (selected.length === 0) process.exit(0);
+const result = spawnSync(process.execPath, [runJest, '--runInBand', ...args, '--runTestsByPath', ...selected], {
   cwd: root,
   stdio: 'inherit',
 });

@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { CollabFixtureSnapshot } from '@test/helpers/collab/CollabFixtureSnapshot';
 import {
   accept,
   availablePort,
@@ -16,15 +17,31 @@ import { InvitationCodec } from '@/app/collab/lan/InvitationCodec';
 jest.setTimeout(90_000);
 
 describe('Project Update projection milestone gate', () => {
-  const { createRoot, createFoundation, createFeature } = projectUpdateMilestoneFixture();
+  const { closeParticipants, createRoot, createFoundation, createFeature } = projectUpdateMilestoneFixture();
 
-  it.each(['matching-working-content', 'pending-publish', 'offline-update', 'offline-review'] as const)('projects the actionable Update state for %s', async scenario => {
+  let prepared: Awaited<ReturnType<typeof prepare>>;
+  let snapshot: CollabFixtureSnapshot;
+
+  beforeAll(async () => {
+    try {
+      prepared = await prepare();
+    } finally {
+      await closeParticipants();
+    }
+    snapshot = await CollabFixtureSnapshot.capture(prepared.root);
+  });
+
+  beforeEach(async () => { await snapshot.restore(); });
+  afterAll(async () => { await snapshot?.dispose(); });
+
+  async function prepare() {
     const root = await createRoot('claudian-update-projection-');
     const hostRoot = path.join(root, 'host');
     const memberRoot = path.join(root, 'member');
     await Promise.all([mkdir(hostRoot), mkdir(memberRoot)]);
     const codec = new InvitationCodec({ isAddressAllowed: address => address === '127.0.0.1' });
-    const host = createFoundation(hostRoot, codec, await availablePort());
+    const hostPort = await availablePort();
+    const host = createFoundation(hostRoot, codec, hostPort);
     const member = createFoundation(memberRoot, codec);
     const hostFeature = createFeature(host, hostRoot, TEST_INSTALLATION_A);
     const memberFeature = createFeature(member, memberRoot, TEST_INSTALLATION_B);
@@ -38,6 +55,18 @@ describe('Project Update projection milestone gate', () => {
     const invitation = unwrap(await hostFeature.createInvitation(projectId));
     const joined = unwrap(await memberFeature.joinProject({ encodedInvitation: invitation.encodedInvitation, memberDisplayName: 'Member' }));
     const memberPath = path.join(memberRoot, joined.workspacePath);
+    return { root, hostRoot, memberRoot, hostPath, memberPath, codec, hostPort, projectId };
+  }
+
+  it.each(['matching-working-content', 'pending-publish', 'offline-update', 'offline-review'] as const)('projects the actionable Update state for %s', async scenario => {
+    const { hostRoot, memberRoot, hostPath, memberPath, codec, hostPort, projectId } = prepared;
+    const host = createFoundation(hostRoot, codec, hostPort);
+    const member = createFoundation(memberRoot, codec);
+    const hostFeature = createFeature(host, hostRoot, TEST_INSTALLATION_A);
+    const memberFeature = createFeature(member, memberRoot, TEST_INSTALLATION_B);
+    unwrap(await hostFeature.initialize());
+    unwrap(await hostFeature.startHost(projectId));
+    unwrap(await memberFeature.initialize());
     await writeFile(path.join(memberPath, 'draft.md'), 'private staged work\n');
     const git = await member.requireGitFoundation();
     await git.repositories.stageAll(memberPath);

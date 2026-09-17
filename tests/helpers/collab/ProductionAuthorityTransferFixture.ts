@@ -6,6 +6,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 
 import { COLLAB_CLOUD_BINDING_VERSION, COLLAB_PROTOCOL_VERSION, type CollabAuthorityRelinquishmentProof, type CollabAuthorityRelinquishmentProofSigningPayload, type CollabAuthorityTransferStatus, type CollabCloudAuthorityTransferArtifact, decodeCollabProjectCheckpointManifest, encodeCollabAuthorityRelinquishmentProofSigningInput, encodeCollabProjectCheckpointManifestCanonicalJson } from '@claudian-collab/protocol';
+import { CollabFixtureSnapshot } from '@test/helpers/collab/CollabFixtureSnapshot';
 import type { TEST_INSTALLATION_B } from '@test/helpers/installations';
 import { TEST_INSTALLATION_A } from '@test/helpers/installations';
 import initSqlJs, { type SqlJsStatic } from 'sql.js';
@@ -20,6 +21,7 @@ import { createCloudToLanTargetEntry, handoffCloudToLanTargetEntry, publishCloud
 import { ProductionCloudToLanTargetEffects } from '@/app/collab/authority-transfer/cloud-to-lan/ProductionCloudToLanTargetEffects';
 import { ProductionLanToCloudSourceEffects } from '@/app/collab/authority-transfer/lan-to-cloud/ProductionLanToCloudSourceEffects';
 import { rotateAuthorityTransferOrigin } from '@/app/collab/git/CollabGitOriginPolicy';
+import { GitRuntimeResolver } from '@/app/collab/git/GitRuntimeResolver';
 import { LanAuthorityTransferClient } from '@/app/collab/lan/authority-transfer/LanAuthorityTransferClient';
 import { listPrivateIpv4Addresses } from '@/app/collab/lan/LanHostCoordinator';
 import type { CloudAuthorityConnection } from '@/app/collab/remote-authority/CloudAuthorityAdapter';
@@ -104,18 +106,36 @@ export function status(
 }
 
 export function productionAuthorityTransferFixture() {
+  // All participants use the same executable. Reuse its real capability probe,
+  // while every participant still owns fresh repositories, processes and state.
+  const gitRuntimeResolver = new GitRuntimeResolver();
   let SQL: SqlJsStatic;
   let sourceRoot: string;
+  let sourceSnapshot: CollabFixtureSnapshot;
   let targetRoot: string;
   const foundations = new Set<ClaudianCollabService>();
   const features = new Set<ReturnType<typeof createProductionFeatureSubcomposition>['feature']>();
 
   beforeAll(async () => {
     SQL = await initSqlJs();
+    sourceRoot = await mkdtemp(path.join(tmpdir(), 'claudian-transfer-source-'));
+    const { sourceFoundation, sourceFeature } = sourceParticipant();
+    try {
+      await sourceFeature.initialize();
+      const created = await sourceFeature.createProject({ memberDisplayName: 'Alice', name: 'Portable' });
+      if (created.status !== 'success') throw new Error(`Source fixture creation failed: ${created.status}`);
+    } finally {
+      await sourceFeature.close();
+      features.delete(sourceFeature);
+      await sourceFoundation.close();
+      foundations.delete(sourceFoundation);
+    }
+    sourceSnapshot = await CollabFixtureSnapshot.capture(sourceRoot);
+    await rm(sourceRoot, { force: true, recursive: true });
   });
 
   beforeEach(async () => {
-    sourceRoot = await mkdtemp(path.join(tmpdir(), 'claudian-transfer-source-'));
+    await mkdir(sourceRoot);
     targetRoot = await mkdtemp(path.join(tmpdir(), 'claudian-transfer-target-'));
   });
 
@@ -131,7 +151,12 @@ export function productionAuthorityTransferFixture() {
     ]);
   });
 
-  async function captureSource(includePeer = true, departedStatus?: 'left' | 'revoked') {
+  afterAll(async () => {
+    await sourceSnapshot?.dispose();
+    if (sourceRoot) await rm(sourceRoot, { force: true, recursive: true });
+  });
+
+  function sourceParticipant() {
     const sourceFoundation = foundation(sourceRoot);
     const sourceSetup = new CollabProjectSetupService(sourceFoundation, {
       installationKey: TEST_INSTALLATION_A,
@@ -149,8 +174,15 @@ export function productionAuthorityTransferFixture() {
       projectSetup: sourceSetup,
       vaultRoot: sourceRoot,
     }).feature;
+    return { sourceFoundation, sourceFeature };
+  }
+
+  async function captureSource(includePeer = true, departedStatus?: 'left' | 'revoked') {
+    // Reuse project creation, not transfer effects or recovery state. Keep the
+    // same path/installation identity and construct fresh owners after restore.
+    await sourceSnapshot.restore();
+    const { sourceFoundation, sourceFeature } = sourceParticipant();
     await sourceFeature.initialize();
-    await sourceFeature.createProject({ memberDisplayName: 'Alice', name: 'Portable' });
     const sourceAuthority = await sourceFoundation.openAuthority(PROJECT_ID);
     if (includePeer) {
       await sourceAuthority.database.mutate(connection => {
@@ -809,6 +841,7 @@ export function productionAuthorityTransferFixture() {
         new SqlJsProjectDatabase(authorityDirectory, { resourceAdmission, loadSqlJs: async () => SQL })
       ),
       getConfiguredGitPath: () => '',
+      gitRuntimeResolver,
       installationKey,
       ...(lanHost ? { lanHost } : {}),
       obsidianConfigDirectory: '.obsidian',

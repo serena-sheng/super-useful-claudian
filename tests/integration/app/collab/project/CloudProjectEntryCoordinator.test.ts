@@ -28,6 +28,7 @@ import { ClaudianCollabService } from '@/app/collab/ClaudianCollabService';
 import { createCollabFeatureSubcomposition } from '@/app/collab/CollabFeatureSubcomposition';
 import { isCollabLocalCloudMembership } from '@/app/collab/CollabLocalProjectRepository';
 import { decodeManagerResponsibilityReceiptRecord } from '@/app/collab/exit/ManagerResponsibilityReceiptRecord';
+import { GitRuntimeResolver } from '@/app/collab/git/GitRuntimeResolver';
 import { CloudProjectEntryCoordinator } from '@/app/collab/project/CloudProjectEntryCoordinator';
 import { decodeCloudProjectEntryRecord } from '@/app/collab/project/CloudProjectEntryRecord';
 import { decodeCloudProjectInvitation, encodeCloudProjectInvitation } from '@/app/collab/project/CloudProjectInvitation';
@@ -43,6 +44,12 @@ const MEMBER_ID = 'member-server-selected';
 const OPERATION_ID = 'entry-one';
 const CREATED_AT = '2026-09-01T00:00:00.000Z';
 const execFileAsync = promisify(execFile);
+const gitRuntimeResolver = new GitRuntimeResolver();
+const remoteSeeds = new Map<string, { barePath: string; mainOid: string }>();
+let remoteSeedRoot: string;
+
+beforeAll(async () => { remoteSeedRoot = await mkdtemp(path.join(tmpdir(), 'claudian-cloud-entry-seeds-')); });
+afterAll(async () => { if (remoteSeedRoot) await rm(remoteSeedRoot, { recursive: true, force: true }); });
 
 async function git(cwd: string, args: readonly string[]): Promise<string> {
   const result = await execFileAsync('git', args, { cwd, encoding: 'utf8' });
@@ -539,7 +546,7 @@ describe('CloudProjectEntryCoordinator', () => {
       await feature.close();
       await fixture.foundation.close();
       const restartedFoundation = new ClaudianCollabService({
-        getConfiguredGitPath: () => '', installationKey: TEST_INSTALLATION_A,
+        getConfiguredGitPath: () => '', gitRuntimeResolver, installationKey: TEST_INSTALLATION_A,
         obsidianConfigDirectory: '.obsidian', vaultRoot: fixture.vaultRoot,
       });
       const reopened = createFeatureFixture({ ...fixture, foundation: restartedFoundation });
@@ -563,7 +570,7 @@ describe('CloudProjectEntryCoordinator', () => {
       await feature.close();
       await fixture.foundation.close();
       restartedFoundation = new ClaudianCollabService({
-        getConfiguredGitPath: () => '', installationKey: TEST_INSTALLATION_A,
+        getConfiguredGitPath: () => '', gitRuntimeResolver, installationKey: TEST_INSTALLATION_A,
         obsidianConfigDirectory: '.obsidian', vaultRoot: fixture.vaultRoot,
       });
       feature = createFeatureFixture({ ...fixture, foundation: restartedFoundation });
@@ -1188,18 +1195,16 @@ function createFeatureFixture(fixture: Awaited<ReturnType<typeof createFixture>>
   }).feature;
 }
 
-async function createFixture(options: {
-  projectName?: string;
-  nonempty?: boolean; generatedProjectId?: boolean; join?: boolean; alreadyBound?: boolean; remoteContribution?: boolean;
-  snapshotFailure?: 'authorization' | 'transport' | 'malformed' | 'settled'; joinFailure?: 'rejected' | 'wrong-member' | 'expired' | 'revoked' | 'wrong-secret';
-} = {}) {
-  let projectId = PROJECT_ID;
-  let projectsFolder = 'Shared/Projects';
-  const root = await mkdtemp(path.join(tmpdir(), 'claudian-cloud-entry-'));
-  const vaultRoot = path.join(root, 'vault');
+// Build each remote history once; every case still clones from its own copy
+// through the real HTTP backend and owns fresh local state, sockets and services.
+async function remoteSeed(options: { nonempty?: boolean; remoteContribution?: boolean }) {
+  const key = `${!!options.nonempty}-${!!options.remoteContribution}`;
+  const existing = remoteSeeds.get(key);
+  if (existing) return existing;
+  const root = path.join(remoteSeedRoot, key);
   const seed = path.join(root, 'seed');
   const barePath = path.join(root, 'authority.git');
-  await mkdir(vaultRoot);
+  await mkdir(root);
   await mkdir(seed);
   await git(seed, ['init', '--initial-branch=main']);
   if (options.nonempty) {
@@ -1216,9 +1221,29 @@ async function createFixture(options: {
     await git(seed, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'Personal contribution']);
   }
   await git(root, ['clone', '--bare', seed, barePath]);
+  const prepared = { barePath, mainOid };
+  remoteSeeds.set(key, prepared);
+  return prepared;
+}
+
+async function createFixture(options: {
+  projectName?: string;
+  nonempty?: boolean; generatedProjectId?: boolean; join?: boolean; alreadyBound?: boolean; remoteContribution?: boolean;
+  snapshotFailure?: 'authorization' | 'transport' | 'malformed' | 'settled'; joinFailure?: 'rejected' | 'wrong-member' | 'expired' | 'revoked' | 'wrong-secret';
+} = {}) {
+  let projectId = PROJECT_ID;
+  let projectsFolder = 'Shared/Projects';
+  const root = await mkdtemp(path.join(tmpdir(), 'claudian-cloud-entry-'));
+  const vaultRoot = path.join(root, 'vault');
+  const barePath = path.join(root, 'authority.git');
+  await mkdir(vaultRoot);
+  const seed = await remoteSeed(options);
+  await fs.cp(seed.barePath, barePath, { recursive: true });
+  const mainOid = seed.mainOid;
 
   const foundation = new ClaudianCollabService({
     getConfiguredGitPath: () => '',
+    gitRuntimeResolver,
     installationKey: TEST_INSTALLATION_A,
     obsidianConfigDirectory: '.obsidian',
     vaultRoot,

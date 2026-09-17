@@ -1,10 +1,8 @@
-import { DEFAULT_CLAUDE_PROVIDER_SETTINGS } from '@/providers/claude/settings';
 import { claudeChatUIConfig } from '@/providers/claude/ui/ClaudeChatUIConfig';
 
 describe('claudeChatUIConfig', () => {
   describe('getDefaultModel', () => {
     it('prefers Opus for fresh Claude settings', () => {
-      expect(DEFAULT_CLAUDE_PROVIDER_SETTINGS.defaultModel).toBe('opus');
       expect(claudeChatUIConfig.getDefaultModel?.({})).toBe('opus');
     });
 

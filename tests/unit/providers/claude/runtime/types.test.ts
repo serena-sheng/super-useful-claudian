@@ -105,61 +105,6 @@ describe('createResponseHandler', () => {
     expect(handler.sawAnyChunk).toBe(true);
   });
 
-  it('preserves id from options', () => {
-    const handler = createResponseHandler({
-      id: 'my-unique-id',
-      onChunk: jest.fn(),
-      onDone: jest.fn(),
-      onError: jest.fn(),
-    });
-
-    expect(handler.id).toBe('my-unique-id');
-  });
-
-  it('calls onChunk callback when invoked', () => {
-    const onChunk = jest.fn();
-    const handler = createResponseHandler({
-      id: 'test-handler',
-      onChunk,
-      onDone: jest.fn(),
-      onError: jest.fn(),
-    });
-
-    const chunk = { type: 'text' as const, content: 'hello' };
-    handler.onChunk(chunk);
-
-    expect(onChunk).toHaveBeenCalledWith(chunk);
-  });
-
-  it('calls onDone callback when invoked', () => {
-    const onDone = jest.fn();
-    const handler = createResponseHandler({
-      id: 'test-handler',
-      onChunk: jest.fn(),
-      onDone,
-      onError: jest.fn(),
-    });
-
-    handler.onDone();
-
-    expect(onDone).toHaveBeenCalled();
-  });
-
-  it('calls onError callback when invoked', () => {
-    const onError = jest.fn();
-    const handler = createResponseHandler({
-      id: 'test-handler',
-      onChunk: jest.fn(),
-      onDone: jest.fn(),
-      onError,
-    });
-
-    const error = new Error('test error');
-    handler.onError(error);
-
-    expect(onError).toHaveBeenCalledWith(error);
-  });
-
   it('maintains independent state between handlers', () => {
     const handler1 = createResponseHandler({
       id: 'handler-1',

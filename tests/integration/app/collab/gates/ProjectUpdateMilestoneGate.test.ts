@@ -1,6 +1,7 @@
 import fs, { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { CollabFixtureSnapshot } from '@test/helpers/collab/CollabFixtureSnapshot';
 import {
   accept,
   availablePort,
@@ -17,35 +18,71 @@ import { publicationCandidateRef } from '@/app/collab/publish/NativeGitPublicati
 jest.setTimeout(90_000);
 
 describe('Project Update recovery milestone gate', () => {
-  const { createRoot, createFoundation, createFeature } = projectUpdateMilestoneFixture();
+  const { closeParticipants, createRoot, createFoundation, createFeature } = projectUpdateMilestoneFixture();
+  const codec = new InvitationCodec({ isAddressAllowed: address => address === '127.0.0.1' });
+  let root: string;
+  let snapshot: CollabFixtureSnapshot;
+  let hostRoot: string;
+  let memberRoot: string;
+  let hostPath: string;
+  let memberPath: string;
+  let projectId: string;
+  let hostPort: number;
 
-  it.each(['unpublished', 'open-request', 'unchanged-request', 'conflict', 'conflict-cleanup-edit', 'conflict-cleanup-commit', 'cleanup-restart', 'state-save-restart', 'state-save-new-main', 'state-save-later-commit'] as const)(
-    'updates %s work locally across restart without publishing it',
-    async scenario => {
-      const root = await createRoot('claudian-project-update-');
-      const hostRoot = path.join(root, 'host');
-      const memberRoot = path.join(root, 'member');
-      await Promise.all([mkdir(hostRoot), mkdir(memberRoot)]);
-      const codec = new InvitationCodec({ isAddressAllowed: address => address === '127.0.0.1' });
-      const host = createFoundation(hostRoot, codec, await availablePort());
-      let member = createFoundation(memberRoot, codec);
-      const hostFeature = createFeature(host, hostRoot, TEST_INSTALLATION_A);
-      let memberFeature = createFeature(member, memberRoot, TEST_INSTALLATION_B);
+  beforeAll(async () => {
+    root = await createRoot('claudian-project-update-');
+    hostRoot = path.join(root, 'host');
+    memberRoot = path.join(root, 'member');
+    await Promise.all([mkdir(hostRoot), mkdir(memberRoot)]);
+    hostPort = await availablePort();
+    const host = createFoundation(hostRoot, codec, hostPort);
+    const member = createFoundation(memberRoot, codec);
+    const hostFeature = createFeature(host, hostRoot, TEST_INSTALLATION_A);
+    const memberFeature = createFeature(member, memberRoot, TEST_INSTALLATION_B);
+    try {
       unwrap(await hostFeature.initialize());
       unwrap(await memberFeature.initialize());
       const project = unwrap(await hostFeature.createProject({ memberDisplayName: 'Manager', name: 'Project Update' }));
-      const projectId = project.id;
+      projectId = project.id;
       unwrap(await hostFeature.startHost(projectId));
       const invitation = unwrap(await hostFeature.createInvitation(projectId));
       const joined = unwrap(await memberFeature.joinProject({ encodedInvitation: invitation.encodedInvitation, memberDisplayName: 'Member' }));
-      const hostPath = path.join(hostRoot, project.workspacePath);
-      const memberPath = path.join(memberRoot, joined.workspacePath);
+      hostPath = path.join(hostRoot, project.workspacePath);
+      memberPath = path.join(memberRoot, joined.workspacePath);
       await writeFile(path.join(hostPath, 'shared.md'), 'base\n');
       await accept(hostFeature, projectId, (await publishFully(hostFeature, projectId)).request!.id);
       await waitFor(async () => {
         unwrap(await memberFeature.inspectProject(projectId));
         return await readFile(path.join(memberPath, 'shared.md'), 'utf8').catch(() => null) === 'base\n';
       });
+    } finally {
+      await closeParticipants();
+    }
+    // Capture only settled files. Each scenario restores a fresh mutable copy at
+    // the original paths, preserving installation identity and captured origins.
+    snapshot = await CollabFixtureSnapshot.capture(root);
+    await rm(root, { recursive: true, force: true });
+  });
+
+  beforeEach(async () => {
+    await snapshot.restore();
+  });
+
+  afterAll(async () => {
+    await snapshot?.dispose();
+    if (root) await rm(root, { recursive: true, force: true });
+  });
+
+  it.each(['unpublished', 'open-request', 'unchanged-request', 'conflict', 'conflict-cleanup-edit', 'conflict-cleanup-commit', 'cleanup-restart', 'state-save-restart', 'state-save-new-main', 'state-save-later-commit'] as const)(
+    'updates %s work locally across restart without publishing it',
+    async scenario => {
+      const host = createFoundation(hostRoot, codec, hostPort);
+      let member = createFoundation(memberRoot, codec);
+      const hostFeature = createFeature(host, hostRoot, TEST_INSTALLATION_A);
+      let memberFeature = createFeature(member, memberRoot, TEST_INSTALLATION_B);
+      unwrap(await hostFeature.initialize());
+      unwrap(await hostFeature.startHost(projectId));
+      unwrap(await memberFeature.initialize());
 
       const hasRequest = scenario === 'open-request' || scenario === 'unchanged-request';
       let requestHead: string | undefined;

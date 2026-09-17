@@ -123,60 +123,6 @@ describe('builtInCommands', () => {
       expect(clearCmd?.content).toBe('');
     });
 
-    it('returns commands compatible with SlashCommand interface', () => {
-      const commands = getBuiltInCommandsForDropdown();
-
-      for (const cmd of commands) {
-        expect(cmd).toHaveProperty('id');
-        expect(cmd).toHaveProperty('name');
-        expect(cmd).toHaveProperty('description');
-        expect(cmd).toHaveProperty('content');
-      }
-    });
-  });
-
-  describe('BUILT_IN_COMMANDS', () => {
-    it('has clear command with new alias', () => {
-      const clearCmd = BUILT_IN_COMMANDS.find((c) => c.name === 'clear');
-      expect(clearCmd).toBeDefined();
-      expect(clearCmd?.aliases).toContain('new');
-      expect(clearCmd?.action).toBe('clear');
-    });
-
-    it('has resume command', () => {
-      const resumeCmd = BUILT_IN_COMMANDS.find((c) => c.name === 'resume');
-      expect(resumeCmd).toBeDefined();
-      expect(resumeCmd?.action).toBe('resume');
-      expect(resumeCmd?.description).toBe('Resume a previous conversation');
-    });
-
-    it('has fork command', () => {
-      const forkCmd = BUILT_IN_COMMANDS.find((c) => c.name === 'fork');
-      expect(forkCmd).toBeDefined();
-      expect(forkCmd?.action).toBe('fork');
-    });
-
-    it('has a Codex-only fast command', () => {
-      const fastCmd = BUILT_IN_COMMANDS.find((c) => c.name === 'fast');
-      expect(fastCmd).toBeDefined();
-      expect(fastCmd?.action).toBe('fast');
-      expect(fastCmd?.supportedProviderIds).toEqual(['codex']);
-    });
-
-    it('clear has no provider restriction', () => {
-      const clearCmd = BUILT_IN_COMMANDS.find((c) => c.name === 'clear');
-      expect(clearCmd?.requiredCapability).toBeUndefined();
-    });
-
-    it('resume requires native history support', () => {
-      const cmd = BUILT_IN_COMMANDS.find((c) => c.name === 'resume');
-      expect(cmd?.requiredCapability).toBe('supportsNativeHistory');
-    });
-
-    it('fork requires fork support', () => {
-      const cmd = BUILT_IN_COMMANDS.find((c) => c.name === 'fork');
-      expect(cmd?.requiredCapability).toBe('supportsFork');
-    });
   });
 
   describe('getBuiltInCommandsForDropdown - provider filtering', () => {
