@@ -58,7 +58,7 @@ describe('Project Update projection milestone gate', () => {
     return { root, hostRoot, memberRoot, hostPath, memberPath, codec, hostPort, projectId };
   }
 
-  it.each(['matching-working-content', 'pending-publish', 'offline-update', 'offline-review'] as const)('projects the actionable Update state for %s', async scenario => {
+  it.each(['matching-working-content', 'offline-update', 'offline-review'] as const)('projects the actionable Update state for %s', async scenario => {
     const { hostRoot, memberRoot, hostPath, memberPath, codec, hostPort, projectId } = prepared;
     const host = createFoundation(hostRoot, codec, hostPort);
     const member = createFoundation(memberRoot, codec);
@@ -83,21 +83,18 @@ describe('Project Update projection milestone gate', () => {
       return current.coordination?.snapshot.project.mainOid === acceptedMain && current.gitStatus?.acceptedMainOid === acceptedMain;
     });
     let preparation: string | undefined;
-    if (scenario === 'pending-publish') preparation = unwrap(await memberFeature.publish({ projectId, description: 'Review my work' })).state;
     if (scenario === 'offline-update' || scenario === 'offline-review') {
       const updated = await memberFeature.updateProject(projectId);
       preparation = updated.status === 'success' ? updated.value.state : updated.status;
       unwrap(await hostFeature.stopHost(projectId));
     }
     const inspected = unwrap(await memberFeature.inspectProject(projectId));
-    expect(preparation).toBe(scenario === 'pending-publish' || scenario === 'offline-review' ? 'review-required' : scenario === 'offline-update' ? 'conflict' : undefined);
+    expect(preparation).toBe(scenario === 'offline-review' ? 'review-required' : scenario === 'offline-update' ? 'conflict' : undefined);
     expect(inspected.projectUpdate).toMatchObject(scenario === 'matching-working-content'
       ? { freshness: 'fresh', incoming: 'included', operation: { kind: 'none' }, action: { kind: 'none', enabled: false } }
-      : scenario === 'pending-publish'
-        ? { freshness: 'fresh', operation: { kind: 'publish' }, action: { kind: 'complete-publish', enabled: true } }
-        : scenario === 'offline-update'
-          ? { freshness: 'offline', incoming: 'unknown', operation: { kind: 'update-conflict' }, action: { kind: 'continue-update', enabled: false } }
-          : { freshness: 'offline', incoming: 'unknown', operation: { kind: 'update-review', review: { canConfirm: false } }, action: { kind: 'review-update', enabled: true } });
+      : scenario === 'offline-update'
+        ? { freshness: 'offline', incoming: 'unknown', operation: { kind: 'update-conflict' }, action: { kind: 'continue-update', enabled: false } }
+        : { freshness: 'offline', incoming: 'unknown', operation: { kind: 'update-review', review: { canConfirm: false } }, action: { kind: 'review-update', enabled: true } });
     if (scenario === 'matching-working-content') {
       const afterHead = await git.repositories.resolveRef(memberPath, 'HEAD');
       const afterIndex = await readFile(path.join(memberPath, '.git', 'index'));

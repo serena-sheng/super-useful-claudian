@@ -4,7 +4,7 @@ import test from 'node:test';
 
 import { selectCiTests } from './ciTestSelection.mjs';
 
-const prompt = 'tests/unit/core/prompt/mainAgent.test.ts';
+const prompt = 'tests/unit/core/prompt/mainAgent.systemPrompt.test.ts';
 const panel = 'tests/unit/features/collab/sidebar/CollabPanel.test.ts';
 const native = 'tests/integration/app/collab/git/GitRepositoryService.test.ts';
 const docs = 'tests/unit/docs/CollabDocumentation.test.ts';
@@ -95,7 +95,7 @@ test('real dependency graph preserves prompt and provider coverage without Colla
   const relatedTests = JSON.parse(execFileSync(process.execPath, [
     'scripts/run-jest.js', '--listTests', '--json', '--findRelatedTests', 'src/core/prompt/mainAgent.ts',
   ], { encoding: 'utf8' }));
-  assert.ok(relatedTests.some(file => file.endsWith('/core/prompt/mainAgent.test.ts')));
+  assert.ok(relatedTests.some(file => file.endsWith('/core/prompt/mainAgent.systemPrompt.test.ts')));
   assert.ok(relatedTests.some(file => file.includes('/providers/')));
   assert.equal(relatedTests.some(file => /collab/i.test(file)), false);
 });

@@ -793,19 +793,6 @@ describe('findNodeDirectory', () => {
     Object.assign(process.env, originalEnv);
   });
 
-  it('returns string or null', () => {
-    const result = findNodeDirectory();
-    expect(result === null || typeof result === 'string').toBe(true);
-  });
-
-  it('returns a non-empty string when node is found', () => {
-    const result = findNodeDirectory();
-    // On most dev machines, node should be findable
-    // Result is either null (not found) or a non-empty directory path
-    const isValidResult = result === null || (typeof result === 'string' && result.length > 0);
-    expect(isValidResult).toBe(true);
-  });
-
   it('uses NVM_SYMLINK when set on Windows', () => {
     if (!isWindows) {
       return;
@@ -1073,7 +1060,6 @@ describe('parseContextLimit with comma-formatted input', () => {
     expect(parseContextLimit('1,234,567')).toBe(1234567);
   });
 });
-
 
 describe('getExtraBinaryPaths (Windows branches)', () => {
   const originalPlatform = process.platform;

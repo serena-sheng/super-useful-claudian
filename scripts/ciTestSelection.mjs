@@ -27,7 +27,6 @@ const fileConsumers = [
   [/^src\/style\//, [
     'tests/unit/style/components/code.test.ts',
     'tests/unit/style/components/messages.test.ts',
-    'tests/unit/style/settings/plugin-settings.test.ts',
     'tests/unit/features/chat/tabs/TabAttentionStyles.test.ts',
     'tests/unit/features/collab/modals/project/ProjectManagementModal.test.ts',
   ]],

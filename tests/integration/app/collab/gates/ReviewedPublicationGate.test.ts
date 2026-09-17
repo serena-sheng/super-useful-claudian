@@ -107,6 +107,9 @@ describe('Reviewed publication boundary', () => {
     expect(prepared.state).toBe('review-required');
     expect(prepared.review).toBeDefined();
     const pending = unwrap(await feature.inspectProject(project.id));
+    expect(pending.projectUpdate).toMatchObject({
+      freshness: 'fresh', operation: { kind: 'publish' }, action: { kind: 'complete-publish', enabled: true },
+    });
     expect(pending.gitStatus!.personalRemoteOid).toBe(before.gitStatus!.personalRemoteOid);
     expect(pending.coordination!.snapshot.openRequests).toEqual([]);
     const review = prepared.review!;

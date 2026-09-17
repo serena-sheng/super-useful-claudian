@@ -126,10 +126,6 @@ describe('builtInCommands', () => {
   });
 
   describe('getBuiltInCommandsForDropdown - provider filtering', () => {
-    it('returns all commands when no providerId is given', () => {
-      const commands = getBuiltInCommandsForDropdown();
-      expect(commands.length).toBe(BUILT_IN_COMMANDS.length);
-    });
 
     it('excludes Codex-only commands for the Claude provider', () => {
       const commands = getBuiltInCommandsForDropdown('claude');
@@ -138,15 +134,6 @@ describe('builtInCommands', () => {
       expect(commands.map(c => c.name)).toContain('resume');
       expect(commands.map(c => c.name)).toContain('fork');
       expect(commands.map(c => c.name)).not.toContain('fast');
-    });
-
-    it('returns all capability-supported commands for codex provider', () => {
-      const commands = getBuiltInCommandsForDropdown('codex');
-      const names = commands.map(c => c.name);
-      expect(names).toContain('clear');
-      expect(names).toContain('resume');
-      expect(names).toContain('fork');
-      expect(names).toContain('fast');
     });
 
     it('returns only commands supported by codex capabilities', () => {

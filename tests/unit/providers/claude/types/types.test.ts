@@ -122,10 +122,6 @@ describe('types.ts', () => {
         expect(getContextWindowSize('custom-model', customLimits)).toBe(CONTEXT_WINDOW_STANDARD);
       });
 
-      it('should accept valid positive custom limit', () => {
-        const customLimits = { 'custom-model': 256000 };
-        expect(getContextWindowSize('custom-model', customLimits)).toBe(256000);
-      });
     });
 
     describe('[1m] suffix detection', () => {

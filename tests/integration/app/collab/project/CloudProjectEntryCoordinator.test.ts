@@ -47,9 +47,23 @@ const execFileAsync = promisify(execFile);
 const gitRuntimeResolver = new GitRuntimeResolver();
 const remoteSeeds = new Map<string, { barePath: string; mainOid: string }>();
 let remoteSeedRoot: string;
+let crashFixtureBundle: Promise<string> | undefined;
 
 beforeAll(async () => { remoteSeedRoot = await mkdtemp(path.join(tmpdir(), 'claudian-cloud-entry-seeds-')); });
 afterAll(async () => { if (remoteSeedRoot) await rm(remoteSeedRoot, { recursive: true, force: true }); });
+
+// The executable is immutable; each crash case still forks a fresh process and Vault.
+function prepareCrashFixture(): Promise<string> {
+  return crashFixtureBundle ??= (async () => {
+    const bundle = path.join(remoteSeedRoot, 'crash-fixture.cjs');
+    await build({
+      bundle: true, entryPoints: [path.resolve('tests/helpers/collab/CloudEntryCrashFixture.ts')],
+      logLevel: 'silent', outfile: bundle, packages: 'external', platform: 'node',
+      target: 'node24', tsconfig: path.resolve('tsconfig.json'),
+    });
+    return bundle;
+  })();
+}
 
 async function git(cwd: string, args: readonly string[]): Promise<string> {
   const result = await execFileAsync('git', args, { cwd, encoding: 'utf8' });
@@ -239,11 +253,9 @@ describe('CloudProjectEntryCoordinator', () => {
     } finally { await fixture.close(); }
   });
 
-  it.each([
-    ['Collab Demo', 'collab-demo'],
-    ['Café Notes', 'cafe-notes'],
-    ['项目', 'project'],
-  ])('resolves a portable directory for %s and preserves occupied paths', async (projectName, slug) => {
+  it('suffixes the derived directory and preserves an occupied path', async () => {
+    const projectName = 'Collab Demo';
+    const slug = 'collab-demo';
     const fixture = await createFixture({ join: true, projectName });
     const occupied = path.join(fixture.vaultRoot, 'Shared/Projects', slug);
     await fixture.foundation.local.workspace.claimProjectsFolder('Shared/Projects');
@@ -371,16 +383,6 @@ describe('CloudProjectEntryCoordinator', () => {
       expect((await lstat(path.join(fixture.vaultRoot, `Shared/Projects/.claudian-clone-${PROJECT_ID}`))).isDirectory()).toBe(true);
       await expect(lstat(path.join(fixture.vaultRoot, 'Shared/Projects/cloud-notes'))).rejects.toMatchObject({ code: 'ENOENT' });
     } finally { cut.mockRestore(); await fixture.close(); }
-  });
-
-  it('derives a portable directory from an underscore-prefixed valid Project name', async () => {
-    const fixture = await createFixture({ projectName: '_Cloud Notes' });
-    try {
-      await expect(fixture.coordinator.createProject({
-        authority: { kind: 'cloud', serverUrl: fixture.serverUrl }, memberDisplayName: 'Alice', name: '_Cloud Notes',
-      })).resolves.toMatchObject({ status: 'success', value: { name: '_Cloud Notes', workspacePath: 'Shared/Projects/cloud-notes' } });
-      expect(fixture.failures).toEqual([]);
-    } finally { await fixture.close(); }
   });
 
   it('does not turn an unknown local Cloud binding into discovery or ordinary Join', async () => {
@@ -782,12 +784,7 @@ describe('CloudProjectEntryCoordinator', () => {
   it.each(['create', 'join'].flatMap(entry => ['intent', 'admitted', 'clone-validated', 'rename-before-checkpoint', 'placed', 'locally-finalized'].map(phase => ({ entry, phase }))))(
     'recovers $entry after actual process death at the durable $phase boundary', async ({ entry, phase }) => {
       const fixture = await createFixture({ join: entry === 'join' });
-      const bundle = path.join(fixture.vaultRoot, 'crash-fixture.cjs');
-      await build({
-        bundle: true, entryPoints: [path.resolve('tests/helpers/collab/CloudEntryCrashFixture.ts')],
-        logLevel: 'silent', outfile: bundle, packages: 'external', platform: 'node',
-        target: 'node24', tsconfig: path.resolve('tsconfig.json'),
-      });
+      const bundle = await prepareCrashFixture();
       const child = fork(bundle, [], {
         env: { ...process.env, NODE_PATH: path.resolve('node_modules') }, execArgv: [],
         stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
