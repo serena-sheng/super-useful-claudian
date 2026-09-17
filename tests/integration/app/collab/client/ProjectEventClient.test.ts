@@ -3,6 +3,7 @@ import { createServer } from 'node:https';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { eventTransportClock, waitForSocket } from '@test/helpers/collab/EventTransportClock';
 import { TEST_INSTALLATION_A } from '@test/helpers/installations';
 import { WebSocketServer } from 'ws';
 
@@ -21,6 +22,7 @@ it('detects a silently lost idle Host independently for three members', async ()
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('Missing address');
+  const clock = eventTransportClock();
   const recovered = new Set<number>();
   const connections = [0, 1, 2].map(member => new CollabProjectConnection({
     onStatusChange: () => undefined,
@@ -36,20 +38,27 @@ it('detects a silently lost idle Host independently for three members', async ()
   }, async invalidation => invalidation.sequence));
   try {
     clients.forEach(client => client.start());
-    const deadline = Date.now() + 63_000;
-    while (recovered.size < 3 && Date.now() < deadline) {
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
+    await waitForSocket(() => connections.every(connection => connection.status === 'connected'));
+    await clock.advance(59_999);
+    expect(connections.map(connection => connection.status)).toEqual(['connected', 'connected', 'connected']);
+    expect([...recovered]).toEqual([]);
+    await clock.advance(1);
+    await waitForSocket(() => connections.every(connection => connection.status === 'offline'));
+    await clock.advance(1_000);
     expect([...recovered].sort()).toEqual([0, 1, 2]);
   } finally {
-    clients.forEach(client => client.dispose());
-    await Promise.all(connections.map(connection => connection.close()));
-    for (const socket of sockets.clients) socket.terminate();
-    await new Promise<void>(resolve => sockets.close(() => resolve()));
-    await new Promise<void>(resolve => server.close(() => resolve()));
-    await rm(root, { recursive: true, force: true });
+    try {
+      clients.forEach(client => client.dispose());
+      await Promise.all(connections.map(connection => connection.close()));
+      for (const socket of sockets.clients) socket.terminate();
+      await new Promise<void>(resolve => sockets.close(() => resolve()));
+      await new Promise<void>(resolve => server.close(() => resolve()));
+      await rm(root, { recursive: true, force: true });
+    } finally {
+      clock.restore();
+    }
   }
-}, 70_000);
+});
 
 it.each([401, 403])('stops on native LAN Upgrade authorization rejection %s', async status => {
   const root = await mkdtemp(path.join(tmpdir(), 'claudian-event-auth-'));

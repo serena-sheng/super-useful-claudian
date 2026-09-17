@@ -1267,16 +1267,20 @@ describe('Obsidian CLI path integration', () => {
     return require('../../../src/utils/env');
   }
 
-  it('uses the top-level app bundle binary dir on macOS helper processes', () => {
-    const helperExecPath = '/Applications/Obsidian.app/Contents/Frameworks/Obsidian Helper (Renderer).app/Contents/MacOS/Obsidian Helper (Renderer)';
-    process.env.PATH = '';
+  it.each([
+    '/Applications/Obsidian.app/Contents/MacOS/Obsidian',
+    '/Applications/Obsidian.app/Contents/Frameworks/Obsidian Helper (Renderer).app/Contents/MacOS/Obsidian Helper (Renderer)',
+  ])('preserves inherited CLI precedence when running %s', (execPath) => {
+    const cliDirectory = '/custom/obsidian-cli/bin';
+    const appDirectory = '/Applications/Obsidian.app/Contents/MacOS';
+    process.env.PATH = `${cliDirectory}:${appDirectory}`;
 
-    const mod = loadWithPlatform('darwin', helperExecPath);
-    const result = mod.getEnhancedPath();
-    const segments = result.split(':');
+    const mod = loadWithPlatform('darwin', execPath);
+    const segments = mod.getEnhancedPath().split(':');
 
-    expect(segments).toContain('/Applications/Obsidian.app/Contents/MacOS');
-    expect(segments).not.toContain('/Applications/Obsidian.app/Contents/Frameworks/Obsidian Helper (Renderer).app/Contents/MacOS');
+    expect(segments).toContain(cliDirectory);
+    expect(segments).toContain(appDirectory);
+    expect(segments.indexOf(cliDirectory)).toBeLessThan(segments.indexOf(appDirectory));
   });
 
   it('does not add transient Linux AppImage mount dirs', () => {
