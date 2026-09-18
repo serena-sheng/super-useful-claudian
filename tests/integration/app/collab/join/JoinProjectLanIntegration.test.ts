@@ -48,6 +48,22 @@ const HOST_CREDENTIAL = Buffer.alloc(32, 1).toString('base64url');
 jest.setTimeout(60_000);
 
 describe('Join Project same-device LAN integration', () => {
+  let tlsRoot: string;
+  let serverIdentity: Awaited<ReturnType<LanTlsIdentity['issueServerIdentity']>>;
+
+  // Certificate creation has its own native tests. These cases retain real TLS
+  // handshakes while sharing only immutable certificate/key material.
+  beforeAll(async () => {
+    tlsRoot = await mkdtemp(path.join(tmpdir(), 'claudian-lan-tls-fixture-'));
+    serverIdentity = await new LanTlsIdentity(tlsRoot, {
+      installationKey: TEST_INSTALLATION_A,
+    }).issueServerIdentity('127.0.0.1');
+  });
+
+  afterAll(async () => {
+    if (tlsRoot) await rm(tlsRoot, { recursive: true, force: true });
+  });
+
   let SQL: SqlJsStatic;
   let database: SqlJsProjectDatabase;
   let hostRoot: string;
@@ -153,9 +169,7 @@ describe('Join Project same-device LAN integration', () => {
       'UPDATE authority_metadata SET authority_generation = ? WHERE singleton = 1', [generation],
     ));
 
-    const identity = await new LanTlsIdentity(hostRoot, {
-      installationKey: TEST_INSTALLATION_A,
-    }).issueServerIdentity('127.0.0.1');
+    const identity = serverIdentity;
     const router = new CollabControlRouter();
     server = createServer({
       cert: identity.certificateChainPem,

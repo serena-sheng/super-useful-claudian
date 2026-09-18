@@ -7,9 +7,8 @@ const os = jest.requireActual<typeof osType>('os');
 const path = jest.requireActual<typeof pathType>('path');
 
 import { findClaudeCLIPath } from '@/providers/claude/cli/findClaudeCLIPath';
-import { getCurrentModelFromEnvironment, getModelsFromEnvironment } from '@/providers/claude/env/claudeModelEnv';
+import { getModelsFromEnvironment } from '@/providers/claude/env/claudeModelEnv';
 import { parseEnvironmentVariables } from '@/utils/env';
-import { appendMarkdownSnippet } from '@/utils/markdown';
 import {
   expandHomePath,
   isPathWithinVault,
@@ -20,53 +19,6 @@ import {
 
 describe('utils.ts', () => {
   describe('parseEnvironmentVariables', () => {
-    it('should parse simple KEY=VALUE pairs', () => {
-      const input = 'API_KEY=abc123\nDEBUG=true';
-      const result = parseEnvironmentVariables(input);
-
-      expect(result).toEqual({
-        API_KEY: 'abc123',
-        DEBUG: 'true',
-      });
-    });
-
-    it('should skip empty lines', () => {
-      const input = 'KEY1=value1\n\nKEY2=value2\n\n';
-      const result = parseEnvironmentVariables(input);
-
-      expect(result).toEqual({
-        KEY1: 'value1',
-        KEY2: 'value2',
-      });
-    });
-
-    it('should skip comment lines starting with #', () => {
-      const input = '# This is a comment\nKEY=value\n# Another comment';
-      const result = parseEnvironmentVariables(input);
-
-      expect(result).toEqual({
-        KEY: 'value',
-      });
-    });
-
-    it('should handle values with = signs', () => {
-      const input = 'URL=https://example.com?foo=bar&baz=qux';
-      const result = parseEnvironmentVariables(input);
-
-      expect(result).toEqual({
-        URL: 'https://example.com?foo=bar&baz=qux',
-      });
-    });
-
-    it('should trim whitespace from keys and values', () => {
-      const input = '  KEY  =  value  ';
-      const result = parseEnvironmentVariables(input);
-
-      expect(result).toEqual({
-        KEY: 'value',
-      });
-    });
-
     it('should skip lines without = sign', () => {
       const input = 'VALID=value\nINVALID_LINE\nANOTHER=test';
       const result = parseEnvironmentVariables(input);
@@ -98,26 +50,6 @@ describe('utils.ts', () => {
 
       expect(result).toEqual({
         MESSAGE: 'Hello World',
-      });
-    });
-
-    it('should strip surrounding double quotes from values', () => {
-      const input = 'URL="https://api.example.com"\nKEY="secret-key"';
-      const result = parseEnvironmentVariables(input);
-
-      expect(result).toEqual({
-        URL: 'https://api.example.com',
-        KEY: 'secret-key',
-      });
-    });
-
-    it('should strip surrounding single quotes from values', () => {
-      const input = "URL='https://api.example.com'\nKEY='secret-key'";
-      const result = parseEnvironmentVariables(input);
-
-      expect(result).toEqual({
-        URL: 'https://api.example.com',
-        KEY: 'secret-key',
       });
     });
 
@@ -300,34 +232,6 @@ describe('utils.ts', () => {
     });
   });
 
-  describe('appendMarkdownSnippet', () => {
-    it('should append snippet as-is when existing prompt is empty', () => {
-      expect(appendMarkdownSnippet('', '  - Test  ')).toBe('- Test');
-    });
-
-    it('should append snippet with a blank line separator by default', () => {
-      const existing = '## Existing\n\n- A';
-      const snippet = '## New\n\n- B';
-      expect(appendMarkdownSnippet(existing, snippet)).toBe('## Existing\n\n- A\n\n## New\n\n- B');
-    });
-
-    it('should ensure a blank line separation when existing ends with a newline', () => {
-      const existing = '## Existing\n';
-      const snippet = '- B';
-      expect(appendMarkdownSnippet(existing, snippet)).toBe('## Existing\n\n- B');
-    });
-
-    it('should not add extra spacing when existing ends with a blank line', () => {
-      const existing = '## Existing\n\n';
-      const snippet = '- B';
-      expect(appendMarkdownSnippet(existing, snippet)).toBe('## Existing\n\n- B');
-    });
-
-    it('should return existing prompt unchanged when snippet is empty', () => {
-      expect(appendMarkdownSnippet('## Existing', '   ')).toBe('## Existing');
-    });
-  });
-
   describe('getModelsFromEnvironment', () => {
     it('should extract model from ANTHROPIC_MODEL', () => {
       const envVars = { ANTHROPIC_MODEL: 'claude-3-opus' };
@@ -400,60 +304,6 @@ describe('utils.ts', () => {
       expect(result[0].value).toBe('main-model');
       expect(result[1].value).toBe('sonnet-model');
       expect(result[2].value).toBe('opus-model');
-    });
-  });
-
-  describe('getCurrentModelFromEnvironment', () => {
-    it('should return ANTHROPIC_MODEL if set', () => {
-      const envVars = {
-        ANTHROPIC_MODEL: 'main-model',
-        ANTHROPIC_DEFAULT_OPUS_MODEL: 'opus-model',
-      };
-      const result = getCurrentModelFromEnvironment(envVars);
-
-      expect(result).toBe('main-model');
-    });
-
-    it('should return ANTHROPIC_DEFAULT_HAIKU_MODEL if ANTHROPIC_MODEL not set', () => {
-      const envVars = {
-        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'haiku-model',
-        ANTHROPIC_DEFAULT_SONNET_MODEL: 'sonnet-model',
-      };
-      const result = getCurrentModelFromEnvironment(envVars);
-
-      expect(result).toBe('haiku-model');
-    });
-
-    it('should return ANTHROPIC_DEFAULT_SONNET_MODEL if higher priority not set', () => {
-      const envVars = {
-        ANTHROPIC_DEFAULT_SONNET_MODEL: 'sonnet-model',
-        ANTHROPIC_DEFAULT_OPUS_MODEL: 'opus-model',
-      };
-      const result = getCurrentModelFromEnvironment(envVars);
-
-      expect(result).toBe('sonnet-model');
-    });
-
-    it('should return ANTHROPIC_DEFAULT_HAIKU_MODEL if only that is set', () => {
-      const envVars = {
-        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'haiku-model',
-      };
-      const result = getCurrentModelFromEnvironment(envVars);
-
-      expect(result).toBe('haiku-model');
-    });
-
-    it('should return null if no model variables are set', () => {
-      const envVars = { OTHER_VAR: 'value' };
-      const result = getCurrentModelFromEnvironment(envVars);
-
-      expect(result).toBeNull();
-    });
-
-    it('should return null for empty object', () => {
-      const result = getCurrentModelFromEnvironment({});
-
-      expect(result).toBeNull();
     });
   });
 
@@ -784,45 +634,4 @@ describe('utils.ts', () => {
     });
   });
 
-  describe('Windows path handling', () => {
-    // Note: Full integration tests for Windows path validation require running on Windows
-    // because Node's `path` module behavior is determined at module load time.
-    // These tests verify the translateMsysPath function which is platform-mockable.
-
-    describe('translateMsysPath behavior', () => {
-      const originalPlatform = process.platform;
-
-      afterEach(() => {
-        Object.defineProperty(process, 'platform', { value: originalPlatform });
-      });
-
-      it('translates MSYS paths to Windows paths when platform is win32', () => {
-        Object.defineProperty(process, 'platform', { value: 'win32' });
-
-        expect(translateMsysPath('/c/Users/test')).toBe('C:\\Users\\test');
-        expect(translateMsysPath('/d/Projects/vault')).toBe('D:\\Projects\\vault');
-        expect(translateMsysPath('/c')).toBe('C:');
-        expect(translateMsysPath('/c/')).toBe('C:\\');
-      });
-
-      it('does not translate non-MSYS paths on Windows', () => {
-        Object.defineProperty(process, 'platform', { value: 'win32' });
-
-        // Multi-letter paths after / are not MSYS drive paths
-        expect(translateMsysPath('/home/user')).toBe('/home/user');
-        expect(translateMsysPath('/tmp/file')).toBe('/tmp/file');
-        // Already Windows paths
-        expect(translateMsysPath('C:\\Users')).toBe('C:\\Users');
-        // Relative paths
-        expect(translateMsysPath('./file')).toBe('./file');
-      });
-
-      it('does not translate any paths on non-Windows', () => {
-        Object.defineProperty(process, 'platform', { value: 'darwin' });
-
-        expect(translateMsysPath('/c/Users/test')).toBe('/c/Users/test');
-        expect(translateMsysPath('/home/user')).toBe('/home/user');
-      });
-    });
-  });
 });

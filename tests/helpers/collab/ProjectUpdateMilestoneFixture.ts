@@ -10,27 +10,38 @@ import { SqlJsProjectDatabase } from '@/app/collab/authority/SqlJsProjectDatabas
 import { ClaudianCollabService } from '@/app/collab/ClaudianCollabService';
 import type { CollabFeatureService } from '@/app/collab/CollabFeatureService';
 import { createCollabFeatureSubcomposition } from '@/app/collab/CollabFeatureSubcomposition';
+import { GitRuntimeResolver } from '@/app/collab/git/GitRuntimeResolver';
 import type { InvitationCodec } from '@/app/collab/lan/InvitationCodec';
 import { CollabProjectSetupService } from '@/app/collab/project/CollabProjectSetupService';
 import type { CollabResult } from '@/core/collab';
 
 export function projectUpdateMilestoneFixture() {
+  // All participants use the same executable. Reuse its real capability probe,
+  // while every participant still owns fresh repositories, processes and state.
+  const gitRuntimeResolver = new GitRuntimeResolver();
   let SQL: SqlJsStatic;
   let root = '';
   const foundations: ClaudianCollabService[] = [];
   const features: CollabFeatureService[] = [];
 
   beforeAll(async () => { SQL = await initSqlJs(); });
-  afterEach(async () => {
+  async function closeParticipants(): Promise<void> {
     await Promise.all(features.splice(0).map(feature => feature.close()));
     await Promise.all(foundations.splice(0).map(foundation => foundation.close()));
+  }
+
+  async function cleanup(): Promise<void> {
+    await closeParticipants();
     if (root) await rm(root, { recursive: true, force: true });
-  });
+  }
+  afterEach(cleanup);
+  afterAll(cleanup);
 
   function createFoundation(vaultRoot: string, invitationCodec: InvitationCodec, hostPort?: number): ClaudianCollabService {
     const installationKey = hostPort === undefined ? TEST_INSTALLATION_B : TEST_INSTALLATION_A;
     const foundation = new ClaudianCollabService({
       installationKey,
+      gitRuntimeResolver,
       ...(hostPort === undefined ? {} : {
         createAuthorityDatabase: (directory: string, resourceAdmission?: <T>(operation: () => Promise<T>) => Promise<T>) => (
           new SqlJsProjectDatabase(directory, { resourceAdmission, loadSqlJs: async () => SQL })
@@ -52,6 +63,7 @@ export function projectUpdateMilestoneFixture() {
   }
 
   return {
+    closeParticipants,
     createFoundation,
     createFeature,
     async createRoot(prefix: string): Promise<string> {

@@ -1,4 +1,4 @@
-import { createServer } from 'node:http';
+import http, { type ClientRequest, createServer, type RequestOptions } from 'node:http';
 import type { Duplex } from 'node:stream';
 
 import { eventTransportClock, waitForSocket } from '@test/helpers/collab/EventTransportClock';
@@ -42,14 +42,6 @@ async function eventServer(upgrade: 'stalled' | 'silent') {
   };
 }
 
-async function waitFor(predicate: () => boolean, milliseconds: number): Promise<boolean> {
-  const deadline = Date.now() + milliseconds;
-  while (!predicate() && Date.now() < deadline) {
-    await new Promise(resolve => setTimeout(resolve, 25));
-  }
-  return predicate();
-}
-
 function controlledClient(
   input: ConstructorParameters<typeof CloudProjectEventClient>[0],
   onInvalidation: ConstructorParameters<typeof CloudProjectEventClient>[1],
@@ -87,8 +79,16 @@ function controlledClient(
 }
 
 describe('Cloud event default transport liveness', () => {
-  it('retries a stalled Upgrade within 32 seconds without advancing the cursor', async () => {
+  it('retries a stalled Upgrade after its configured deadline without advancing the cursor', async () => {
     const server = await eventServer('stalled');
+    const clock = eventTransportClock();
+    const requests: Array<{ request: ClientRequest; timeout: number | undefined }> = [];
+    const realRequest = http.request;
+    const requestSpy = jest.spyOn(http, 'request').mockImplementation((...args: Parameters<typeof http.request>) => {
+      const request = realRequest(...args);
+      requests.push({ request, timeout: (args[0] as RequestOptions).timeout });
+      return request;
+    });
     const invalidations: number[] = [];
     const client = controlledClient({
       headers: {},
@@ -101,17 +101,29 @@ describe('Cloud event default transport liveness', () => {
     });
     try {
       client.start();
-      expect(await waitFor(() => server.requests.length >= 2, 32_000)).toBe(true);
+      await waitForSocket(() => server.requests.length === 1);
+      expect(requests[0].timeout).toBe(30_000);
+      // Deliver the native HTTP deadline event; keep the actual socket, ws adapter,
+      // connection owner and retry scheduling real, without waiting 30 seconds.
+      requests[0].request.emit('timeout');
+      await waitForSocket(() => client.status === 'offline');
+      await clock.advance(1_000);
+      await waitForSocket(() => server.requests.length === 2);
       expect(server.requests.slice(0, 2)).toEqual([
         '/v10/projects/project-events/events?afterSequence=7',
         '/v10/projects/project-events/events?afterSequence=7',
       ]);
       expect(invalidations).toEqual([]);
     } finally {
-      await client.dispose();
-      await server.close();
+      try {
+        await client.dispose();
+        await server.close();
+      } finally {
+        requestSpy.mockRestore();
+        clock.restore();
+      }
     }
-  }, 35_000);
+  });
 
   it('reconnects a silently lost established socket from the applied cursor', async () => {
     const server = await eventServer('silent');

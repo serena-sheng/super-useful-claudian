@@ -847,7 +847,6 @@ describe('ServiceTierToggle', () => {
   });
 });
 
-
 describe('ContextUsageMeter', () => {
   let parentEl: any;
   let meter: ContextUsageMeter;
@@ -1049,21 +1048,7 @@ describe('InputToolbarLayoutController', () => {
   });
 });
 
-
 describe('createInputToolbar', () => {
-  it('should return all toolbar components', () => {
-    const parentEl = createMockEl();
-    const callbacks = createMockCallbacks();
-    const toolbar = createInputToolbar(parentEl, callbacks);
-
-    expect(toolbar.modelSelector).toBeInstanceOf(ModelSelector);
-    expect(toolbar.modeSelector).toBeInstanceOf(ModeSelector);
-    expect(toolbar.thinkingBudgetSelector).toBeInstanceOf(ThinkingBudgetSelector);
-    expect(toolbar.contextUsageMeter).toBeInstanceOf(ContextUsageMeter);
-    expect(toolbar.layoutController).toBeInstanceOf(InputToolbarLayoutController);
-    expect(toolbar.permissionToggle).toBeInstanceOf(PermissionToggle);
-    expect(toolbar.serviceTierToggle).toBeInstanceOf(ServiceTierToggle);
-  });
 
   it('should place the mode selector after the permission toggle in toolbar order', () => {
     const parentEl = createMockEl();

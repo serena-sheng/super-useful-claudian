@@ -3,54 +3,138 @@ import { appendFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const fullSelection = { testFiles: null, lanCompatibility: true, crossPlatform: true };
-const isDocumentation = file => /^(?:docs\/.*|[^/]+\.md)$/.test(file);
-const isSourceOrTest = file => /^(?:src\/.*\.tsx?|tests\/(?:unit|integration)\/.*\.tsx?)$/.test(file);
-const isCollab = file => /collab/i.test(file);
-const needsNativeSmoke = file => /(?:windowsCmdShim|ManagedStdioProcess|PiSubprocess)/.test(file);
+import suites from './testSuites.cjs';
+
+const fullSelection = {
+  testFiles: null, scriptTests: null, crossPlatformTests: null,
+  lanCompatibility: true, crossPlatform: true, piWindows: true,
+};
+const docsTest = 'tests/unit/docs/CollabDocumentation.test.ts';
+const piTest = 'tests/integration/providers/pi/PiSubprocess.windows.test.ts';
+const isDocumentation = file => file.endsWith('.md') || file.startsWith('docs/');
+const isJestTest = file => /^tests\/(?:unit|integration)\/.*\.test\.ts$/.test(file);
+const isGraphInput = file => /^(?:src|tests)\/.*\.(?:[cm]?[jt]sx?|json)$/.test(file);
+const isCollabRuntime = file => /^(?:src|tests\/(?:unit|integration))\/(?:app|core)\/collab\//.test(file);
+
+// These consumers read files through fs rather than imports, so Jest cannot find their edges.
+const fileConsumers = [
+  // esbuild reads these entry points dynamically. Their owner tests also carry
+  // the transitive import edges needed when a dependency of an entry changes.
+  [/^(?:src|tests\/unit)\/(?:app\/collab\/lan\/LanTlsIdentity|features\/collab\/detail\/review\/CollabDiffRenderer|features\/collab\/shared\/markdown\/MarkdownDraftEditor)(?:\.test)?\.ts$/, [
+    'tests/integration/build/collab-dependency-envelope.test.ts',
+  ]],
+  [/^src\/i18n\/locales\/.*\.json$/, ['tests/integration/build/collab-dependency-envelope.test.ts']],
+  [/^src\/style\//, [
+    'tests/unit/style/components/code.test.ts',
+    'tests/unit/style/components/messages.test.ts',
+    'tests/unit/features/chat/tabs/TabAttentionStyles.test.ts',
+    'tests/unit/features/collab/modals/project/ProjectManagementModal.test.ts',
+  ]],
+  [/^tests\/fixtures\/collab\/authority-v12-inert\.sqlite\.gz$/, [
+    'tests/unit/app/collab/authority/AuthorityEventRetention.test.ts',
+    'tests/unit/app/collab/host-transfer/HostTransferAuthoritySnapshot.test.ts',
+  ]],
+  [/^tests\/fixtures\/providers\/grok\/history\//, [
+    'tests/unit/providers/grok/history/GrokConversationHistoryService.test.ts',
+    'tests/unit/providers/grok/history/GrokHistoryStore.test.ts',
+  ]],
+];
+const scriptConsumers = new Map(suites.scriptTests.flatMap(file => [
+  [file, file], [file.replace('.test.mjs', '.mjs'), file],
+]));
+const globalInputs = new Set([
+  'src/main.ts', 'tests/setupWindow.ts', 'scripts/ciTestSelection.mjs',
+  'scripts/run-tests.js', 'scripts/run-jest.js', 'scripts/run-cross-platform-collab-tests.js',
+  'scripts/testSuites.cjs', 'tests/tsconfig.json',
+]);
 
 export function selectCiTests({ changes, relatedTests, eventName }) {
-  if (eventName !== 'pull_request' || changes.some(change =>
-    change.status === 'D' || change.path === 'src/main.ts'
-    || (!isDocumentation(change.path) && !isSourceOrTest(change.path))
-  )) return { ...fullSelection };
-
-  const paths = [...changes.map(change => change.path), ...relatedTests];
-  const lanCompatibility = paths.some(isCollab);
+  if (!['pull_request', 'push'].includes(eventName)) return { ...fullSelection };
+  const files = new Set(relatedTests);
+  const scripts = new Set();
+  for (const { status, path: file } of changes) {
+    if (status === 'D' && !isJestTest(file) && !isDocumentation(file)) return { ...fullSelection };
+    if (file.startsWith('tests/fixtures/') && !isDocumentation(file)
+      && !file.endsWith('.json') && !fileConsumers.some(([pattern]) => pattern.test(file))) return { ...fullSelection };
+    if (globalInputs.has(file)) return { ...fullSelection };
+    if (isJestTest(file)) {
+      if (status !== 'D') files.add(file);
+    } else if (isDocumentation(file)) {
+      files.add(docsTest);
+    } else if (scriptConsumers.has(file)) {
+      scripts.add(scriptConsumers.get(file));
+    } else if (!isGraphInput(file) && !fileConsumers.some(([pattern]) => pattern.test(file))) {
+      return { ...fullSelection };
+    }
+    if (/^(?:src\/.*\.[jt]sx?|tests\/.*\.ts|.*\/(?:AGENTS|CLAUDE)\.md|AGENTS\.md|CLAUDE\.md)$/.test(file)) {
+      scripts.add('scripts/check-architecture-boundaries.test.mjs');
+    }
+  }
+  for (const file of [...changes.map(change => change.path), ...relatedTests]) {
+    for (const [pattern, consumers] of fileConsumers) {
+      if (pattern.test(file)) consumers.forEach(consumer => files.add(consumer));
+    }
+  }
+  for (const { status, path: file } of changes) {
+    if (status === 'D') files.delete(file);
+  }
+  const testFiles = [...files];
+  const crossPlatformTests = suites.crossPlatformTests.filter(file => files.has(file));
+  const paths = [...changes.filter(change => change.status !== 'D').map(change => change.path), ...testFiles];
+  const piWindows = files.has(piTest);
   return {
-    testFiles: [...new Set(relatedTests)],
-    lanCompatibility,
-    crossPlatform: lanCompatibility || paths.some(needsNativeSmoke),
+    testFiles, scriptTests: [...scripts], crossPlatformTests,
+    lanCompatibility: paths.some(file => isCollabRuntime(file) && !isDocumentation(file))
+      || paths.some(file => file.startsWith('tests/compatibility/')),
+    crossPlatform: crossPlatformTests.length > 0 || piWindows,
+    piWindows,
   };
 }
 
 function main() {
-  let changes = [];
-  if (process.env.GITHUB_EVENT_NAME === 'pull_request') {
-    const { BASE_SHA: base, HEAD_SHA: head } = process.env;
-    if (!base || !head) throw new Error('PR test selection requires base and head commits');
-    const entries = execFileSync('git', [
-      'diff', '--name-status', '-z', '--no-renames', `${base}...${head}`,
-    ], { encoding: 'utf8' }).split('\0');
-    entries.pop();
-    for (let index = 0; index < entries.length; index += 2) {
-      changes.push({ status: entries[index], path: entries[index + 1] });
+  const eventName = process.env.GITHUB_EVENT_NAME;
+  const { BASE_SHA: base, HEAD_SHA: head } = process.env;
+  let selection = { ...fullSelection };
+  // Tag pushes include reusable release verification and always retain the full suite.
+  if (['pull_request', 'push'].includes(eventName) && !process.env.GITHUB_REF?.startsWith('refs/tags/')
+    && base && head && !/^0+$/.test(base)) {
+    let entries;
+    try {
+      entries = execFileSync('git', [
+        'diff', '--name-status', '-z', '--no-renames', eventName === 'pull_request' ? `${base}...${head}` : base,
+        ...(eventName === 'push' ? [head] : []),
+      ], { encoding: 'utf8' }).split('\0');
+    } catch {
+      // A missing/force-pushed base cannot safely narrow coverage.
+      entries = undefined;
     }
-  }
-
-  let selection = selectCiTests({ changes, relatedTests: [], eventName: process.env.GITHUB_EVENT_NAME });
-  const inputs = changes.map(change => change.path).filter(isSourceOrTest);
-  if (selection.testFiles !== null && inputs.length > 0) {
-    const relatedTests = JSON.parse(execFileSync(process.execPath, [
-      'scripts/run-jest.js', '--listTests', '--json', '--findRelatedTests', ...inputs,
-    ], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }))
-      .map(file => path.relative(process.cwd(), file).split(path.sep).join('/'));
-    selection = selectCiTests({ changes, relatedTests, eventName: process.env.GITHUB_EVENT_NAME });
+    if (entries) {
+      entries.pop();
+      const changes = [];
+      for (let index = 0; index < entries.length; index += 2) {
+        changes.push({ status: entries[index], path: entries[index + 1] });
+      }
+      selection = selectCiTests({ changes, relatedTests: [], eventName });
+      const inputs = changes.filter(change => change.status !== 'D' && isGraphInput(change.path))
+        .map(change => change.path);
+      if (selection.testFiles !== null && inputs.length > 0) {
+        const relatedTests = JSON.parse(execFileSync(process.execPath, [
+          'scripts/run-jest.js', '--listTests', '--json', '--findRelatedTests', ...inputs,
+        ], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }))
+          .map(file => path.relative(process.cwd(), file).split(path.sep).join('/'));
+        selection = selectCiTests({ changes, relatedTests, eventName });
+      }
+    }
   }
   const output = [
     `test-files=${JSON.stringify(selection.testFiles)}`,
+    `script-tests=${JSON.stringify(selection.scriptTests)}`,
+    `cross-platform-tests=${JSON.stringify(selection.crossPlatformTests)}`,
     `lan=${selection.lanCompatibility}`,
     `cross-platform=${selection.crossPlatform}`,
+    `pi-windows=${selection.piWindows}`,
+    `has-tests=${selection.testFiles === null || selection.testFiles.length > 0
+      || selection.scriptTests === null || selection.scriptTests.length > 0}`,
   ].join('\n');
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `${output}\n`);
   console.log(output);

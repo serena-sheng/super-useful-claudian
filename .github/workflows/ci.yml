@@ -86,6 +86,7 @@ jobs:
 
   selected-tests:
     needs: test-scope
+    if: needs.test-scope.outputs.has-tests == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -104,9 +105,10 @@ jobs:
         id: tests
         env:
           TEST_SELECTION: ${{ needs.test-scope.outputs.test-files }}
+          SCRIPT_SELECTION: ${{ needs.test-scope.outputs.script-tests }}
         run: |
           mkdir -p test-results
-          npm run test -- --selection "$TEST_SELECTION" --json --outputFile=test-results/jest.json
+          npm run test -- --selection "$TEST_SELECTION" --script-selection "$SCRIPT_SELECTION" --json --outputFile=test-results/jest.json
 
       - name: Summarize test timings
         if: always() && steps.tests.outcome != 'skipped' && needs.test-scope.outputs.test-files != '[]'
@@ -126,6 +128,10 @@ jobs:
     timeout-minutes: 10
     outputs:
       test-files: ${{ steps.scope.outputs.test-files }}
+      script-tests: ${{ steps.scope.outputs.script-tests }}
+      cross-platform-tests: ${{ steps.scope.outputs.cross-platform-tests }}
+      pi-windows: ${{ steps.scope.outputs.pi-windows }}
+      has-tests: ${{ steps.scope.outputs.has-tests }}
       lan: ${{ steps.scope.outputs.lan }}
       cross-platform: ${{ steps.scope.outputs.cross-platform }}
     steps:
@@ -145,8 +151,8 @@ jobs:
       - name: Select affected tests and platform checks
         id: scope
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: node scripts/ciTestSelection.mjs
 
   lan-compatibility:
@@ -179,10 +185,15 @@ jobs:
         env:
           SCOPE_RESULT: ${{ needs.test-scope.result }}
           TEST_RESULT: ${{ needs.selected-tests.result }}
+          HAS_TESTS: ${{ needs.test-scope.outputs.has-tests }}
           LAN_RESULT: ${{ needs.lan-compatibility.result }}
         run: |
           test "$SCOPE_RESULT" = success
-          test "$TEST_RESULT" = success
+          if [ "$HAS_TESTS" = true ]; then
+            test "$TEST_RESULT" = success
+          else
+            test "$TEST_RESULT" = skipped
+          fi
           test "$LAN_RESULT" = success || test "$LAN_RESULT" = skipped
 
   cross-platform-smoke:
@@ -215,10 +226,13 @@ jobs:
         run: npm run build
 
       - name: Run OS-sensitive Collab tests
-        run: npm run test:cross-platform-collab
+        shell: bash
+        env:
+          TEST_SELECTION: ${{ needs.test-scope.outputs.cross-platform-tests }}
+        run: npm run test:cross-platform-collab -- --selection "$TEST_SELECTION"
 
       - name: Run Windows Pi launch integration
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && needs.test-scope.outputs.pi-windows == 'true'
         run: npm run test:unit -- --runInBand tests/integration/providers/pi/PiSubprocess.windows.test.ts
 
   build:

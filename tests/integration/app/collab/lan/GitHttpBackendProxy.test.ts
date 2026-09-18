@@ -62,6 +62,22 @@ async function withGitDiagnostics(
 }
 
 describe('GitHttpBackendProxy integration', () => {
+  let tlsRoot: string;
+  let serverIdentity: Awaited<ReturnType<LanTlsIdentity['issueServerIdentity']>>;
+
+  // Certificate creation has its own native tests. These cases retain real TLS
+  // handshakes while sharing only immutable certificate/key material.
+  beforeAll(async () => {
+    tlsRoot = await mkdtemp(path.join(tmpdir(), 'claudian-lan-tls-fixture-'));
+    serverIdentity = await new LanTlsIdentity(tlsRoot, {
+      installationKey: TEST_INSTALLATION_A,
+    }).issueServerIdentity('127.0.0.1');
+  });
+
+  afterAll(async () => {
+    if (tlsRoot) await rm(tlsRoot, { recursive: true, force: true });
+  });
+
   let authorityDirectory: string;
   let resources: CollabLocalProjectRepository;
   let resource: OwnedAuthorityDirectoryCapability;
@@ -176,9 +192,7 @@ describe('GitHttpBackendProxy integration', () => {
     });
     await proxy.enable();
 
-    const identity = await new LanTlsIdentity(root, {
-      installationKey: TEST_INSTALLATION_A,
-    }).issueServerIdentity('127.0.0.1');
+    const identity = serverIdentity;
     caCertificatePem = identity.caCertificatePem;
     const caPath = path.join(root, 'host-ca.pem');
     await writeFile(caPath, identity.caCertificatePem, { mode: 0o600 });

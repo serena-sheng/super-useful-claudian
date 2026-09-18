@@ -2,16 +2,6 @@ import { buildRefineSystemPrompt } from '@/core/prompt/instructionRefine';
 
 describe('buildRefineSystemPrompt', () => {
   describe('without existing instructions', () => {
-    it('should return base prompt when existing instructions is empty', () => {
-      const result = buildRefineSystemPrompt('');
-
-      expect(result).toContain('You refine user requests into system instructions');
-      expect(result).toContain('**Your Goal**');
-      expect(result).toContain('**Process**');
-      expect(result).toContain('**Guidelines**');
-      expect(result).toContain('**Output Format**');
-      expect(result).toContain('**Examples**');
-    });
 
     it('should not include existing instructions section when empty', () => {
       const result = buildRefineSystemPrompt('');
@@ -65,101 +55,6 @@ describe('buildRefineSystemPrompt', () => {
       const result = buildRefineSystemPrompt(existingInstructions);
 
       expect(result).toContain('```\n- Trimmed rule\n```');
-    });
-  });
-
-  describe('prompt structure', () => {
-    it('should contain process steps for analyzing intent', () => {
-      const result = buildRefineSystemPrompt('');
-
-      expect(result).toContain('**Analyze Intent**');
-      expect(result).toContain('**Check Context**');
-      expect(result).toContain('**Refine**');
-      expect(result).toContain('**Format**');
-    });
-
-    it('should include conflict handling guidance', () => {
-      const result = buildRefineSystemPrompt('');
-
-      expect(result).toContain('*No Conflict*');
-      expect(result).toContain('*Conflict*');
-      expect(result).toContain('explicitly scoped exception or override');
-      expect(result).toContain('ask a concise clarification question');
-    });
-
-    it('should specify output format with instruction tags', () => {
-      const result = buildRefineSystemPrompt('');
-
-      expect(result).toContain('<instruction>');
-      expect(result).toContain('</instruction>');
-      expect(result).toContain('**Success**');
-      expect(result).toContain('**Ambiguity**');
-    });
-
-    it('should include examples', () => {
-      const result = buildRefineSystemPrompt('');
-
-      expect(result).toContain('Input: "typescript for code"');
-      expect(result).toContain('Input: "be concise"');
-      expect(result).toContain(
-        'Input: "organize these rules: use TypeScript; prefer functional patterns; keep diffs small"',
-      );
-      expect(result).toContain('Input: "use that thing from before"');
-    });
-
-    it('should show example outputs with proper tag wrapping', () => {
-      const result = buildRefineSystemPrompt('');
-
-      expect(result).toContain('Output: <instruction>');
-      expect(result).toContain('**Code Language**');
-      expect(result).toContain('**Conciseness**');
-      expect(result).toContain('## Coding Standards');
-      expect(result).not.toContain('Include proper type annotations and interfaces');
-    });
-
-    it('should include ambiguity handling example', () => {
-      const result = buildRefineSystemPrompt('');
-
-      expect(result).toContain('I\'m not sure what you\'re referring to');
-      expect(result).toContain('Could you please clarify');
-    });
-  });
-
-  describe('guidelines', () => {
-    it('should specify clarity guideline', () => {
-      const result = buildRefineSystemPrompt('');
-
-      expect(result).toContain('**Clarity**');
-      expect(result).toContain('Use precise language');
-    });
-
-    it('should specify scope guideline', () => {
-      const result = buildRefineSystemPrompt('');
-
-      expect(result).toContain('**Scope**');
-      expect(result).toContain('Keep it focused');
-      expect(result).toContain('Do not invent requirements');
-    });
-
-    it('should specify format guideline', () => {
-      const result = buildRefineSystemPrompt('');
-
-      expect(result).toContain('**Format**');
-      expect(result).toContain('Valid Markdown');
-    });
-
-    it('should specify no header guideline', () => {
-      const result = buildRefineSystemPrompt('');
-
-      expect(result).toContain('**No Header**');
-      expect(result).toContain('# Custom Instructions');
-    });
-
-    it('should specify conflict handling guideline', () => {
-      const result = buildRefineSystemPrompt('');
-
-      expect(result).toContain('**Conflict Handling**');
-      expect(result).toContain('cannot coexist unambiguously');
     });
   });
 

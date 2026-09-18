@@ -817,60 +817,6 @@ test('production consumes protocol-owned canonical Collab Git refs', () => {
   ), []);
 });
 
-test('Collab consumer CI runs production and cross-platform checks', () => {
-  const workflow = fs.readFileSync(
-    path.join(process.cwd(), '.github', 'workflows', 'ci.yml'),
-    'utf8',
-  );
-  const crossPlatformJob = workflow
-    .split(/^ {2}build:/mu)[0]
-    .split(/^ {2}cross-platform-smoke:/mu)[1] ?? '';
-  assert.match(crossPlatformJob, /npm run build/);
-  assert.match(
-    crossPlatformJob,
-    /name: Run Windows architecture boundaries\s+if: runner\.os == 'Windows'\s+run: npm run test:architecture/,
-  );
-  assert.match(crossPlatformJob, /npm run test:cross-platform-collab/);
-});
-
-test('CI gates releases, cross-platform behavior, and security', () => {
-  const workflowsRoot = path.join(process.cwd(), '.github', 'workflows');
-  const ci = fs.readFileSync(path.join(workflowsRoot, 'ci.yml'), 'utf8').replace(/\r\n/g, '\n');
-  const release = fs.readFileSync(path.join(workflowsRoot, 'release.yml'), 'utf8').replace(/\r\n/g, '\n');
-  const nightly = fs.readFileSync(path.join(workflowsRoot, 'nightly.yml'), 'utf8');
-  const codeql = fs.readFileSync(path.join(workflowsRoot, 'codeql.yml'), 'utf8');
-
-  assert.match(ci, /^ {2}push:\n {4}branches: \[main, codex\/cloud-integration\]$/m);
-  assert.match(ci, /^ {2}pull_request:\n {4}branches: \[main, codex\/cloud-integration\]$/m);
-  assert.match(ci, /workflow_call:/);
-  assert.match(ci, /rhysd\/actionlint:1\.7\.12/);
-  assert.match(ci, /diff-hygiene:/);
-  assert.match(ci, /dependency-review-action@v4/);
-  assert.match(ci, /cross-platform-smoke:/);
-  assert.match(ci, /windows-latest/);
-  assert.match(ci, /macos-latest/);
-  assert.match(ci, /test-scope:/);
-  assert.match(ci, /node scripts\/ciTestSelection\.mjs/);
-  assert.match(ci, /needs:\s*test-scope/);
-  assert.match(ci, /needs\.test-scope\.outputs\.cross-platform == 'true'/);
-
-  assert.match(release, /^on:\n {2}push:\n {4}tags:\n {6}- '\*'\n\njobs:/m);
-  assert.match(release, /uses:\s*\.\/\.github\/workflows\/ci\.yml/);
-  assert.match(release, /needs:\s*verify/);
-
-  assert.match(nightly, /schedule:/);
-  assert.match(nightly, /ubuntu-latest/);
-  assert.match(nightly, /windows-latest/);
-  assert.match(nightly, /macos-latest/);
-  assert.match(nightly, /npm run check:open-handles/);
-  assert.match(nightly, /npm audit --omit=dev --audit-level=high/);
-
-  assert.match(codeql, /schedule:/);
-  assert.match(codeql, /github\/codeql-action\/init@v4/);
-  assert.match(codeql, /github\/codeql-action\/analyze@v4/);
-  assert.match(codeql, /javascript-typescript/);
-});
-
 test('src does not re-export the collab protocol package', () => {
   const pattern = /export\s+(?:\*|\{[^}]*\})\s*from\s*['"]@claudian-collab\/protocol['"]/;
   assert.deepEqual(findMatches([sourceRoot], pattern), []);

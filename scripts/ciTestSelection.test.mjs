@@ -4,62 +4,163 @@ import test from 'node:test';
 
 import { selectCiTests } from './ciTestSelection.mjs';
 
-const prompt = 'tests/unit/core/prompt/mainAgent.test.ts';
-const collab = 'tests/integration/app/collab/gates/ProjectUpdateMilestoneGate.test.ts';
-const select = (changes, relatedTests = [prompt], eventName = 'pull_request') =>
-  selectCiTests({ changes, relatedTests, eventName });
-
-test('prompt changes select consumers without unrelated Collab jobs', () => {
-  assert.deepEqual(select([{ status: 'M', path: 'src/core/prompt/mainAgent.ts' }]), {
-    testFiles: [prompt], lanCompatibility: false, crossPlatform: false,
-  });
+const prompt = 'tests/unit/core/prompt/mainAgent.systemPrompt.test.ts';
+const panel = 'tests/unit/features/collab/sidebar/CollabPanel.test.ts';
+const native = 'tests/integration/app/collab/git/GitRepositoryService.test.ts';
+const docs = 'tests/unit/docs/CollabDocumentation.test.ts';
+const select = (paths, relatedTests = [], eventName = 'pull_request') => selectCiTests({
+  changes: paths.map(path => typeof path === 'string' ? { status: 'M', path } : path),
+  relatedTests, eventName,
 });
 
-test('shared dependencies retain Collab consumers and platform checks', () => {
-  assert.deepEqual(select([{ status: 'M', path: 'src/utils/env.ts' }], [prompt, collab]), {
-    testFiles: [prompt, collab], lanCompatibility: true, crossPlatform: true,
-  });
+test('ordinary PRs and pushes select affected consumers', () => {
+  for (const event of ['pull_request', 'push']) {
+    const result = select(['src/core/prompt/mainAgent.ts'], [prompt], event);
+    assert.deepEqual(result.testFiles, [prompt]);
+    assert.deepEqual(result.crossPlatformTests, []);
+    assert.equal(result.lanCompatibility, false);
+  }
 });
 
-test('direct Collab and native process changes retain their extra checks', () => {
-  assert.equal(select([{ status: 'M', path: 'src/app/collab/lan/LanHostCoordinator.ts' }], []).lanCompatibility, true);
-  const pi = select([{ status: 'M', path: 'src/providers/pi/runtime/PiSubprocess.ts' }], []);
-  assert.equal(pi.crossPlatform, true);
-  assert.equal(pi.lanCompatibility, false);
+test('presentation changes do not trigger native or published LAN checks through main composition', () => {
+  const result = select(['src/features/collab/sidebar/CollabPanel.ts'], [panel, 'tests/integration/main.test.ts']);
+  assert.deepEqual(result.testFiles, [panel, 'tests/integration/main.test.ts']);
+  assert.deepEqual(result.crossPlatformTests, []);
+  assert.equal(result.lanCompatibility, false);
 });
 
-test('deletions, unrecognized changes, and global configuration run full verification', () => {
+test('shared dependencies retain affected native consumers and LAN checks', () => {
+  const result = select(['src/utils/env.ts'], [prompt, native]);
+  assert.deepEqual(result.testFiles, [prompt, native]);
+  assert.deepEqual(result.crossPlatformTests, [native]);
+  assert.equal(result.lanCompatibility, true);
+});
+
+test('changed tests run directly, while removed tests are omitted', () => {
+  const result = select([{ status: 'D', path: panel }, prompt], [panel]);
+  assert.deepEqual(result.testFiles, [prompt]);
+  assert.deepEqual(result.crossPlatformTests, []);
+});
+
+test('shared test helpers use their graph consumers', () => {
+  assert.deepEqual(select(['tests/helpers/collab/ProjectUpdateMilestoneFixture.ts'], [native]).testFiles, [native]);
+});
+
+test('filesystem-read documentation, styles, and captured fixtures retain their consumers', () => {
+  assert.deepEqual(select(['README.md']).testFiles, [docs]);
+  assert.deepEqual(select(['src/features/collab/AGENTS.md']).testFiles, [docs]);
+  assert.ok(select(['src/style/components/code.css']).testFiles.includes('tests/unit/style/components/code.test.ts'));
+  const fixture = select(['tests/fixtures/collab/authority-v12-inert.sqlite.gz']);
+  assert.ok(fixture.testFiles.includes('tests/unit/app/collab/authority/AuthorityEventRetention.test.ts'));
+  assert.ok(fixture.testFiles.includes('tests/unit/app/collab/host-transfer/HostTransferAuthoritySnapshot.test.ts'));
+  assert.equal(fixture.lanCompatibility, true);
+});
+
+test('native Pi launch runs only when affected', () => {
+  const pi = 'tests/integration/providers/pi/PiSubprocess.windows.test.ts';
+  assert.equal(select(['src/providers/pi/runtime/PiSubprocess.ts'], [pi]).piWindows, true);
+  assert.equal(select(['src/features/collab/sidebar/CollabPanel.ts'], [panel]).piWindows, false);
+});
+
+test('script edits select their script tests without unrelated Jest work', () => {
+  const result = select(['scripts/summarize-jest-results.mjs']);
+  assert.deepEqual(result.testFiles, []);
+  assert.deepEqual(result.scriptTests, ['scripts/summarize-jest-results.test.mjs']);
+  assert.equal(result.crossPlatform, false);
+});
+
+test('unsafe deletions and global or unknown changes retain full verification', () => {
   for (const change of [
     { status: 'D', path: 'src/core/prompt/mainAgent.ts' },
-    { status: 'M', path: 'package-lock.json' },
-    { status: 'M', path: 'jest.config.js' },
-    { status: 'M', path: 'tests/setupWindow.ts' },
-    { status: 'M', path: 'scripts/ciTestSelection.mjs' },
-    { status: 'M', path: '.github/workflows/ci.yml' },
-    { status: 'M', path: 'src/style/main.css' },
-    { status: 'M', path: 'unknown-config' },
+    { status: 'D', path: 'tests/helpers/installations.ts' },
+    ...['package-lock.json', 'jest.config.js', 'tests/setupWindow.ts',
+      'scripts/ciTestSelection.mjs', '.github/workflows/ci.yml', 'unknown-config'].map(path => ({ status: 'M', path })),
   ]) {
-    assert.deepEqual(select([change]), { testFiles: null, lanCompatibility: true, crossPlatform: true });
+    const result = select([change]);
+    assert.equal(result.testFiles, null);
+    assert.equal(result.crossPlatformTests, null);
+    assert.equal(result.scriptTests, null);
+    assert.equal(result.lanCompatibility, true);
+    assert.equal(result.piWindows, true);
   }
 });
 
-test('main, release, and reusable workflow runs retain full coverage', () => {
-  for (const eventName of ['push', 'workflow_call', 'schedule']) {
-    assert.deepEqual(select([], [], eventName), { testFiles: null, lanCompatibility: true, crossPlatform: true });
+test('scheduled and reusable verification retain full coverage', () => {
+  for (const event of ['workflow_call', 'schedule', 'workflow_dispatch']) {
+    assert.equal(select([], [], event).testFiles, null);
   }
 });
 
-test('documentation-only changes have no Jest or platform work', () => {
-  assert.deepEqual(select([{ status: 'M', path: 'README.md' }], []), {
-    testFiles: [], lanCompatibility: false, crossPlatform: false,
-  });
-});
-
-test('real prompt dependency graph includes prompt and provider coverage without Collab suites', () => {
+test('real dependency graph preserves prompt and provider coverage without Collab suites', () => {
   const relatedTests = JSON.parse(execFileSync(process.execPath, [
     'scripts/run-jest.js', '--listTests', '--json', '--findRelatedTests', 'src/core/prompt/mainAgent.ts',
   ], { encoding: 'utf8' }));
-  assert.ok(relatedTests.some(file => file.endsWith('/core/prompt/mainAgent.test.ts')));
+  assert.ok(relatedTests.some(file => file.endsWith('/core/prompt/mainAgent.systemPrompt.test.ts')));
   assert.ok(relatedTests.some(file => file.includes('/providers/')));
   assert.equal(relatedTests.some(file => /collab/i.test(file)), false);
+});
+
+test('the CI entry point handles real Git ranges, renames, missing bases and release tags', async () => {
+  const { copyFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const path = await import('node:path');
+  const root = mkdtempSync(path.join(tmpdir(), 'claudian-ci-scope-'));
+  try {
+    for (const directory of ['scripts', 'src', 'tests/unit']) mkdirSync(path.join(root, directory), { recursive: true });
+    for (const file of ['ciTestSelection.mjs', 'testSuites.cjs']) copyFileSync(`scripts/${file}`, path.join(root, 'scripts', file));
+    writeFileSync(path.join(root, 'scripts/run-jest.js'), `require(${JSON.stringify(path.resolve('scripts/run-jest.js'))});`);
+    writeFileSync(path.join(root, 'jest.config.js'), `module.exports = { testMatch: ['<rootDir>/tests/unit/**/*.test.ts'] };`);
+    writeFileSync(path.join(root, 'src/value.ts'), 'export const value = 1;');
+    writeFileSync(path.join(root, 'tests/unit/value.test.ts'), "import { value } from '../../src/value'; test('value', () => expect(value).toBe(1));");
+    const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    git('init');
+    git('config', 'user.name', 'CI fixture');
+    git('config', 'user.email', 'ci@example.test');
+    git('config', 'commit.gpgsign', 'false');
+    git('add', '.');
+    git('commit', '-m', 'Initial fixture');
+    const base = git('rev-parse', 'HEAD');
+    const scope = (head, overrides = {}) => {
+      const output = execFileSync(process.execPath, ['scripts/ciTestSelection.mjs'], {
+        cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, GITHUB_OUTPUT: '', GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/main',
+          BASE_SHA: base, HEAD_SHA: head, ...overrides },
+      });
+      return Object.fromEntries(output.trim().split('\n').map(line => {
+        const index = line.indexOf('=');
+        return [line.slice(0, index), JSON.parse(line.slice(index + 1))];
+      }));
+    };
+    writeFileSync(path.join(root, 'src/value.ts'), 'export const value = 2;');
+    git('add', '.'); git('commit', '-m', 'Edit source');
+    const edited = git('rev-parse', 'HEAD');
+    assert.deepEqual(scope(edited)['test-files'], ['tests/unit/value.test.ts']);
+    assert.deepEqual(scope(edited, { GITHUB_EVENT_NAME: 'pull_request' })['test-files'], ['tests/unit/value.test.ts']);
+    renameSync(path.join(root, 'tests/unit/value.test.ts'), path.join(root, 'tests/unit/renamed.test.ts'));
+    git('add', '.'); git('commit', '-m', 'Rename test');
+    const renamed = git('rev-parse', 'HEAD');
+    assert.deepEqual(scope(renamed, { BASE_SHA: edited })['test-files'], ['tests/unit/renamed.test.ts']);
+    rmSync(path.join(root, 'tests/unit/renamed.test.ts'));
+    git('add', '.'); git('commit', '-m', 'Delete test');
+    const deleted = git('rev-parse', 'HEAD');
+    assert.deepEqual(scope(deleted, { BASE_SHA: renamed })['test-files'], []);
+    for (const overrides of [
+      { BASE_SHA: 'f'.repeat(40) }, { BASE_SHA: '0'.repeat(40) }, { BASE_SHA: '' },
+      { GITHUB_REF: 'refs/tags/2.3.0' },
+    ]) assert.equal(scope(deleted, overrides)['test-files'], null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('esbuild entry points and their transitive consumers retain the dependency envelope', () => {
+  const envelope = 'tests/integration/build/collab-dependency-envelope.test.ts';
+  for (const owner of [
+    'app/collab/lan/LanTlsIdentity',
+    'features/collab/detail/review/CollabDiffRenderer',
+    'features/collab/shared/markdown/MarkdownDraftEditor',
+  ]) {
+    assert.ok(select([`src/${owner}.ts`]).testFiles.includes(envelope));
+    assert.ok(select(['src/utils/path.ts'], [`tests/unit/${owner}.test.ts`]).testFiles.includes(envelope));
+  }
 });
