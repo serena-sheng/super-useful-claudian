@@ -38,6 +38,7 @@ export function renderCliInstallationSetting(
   let disabled = options.disabled ?? false;
   let saving = false;
   let generation = 0;
+  options.container.classList.add('claudian-cli-installation-container');
   const card = options.container.createDiv({ cls: 'claudian-cli-installation' });
   const heading = card.createDiv({ cls: 'claudian-cli-installation-heading' });
   const header = heading.createEl('button', {

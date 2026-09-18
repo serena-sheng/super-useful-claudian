@@ -172,6 +172,10 @@ export class ClaudianSettingTab extends PluginSettingTab {
     this.agentSkillCoordinator.resetSubscriptions();
     containerEl.empty();
     containerEl.addClass('claudian-settings');
+    const settingItems = containerEl.parentElement;
+    if (settingItems?.classList.contains('setting-items')) {
+      settingItems.classList.add('claudian-settings-items');
+    }
     this.refreshTitleModelOptions = null;
 
     setLocale(this.plugin.settings.locale as Locale);
@@ -326,6 +330,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
 
     return () => {
       if (renderGeneration !== this.renderGeneration) return;
+      settingItems?.classList.remove('claudian-settings-items');
       this.renderGeneration += 1;
       this.agentSkillCoordinator.resetSubscriptions();
       this.refreshTitleModelOptions = null;
@@ -563,6 +568,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
     new Setting(container)
       .setName(t('settings.systemPrompt.name'))
       .setDesc(t('settings.systemPrompt.desc'))
+      .setClass('claudian-settings-textarea')
       .addTextArea((text) => {
         text
           .setPlaceholder(t('settings.systemPrompt.name'))
@@ -582,6 +588,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
     new Setting(container)
       .setName(t('settings.excludedTags.name'))
       .setDesc(t('settings.excludedTags.desc'))
+      .setClass('claudian-settings-textarea')
       .addTextArea((text) => {
         text
           .setPlaceholder('System\nprivate\ndraft')
@@ -636,6 +643,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
     new Setting(container)
       .setName(t('settings.navMappings.name'))
       .setDesc(t('settings.navMappings.desc'))
+      .setClass('claudian-settings-textarea')
       .addTextArea((text) => {
         let pendingValue = buildNavMappingText(this.plugin.settings.keyboardNavigation);
         let saveTimeout: number | null = null;
@@ -876,6 +884,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
     new Setting(container)
       .setName(copy.name)
       .setDesc(copy.desc)
+      .setClass('claudian-settings-textarea')
       .addTextArea((text) => {
         text
           .setPlaceholder(copy.placeholder)
