@@ -77,7 +77,7 @@
 }
 
 /* Settings page - remove separator lines from setting items */
-.setting-group > .setting-items:has(> .claudian-settings) {
+.setting-group > .setting-items.claudian-settings-items {
   background: transparent;
 }
 

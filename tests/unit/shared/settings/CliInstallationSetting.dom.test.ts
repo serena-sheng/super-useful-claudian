@@ -12,6 +12,7 @@ jest.mock('obsidian', () => {
       this.descEl = this.settingEl.createDiv();
     }
     setName() { return this; }
+    setClass(value: string) { this.settingEl.classList.add(value); return this; }
     addToggle(callback: (toggle: unknown) => void) {
       const toggleEl = this.settingEl.createEl('input', { attr: { type: 'checkbox', role: 'switch' } });
       const toggle = {

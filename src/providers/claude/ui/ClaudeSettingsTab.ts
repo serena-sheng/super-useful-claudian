@@ -180,6 +180,7 @@ export const claudeSettingsTabRenderer: ProviderSettingsTabRenderer = {
     new Setting(container)
       .setName(t('settings.customModels.name'))
       .setDesc(t('settings.customModels.desc'))
+      .setClass('claudian-settings-textarea')
       .addTextArea((text) => {
         let pendingCustomModels = claudeSettings.customModels;
         let savedCustomModels = claudeSettings.customModels;

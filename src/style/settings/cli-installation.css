@@ -172,7 +172,10 @@
 }
 
 .claudian-cli-installation-body .setting-item {
-  display: contents;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 0;
 }
 
 .claudian-cli-installation-body .setting-item-info {

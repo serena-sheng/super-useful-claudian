@@ -59,6 +59,7 @@ export function renderEnvironmentSettingsSection(
   new Setting(container)
     .setName(name)
     .setDesc(desc)
+    .setClass('claudian-settings-textarea')
     .addTextArea((text) => {
       text
         .setPlaceholder(placeholder)

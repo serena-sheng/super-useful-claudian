@@ -235,16 +235,16 @@
   }
 }
 
-.claudian-settings .setting-item:has(textarea) {
+.claudian-settings .setting-item.claudian-settings-textarea {
   flex-direction: column;
   align-items: stretch;
 }
 
-.claudian-settings .setting-item:has(textarea) .setting-item-info {
+.claudian-settings .setting-item.claudian-settings-textarea .setting-item-info {
   margin-inline-end: 0;
 }
 
-.claudian-settings .setting-item:has(textarea) .setting-item-control {
+.claudian-settings .setting-item.claudian-settings-textarea .setting-item-control {
   width: 100%;
 }
 
@@ -270,7 +270,7 @@
 }
 
 /* Installation cards stand on their own above the named provider groups. */
-.claudian-settings .claudian-settings-provider-content > div:has(> .claudian-cli-installation) {
+.claudian-settings .claudian-settings-provider-content > .claudian-cli-installation-container {
   margin-bottom: var(--size-4-5);
 }
 
