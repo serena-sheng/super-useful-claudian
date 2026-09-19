@@ -4,9 +4,8 @@ import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import type { App, Component, Editor, MarkdownView } from 'obsidian';
 import { Notice } from 'obsidian';
 
+import { createCatalogCommandDiscoveryStore } from '../../../core/providers/commands/catalogCommandDiscovery';
 import { getHiddenProviderCommandSet } from '../../../core/providers/commands/hiddenCommands';
-import { normalizeProviderCommandDiscoveryItems } from '../../../core/providers/commands/ProviderCommandDiscoveryResult';
-import { ProviderCommandDiscoveryStore } from '../../../core/providers/commands/ProviderCommandDiscoveryStore';
 import { resolveConversationModel } from '../../../core/providers/conversationModel';
 import { ProviderRegistry } from '../../../core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '../../../core/providers/ProviderWorkspaceRegistry';
@@ -581,11 +580,7 @@ export class InlineEditSession {
     if (this.generating) this.spinnerEl.removeClass('claudian-hidden');
 
     const inlineCatalog = ProviderWorkspaceRegistry.getCommandCatalog(this.resolvedProviderId);
-    const discovery = inlineCatalog ? new ProviderCommandDiscoveryStore(async signal =>
-      normalizeProviderCommandDiscoveryItems(
-        await inlineCatalog.listDropdownEntries({ includeBuiltIns: false, signal }),
-      ),
-    ) : null;
+    const discovery = inlineCatalog ? createCatalogCommandDiscoveryStore(inlineCatalog) : null;
     const slashSource = new SlashCommandSource({
       includeBuiltIns: false,
       providerId: this.resolvedProviderId,
