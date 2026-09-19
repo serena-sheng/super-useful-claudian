@@ -1,6 +1,6 @@
-import type { AgentDefinition } from '../core/types';
-import { validateSlugName } from './frontmatter';
-import { yamlString } from './slashCommand';
+import { validateSlugName } from '../../../utils/frontmatter';
+import { yamlString } from '../../../utils/slashCommand';
+import type { AgentDefinition } from '../types/agent';
 
 export function validateAgentName(name: string): string | null {
   return validateSlugName(name, 'Agent');
@@ -17,14 +17,14 @@ function pushYamlList(lines: string[], key: string, items?: string[]): void {
 export function serializeAgent(agent: AgentDefinition): string {
   const lines: string[] = ['---'];
 
-  lines.push(`name: ${agent.name}`);
+  lines.push(`name: ${JSON.stringify(agent.name)}`);
   lines.push(`description: ${yamlString(agent.description)}`);
 
   pushYamlList(lines, 'tools', agent.tools);
   pushYamlList(lines, 'disallowedTools', agent.disallowedTools);
 
   if (agent.model && agent.model !== 'inherit') {
-    lines.push(`model: ${agent.model}`);
+    lines.push(`model: ${yamlString(agent.model)}`);
   }
 
   if (agent.permissionMode) {

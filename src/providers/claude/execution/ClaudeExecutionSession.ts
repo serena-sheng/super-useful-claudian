@@ -70,7 +70,7 @@ interface BackgroundTurn {
 
 type ClaudeExecutionSessionServices = Pick<
   ClaudeWorkspaceServices,
-  'agentManager' | 'commandCatalog' | 'pluginManager'
+  'agentManager'
 >;
 
 export class ClaudeExecutionSession
@@ -102,7 +102,8 @@ ClaudeExecutionStrategySink {
   private backgroundCounter = 0;
   private sessionSequence = 0;
   private queryToken = 0;
-  private latestCommandQueryToken = -1;
+  private commandPublication = 0;
+  private commandSnapshot: SlashCommand[] | undefined;
   private disposed = false;
   private readonly suppressedPersistentQueryTokens = new Set<number>();
   private readonly suppressedEphemeralQueryTokens = new Set<number>();
@@ -145,7 +146,6 @@ ClaudeExecutionStrategySink {
       ?? forkSource?.resumeAt;
     this.encoder = new ClaudeExecutionRequestEncoder({
       host,
-      pluginManager: services.pluginManager,
     });
     this.interactionHandler = new ClaudeInteractionHandler({
       interactionPort: config.interactionPort,
@@ -620,21 +620,27 @@ ClaudeExecutionStrategySink {
     }
   }
 
-  publishCommands(query: Query, queryToken: number): void {
-    this.latestCommandQueryToken = queryToken;
-    void query.supportedCommands()
-      .then((commands) => {
-        if (
-          this.disposed
-          || this.latestCommandQueryToken !== queryToken
-        ) {
-          return;
-        }
-        this.services.commandCatalog.setCommandSnapshot(
-          commands.map(mapSdkCommand),
-        );
-      })
-      .catch(() => undefined);
+  getCommandSnapshot(): readonly SlashCommand[] | undefined {
+    return this.commandSnapshot?.map(command => ({ ...command }));
+  }
+
+  publishCommands(query: Query, commands?: Awaited<ReturnType<Query['supportedCommands']>>): void {
+    if (this.disposed || this.nativeQuery !== query) return;
+    const publication = ++this.commandPublication;
+    const publish = (snapshot: Awaited<ReturnType<Query['supportedCommands']>>) => {
+      if (
+        this.disposed
+        || this.nativeQuery !== query
+        || this.commandPublication !== publication
+      ) return;
+      this.commandSnapshot = snapshot.map(mapSdkCommand);
+      this.#emitSession({ type: 'commands_changed' });
+    };
+    if (commands !== undefined) {
+      publish(commands);
+    } else {
+      void query.supportedCommands().then(publish).catch(() => undefined);
+    }
   }
 
   releaseNativeTurnFence(queryToken: number): void {
@@ -644,12 +650,15 @@ ClaudeExecutionStrategySink {
   handleNativeQueryOpened(query: Query): void {
     if (this.nativeQuery === query) return;
     this.nativeQuery = query;
+    this.commandSnapshot = undefined;
     this.authoritativeContextWindow = null;
   }
 
   handleNativeQueryClosed(query: Query): void {
     if (this.nativeQuery !== query) return;
     this.nativeQuery = null;
+    this.commandSnapshot = undefined;
+    this.#emitSession({ type: 'commands_changed' });
     this.authoritativeContextWindow = null;
   }
 

@@ -103,22 +103,13 @@ function createHost(): ProviderHost {
 
 function createServices(): {
   services: ClaudeWorkspaceServices;
-  commandCatalog: { setCommandSnapshot: jest.Mock };
 } {
-  const commandCatalog = {
-    setCommandSnapshot: jest.fn(),
-  };
   return {
-    commandCatalog,
     services: {
-      pluginManager: {
-        getPluginsKey: jest.fn().mockReturnValue(''),
-      },
       agentManager: {
         setBuiltinAgentNames: jest.fn(),
       },
-      commandCatalog,
-    } as unknown as ClaudeWorkspaceServices,
+      } as unknown as ClaudeWorkspaceServices,
   };
 }
 
@@ -230,6 +221,44 @@ describe('ClaudeExecutionBackend', () => {
     }));
   });
 
+  it.each(['persistent', 'ephemeral'] as const)(
+    'keeps pushed commands over delayed initialization metadata in a %s session',
+    async (lifecycle) => {
+      const metadata = createDeferred<sdkModule.SlashCommand[]>();
+      const finish = createDeferred<unknown>();
+      const query = createScriptedPersistentQuery([[
+        { type: 'system', subtype: 'init', session_id: 'session-1' },
+        {
+          type: 'system', subtype: 'commands_changed',
+          commands: [{ name: 'new-command', description: 'New command', argumentHint: '' }],
+        },
+        finish.promise,
+      ]]);
+      query.supportedCommands.mockReturnValue(metadata.promise);
+      jest.spyOn(await import('@/providers/claude/loadClaudeAgentSdk'), 'loadClaudeAgentQuery')
+        .mockResolvedValueOnce((() => query) as unknown as typeof sdkModule.query);
+      const host = createHost();
+      const { services } = createServices();
+      const session = new ClaudeExecutionBackend(host, services)
+        .createSession(createConfig({ lifecycle }));
+      const events = collectEvents(session.execute(createRequest()).events);
+      try {
+        await waitFor(() => query.supportedCommands.mock.calls.length > 0);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(session.getCommandSnapshot())
+          .toEqual([expect.objectContaining({ name: 'new-command' })]);
+        metadata.resolve([{ name: 'old-command', description: 'Old command', argumentHint: '' }]);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(session.getCommandSnapshot())
+          .toEqual([expect.objectContaining({ name: 'new-command' })]);
+      } finally {
+        finish.resolve({ type: 'result', subtype: 'success' });
+        await events;
+        await session.dispose();
+      }
+    },
+  );
+
   it('creates a persistent session that normalizes SDK output and publishes commands', async () => {
     sdkMock.setMockSupportedCommands([
       { name: 'review', description: 'Review changes', argumentHint: '[path]' },
@@ -258,10 +287,14 @@ describe('ClaudeExecutionBackend', () => {
       },
       { type: 'result', subtype: 'success' },
     ], { appendResult: false });
-    const { services, commandCatalog } = createServices();
+    const { services } = createServices();
     const session = new ClaudeExecutionBackend(createHost(), services)
       .createSession(createConfig());
 
+    const commandSnapshots: unknown[] = [];
+    session.onEvent(event => {
+      if (event.type === 'commands_changed') commandSnapshots.push(session.getCommandSnapshot());
+    });
     const run = session.execute(createRequest());
     const events = await collectEvents(run.events);
 
@@ -305,7 +338,7 @@ describe('ClaudeExecutionBackend', () => {
     }));
     expect(session.getSnapshot().providerStateDeletes).toBeUndefined();
     await Promise.resolve();
-    expect(commandCatalog.setCommandSnapshot).toHaveBeenCalledWith([
+    expect(commandSnapshots).toContainEqual([
       {
         id: 'sdk:review',
         name: 'review',
@@ -623,7 +656,7 @@ describe('ClaudeExecutionBackend', () => {
       },
     })).events);
 
-    expect(sdkMock.getLastResponse()?.getContextUsage).toHaveBeenCalledTimes(1);
+    expect(sdkMock.getLastResponse()?.getContextUsage).toHaveBeenCalledWith({ detail: 'summary' });
     const usageEvents = events.filter((event) => event.type === 'usage_updated');
     expect(usageEvents.at(-1)).toEqual(expect.objectContaining({
       type: 'usage_updated',

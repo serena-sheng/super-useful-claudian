@@ -11,7 +11,6 @@ import type {
 import { buildSystemPrompt } from '../../../core/prompt/mainAgent';
 import type { ProviderHost } from '../../../core/providers/ProviderHost';
 import { ProviderSettingsCoordinator } from '../../../core/providers/ProviderSettingsCoordinator';
-import type { AppPluginManager } from '../../../core/providers/types';
 import {
   isReadOnlyTool,
   READ_ONLY_TOOLS,
@@ -30,13 +29,13 @@ import {
 import { appendEditorContext } from '../../../utils/editor';
 import {
   getEnhancedPath,
-  getMissingNodeError,
   parseEnvironmentVariables,
 } from '../../../utils/env';
 import {
   buildContextFromHistory,
   buildPromptWithHistoryContext,
 } from '../../../utils/session';
+import { getMissingNodeError } from '../cli/claudeLaunchValidation';
 import { toClaudeRuntimeModelId } from '../modelSelection';
 import { createCustomSpawnFunction } from '../runtime/customSpawn';
 import {
@@ -90,7 +89,6 @@ export interface ClaudeEncodedExecutionRequest {
 
 export interface ClaudeExecutionRequestEncoderDeps {
   readonly host: ProviderHost;
-  readonly pluginManager: AppPluginManager;
 }
 
 export class ClaudeExecutionRequestEncoder {

@@ -1,18 +1,10 @@
-/**
- * Agent load order (earlier sources take precedence for duplicate IDs):
- * 0. Built-in agents: dynamically provided via SDK init message
- * 1. Plugin agents: {installPath}/agents/*.md (namespaced as plugin-name:agent-name)
- * 2. Vault agents: {vaultPath}/.claude/agents/*.md
- * 3. Global agents: {CLAUDE_CONFIG_DIR}/agents/*.md
- */
-
 import { promises as fs } from 'fs';
 import * as path from 'path';
 
-import type { AgentDefinition, AgentFrontmatter } from '../../../core/types';
 import { mapWithConcurrency } from '../../../utils/concurrency';
 import { resolveClaudeConfigDir } from '../config/ClaudeConfigDir';
-import type { PluginManager } from '../plugins/PluginManager';
+import type { ClaudePluginDiscovery } from '../plugins/ClaudePluginDiscovery';
+import type { AgentDefinition, AgentFrontmatter } from '../types/agent';
 import { buildAgentFromFrontmatter, parseAgentFile } from './AgentStorage';
 
 const VAULT_AGENTS_DIR = '.claude/agents';
@@ -47,17 +39,17 @@ export class AgentManager {
   private agents: AgentDefinition[] = FALLBACK_BUILTIN_AGENT_NAMES.map(makeBuiltinAgent);
   private builtinAgentNames: string[] = FALLBACK_BUILTIN_AGENT_NAMES;
   private vaultPath: string;
-  private pluginManager: PluginManager;
+  private pluginDiscovery: ClaudePluginDiscovery;
   private resolveConfigDir: () => string;
   private loadPromise: Promise<void> | null = null;
 
   constructor(
     vaultPath: string,
-    pluginManager: PluginManager,
+    pluginDiscovery: ClaudePluginDiscovery,
     configDir: string | (() => string) = () => resolveClaudeConfigDir(),
   ) {
     this.vaultPath = vaultPath;
-    this.pluginManager = pluginManager;
+    this.pluginDiscovery = pluginDiscovery;
     this.resolveConfigDir = typeof configDir === 'function' ? configDir : () => configDir;
   }
 
@@ -93,13 +85,12 @@ export class AgentManager {
   async #loadAgentsInternal(): Promise<void> {
     this.agents = [];
 
+    try { await this.#loadVaultAgents(); } catch { /* non-critical */ }
+    try { await this.#loadGlobalAgents(); } catch { /* non-critical */ }
+    try { await this.#loadPluginAgents(); } catch { /* non-critical */ }
     for (const name of this.builtinAgentNames) {
       this.#addAgent(makeBuiltinAgent(name));
     }
-
-    try { await this.#loadPluginAgents(); } catch { /* non-critical */ }
-    try { await this.#loadVaultAgents(); } catch { /* non-critical */ }
-    try { await this.#loadGlobalAgents(); } catch { /* non-critical */ }
   }
 
   getAvailableAgents(): AgentDefinition[] {
@@ -107,13 +98,13 @@ export class AgentManager {
   }
 
   async #loadPluginAgents(): Promise<void> {
-    for (const plugin of this.pluginManager.getPlugins()) {
+    for (const plugin of this.pluginDiscovery.getPlugins()) {
       if (!plugin.enabled) continue;
 
       const agentsDir = path.join(plugin.installPath, PLUGIN_AGENTS_DIR);
       await this.#loadAgentsFromFiles(
         await this.#listMarkdownFiles(agentsDir),
-        (filePath) => this.#parsePluginAgentFromFile(filePath, plugin.name),
+        (filePath) => this.#parsePluginAgentFromFile(filePath, plugin.name, agentsDir),
       );
     }
   }
@@ -139,9 +130,13 @@ export class AgentManager {
   async #listMarkdownFiles(dir: string): Promise<string[]> {
     try {
       const entries = await fs.readdir(dir, { withFileTypes: true });
-      return entries
-        .filter(entry => entry.isFile() && entry.name.endsWith('.md'))
-        .map(entry => path.join(dir, entry.name));
+      const files: string[] = [];
+      for (const entry of entries) {
+        const entryPath = path.join(dir, entry.name);
+        if (entry.isFile() && entry.name.endsWith('.md')) files.push(entryPath);
+        else if (entry.isDirectory()) files.push(...await this.#listMarkdownFiles(entryPath));
+      }
+      return files;
     } catch {
       return [];
     }
@@ -149,11 +144,12 @@ export class AgentManager {
 
   async #parsePluginAgentFromFile(
     filePath: string,
-    pluginName: string
+    pluginName: string,
+    agentsDir: string,
   ): Promise<AgentDefinition | null> {
     return this.#parseAgentDefinition(
       filePath,
-      (agentName) => `${normalizePluginName(pluginName)}:${agentName}`,
+      (agentName) => [normalizePluginName(pluginName), ...path.relative(agentsDir, path.dirname(filePath)).split(path.sep).filter(Boolean), agentName].join(':'),
       (frontmatter, body, id) => buildAgentFromFrontmatter(frontmatter, body, {
         id,
         source: 'plugin',
@@ -196,7 +192,11 @@ export class AgentManager {
     if (!agent) {
       return;
     }
-    if (this.agents.some(existing => existing.id === agent.id)) {
+    const existingIndex = this.agents.findIndex(existing => existing.id === agent.id);
+    if (existingIndex !== -1) {
+      if (this.agents[existingIndex].source === 'builtin' && agent.source !== 'builtin') {
+        this.agents[existingIndex] = agent;
+      }
       return;
     }
     this.agents.push(agent);

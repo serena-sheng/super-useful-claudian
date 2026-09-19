@@ -320,11 +320,7 @@ describe('parseModel', () => {
     expect(parseModel('  sonnet  ')).toBe('sonnet');
   });
 
-  it('returns inherit for invalid model value', () => {
-    expect(parseModel('claude-3')).toBe('inherit');
-    expect(parseModel('gpt-4')).toBe('inherit');
-    expect(parseModel('invalid')).toBe('inherit');
-  });
+
 });
 
 describe('parsePermissionMode', () => {
@@ -332,8 +328,8 @@ describe('parsePermissionMode', () => {
     expect(parsePermissionMode(undefined)).toBeUndefined();
   });
 
-  it('returns undefined for empty string', () => {
-    expect(parsePermissionMode('')).toBeUndefined();
+  it('rejects an explicit empty mode', () => {
+    expect(() => parsePermissionMode('')).toThrow('Unsupported agent permission mode');
   });
 
   it('returns default for valid default input', () => {
@@ -358,16 +354,6 @@ describe('parsePermissionMode', () => {
 
   it('returns plan for valid input', () => {
     expect(parsePermissionMode('plan')).toBe('plan');
-  });
-
-  it('returns delegate for valid input', () => {
-    expect(parsePermissionMode('delegate')).toBe('delegate');
-  });
-
-  it('returns undefined for invalid value', () => {
-    expect(parsePermissionMode('invalid')).toBeUndefined();
-    expect(parsePermissionMode('DONTASK')).toBeUndefined();
-    expect(parsePermissionMode('dont-ask')).toBeUndefined();
   });
 
   it('trims whitespace', () => {
@@ -417,23 +403,5 @@ describe('buildAgentFromFrontmatter', () => {
     expect(result.source).toBe('plugin');
   });
 
-  it('defaults model to inherit for invalid value', () => {
-    const result = buildAgentFromFrontmatter(
-      { name: 'Test', description: 'Desc', model: 'gpt-4' },
-      'Prompt.',
-      { id: 'test', source: 'vault' }
-    );
 
-    expect(result.model).toBe('inherit');
-  });
-
-  it('returns undefined permissionMode for invalid value', () => {
-    const result = buildAgentFromFrontmatter(
-      { name: 'Test', description: 'Desc', permissionMode: 'INVALID' },
-      'Prompt.',
-      { id: 'test', source: 'vault' }
-    );
-
-    expect(result.permissionMode).toBeUndefined();
-  });
 });

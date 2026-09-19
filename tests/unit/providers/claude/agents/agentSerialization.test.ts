@@ -1,6 +1,6 @@
-import type { AgentDefinition } from '@/core/types';
+import { serializeAgent, validateAgentName } from '@/providers/claude/agents/agentSerialization';
 import { buildAgentFromFrontmatter, parseAgentFile } from '@/providers/claude/agents/AgentStorage';
-import { serializeAgent, validateAgentName } from '@/utils/agent';
+import type { AgentDefinition } from '@/providers/claude/types/agent';
 
 describe('validateAgentName', () => {
   it('returns null for valid name', () => {
@@ -75,7 +75,7 @@ describe('serializeAgent', () => {
   it('serializes minimal agent', () => {
     const result = serializeAgent(baseAgent);
     expect(result).toBe(
-      '---\nname: test-agent\ndescription: A test agent\n---\nYou are a test agent.'
+      '---\nname: "test-agent"\ndescription: A test agent\n---\nYou are a test agent.'
     );
   });
 
@@ -180,7 +180,7 @@ describe('serializeAgent', () => {
       skills: ['review'],
     };
     const result = serializeAgent(agent);
-    expect(result).toContain('name: test-agent');
+    expect(result).toContain('name: "test-agent"');
     expect(result).toContain('description: A test agent');
     expect(result).toContain('tools:\n  - Read');
     expect(result).toContain('disallowedTools:\n  - Bash');
