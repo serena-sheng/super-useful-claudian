@@ -29,6 +29,7 @@ function isVisibleAutoTurnChunk(chunk: StreamChunk, hiddenToolIds: Set<string>):
     case 'error':
     case 'tool_output':
     case 'context_compacted':
+    case 'task_notification':
     case 'subagent_tool_use':
     case 'subagent_tool_result':
       return true;
@@ -74,6 +75,7 @@ export async function renderAutoTriggeredTurn(
   const assistantMessage: ChatMessage = {
     id: metadata.assistantMessageId ?? host.createMessageId(),
     role: 'assistant',
+    isAutomaticResponse: true,
     content: '',
     timestamp: Date.now(),
     completedAt: Date.now(),
