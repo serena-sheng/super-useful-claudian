@@ -123,6 +123,7 @@ export class StreamController {
   private viewportVisible = true;
   private pendingToolOutputFrames = new Map<string, ScheduledAnimationFrame>();
   private pendingScrollFrame: ScheduledAnimationFrame | null = null;
+  private readonly managedSubagentIds = new Set<string>();
 
   // Provider lifecycle agent tracking (spawn → wait/close lifecycle)
   private lifecycleSubagentStates = new Map<string, SubagentState | AsyncSubagentState>(); // spawn callId → rendered state
@@ -136,6 +137,14 @@ export class StreamController {
     this.thinkingRenderCoordinator = this.#createRenderCoordinator(
       () => this.#getThinkingRenderWindow()
     );
+  }
+
+  /** Share provider/subagent ownership, but isolate a background response's render buffers. */
+  createBackgroundStream(state: ChatState): StreamController {
+    const stream = new StreamController({ ...this.deps, state });
+    stream.tabActive = this.tabActive;
+    stream.viewportVisible = this.viewportVisible;
+    return stream;
   }
 
   #createRenderCoordinator(
@@ -181,6 +190,14 @@ export class StreamController {
 
   async handleStreamChunk(chunk: StreamChunk, msg: ChatMessage): Promise<void> {
     const { state } = this.deps;
+    const responseMessage = msg;
+    // A notification may split display messages while tools from the earlier segment still run.
+    const ownerToolId = chunk.type === 'subagent_tool_use' || chunk.type === 'subagent_tool_result'
+      ? chunk.subagentId
+      : chunk.type === 'tool_use' || chunk.type === 'tool_result' || chunk.type === 'tool_output' ? chunk.id : undefined;
+    if (ownerToolId && !msg.toolCalls?.some(tool => tool.id === ownerToolId)) {
+      msg = [...state.messages].reverse().find(message => message.toolCalls?.some(tool => tool.id === ownerToolId)) ?? msg;
+    }
 
     switch (chunk.type) {
       case 'thinking':
@@ -218,9 +235,9 @@ export class StreamController {
 
       case 'tool_use': {
         if (state.currentThinkingState) {
-          await this.finalizeCurrentThinkingBlock(msg);
+          await this.finalizeCurrentThinkingBlock(responseMessage);
         }
-        await this.finalizeCurrentTextBlock(msg);
+        await this.finalizeCurrentTextBlock(responseMessage);
 
         const subagentAdapter = this.getSubagentAdapter(chunk.name);
         if (subagentAdapter?.protocol === 'managed-agent') {
@@ -1172,15 +1189,21 @@ export class StreamController {
   // Subagent Tool Handling (via SubagentManager)
   // ============================================
 
+  #getMessageContentEl(message: ChatMessage): HTMLElement | null {
+    return this.deps.getMessagesEl().querySelector<HTMLElement>(
+      `[data-message-id="${message.id}"] .claudian-message-content`,
+    ) ?? this.deps.state.currentContentEl;
+  }
+
   /** Delegates Agent tool_use to SubagentManager and updates message based on result. */
   #handleTaskToolUseViaManager(
     chunk: Extract<StreamChunk, { type: 'tool_use' }>,
     msg: ChatMessage
   ): void {
-    const { state, subagentManager } = this.deps;
+    const { subagentManager } = this.deps;
     this.#ensureTaskToolCall(msg, chunk.id, chunk.input, chunk.providerPayload);
 
-    const result = subagentManager.handleTaskToolUse(chunk.id, chunk.input, state.currentContentEl);
+    const result = subagentManager.handleTaskToolUse(chunk.id, chunk.input, this.#getMessageContentEl(msg));
 
     switch (result.action) {
       case 'created_sync':
@@ -1201,7 +1224,7 @@ export class StreamController {
 
   /** Renders a pending Agent tool call via SubagentManager and updates message. */
   #renderPendingTaskViaManager(toolId: string, msg: ChatMessage): void {
-    const result = this.deps.subagentManager.renderPendingTask(toolId, this.deps.state.currentContentEl);
+    const result = this.deps.subagentManager.renderPendingTask(toolId, this.#getMessageContentEl(msg));
     if (!result) return;
 
     if (result.mode === 'sync') {
@@ -1220,7 +1243,7 @@ export class StreamController {
       chunk.id,
       chunk.content,
       chunk.isError || false,
-      this.deps.state.currentContentEl,
+      this.#getMessageContentEl(msg),
       chunk.toolUseResult
     );
     if (!result) return;
@@ -1630,6 +1653,7 @@ export class StreamController {
     input?: Record<string, unknown>,
     providerPayload?: unknown,
   ): ToolCallInfo {
+    this.managedSubagentIds.add(toolId);
     msg.toolCalls = msg.toolCalls || [];
     const existing = msg.toolCalls.find(tc => tc.id === toolId);
     if (existing) {
@@ -1935,7 +1959,7 @@ export class StreamController {
     state.currentTextEl = null;
     state.currentTextContent = '';
     state.currentThinkingState = null;
-    this.deps.subagentManager.resetStreamingState();
+    this.resetSubagentStreamingState();
     this.lifecycleSubagentStates.clear();
     this.lifecycleAgentIdToSpawnId.clear();
     state.pendingTools.clear();
@@ -1943,7 +1967,13 @@ export class StreamController {
     state.responseStartTime = null;
   }
 
+  resetSubagentStreamingState(): void {
+    this.deps.subagentManager.resetStreamingState(this.managedSubagentIds);
+    this.managedSubagentIds.clear();
+  }
+
   dispose(): void {
+    this.resetSubagentStreamingState();
     this.textRenderCoordinator.dispose();
     this.thinkingRenderCoordinator.dispose();
     this.#cancelPendingToolOutputRenders();
