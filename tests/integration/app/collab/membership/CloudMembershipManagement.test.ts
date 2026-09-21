@@ -29,6 +29,8 @@ import { createAuthorityTransferRecord } from '@/app/collab/authority-transfer/A
 import { ClaudianCollabService } from '@/app/collab/ClaudianCollabService';
 import { createCollabFeatureSubcomposition } from '@/app/collab/CollabFeatureSubcomposition';
 import { isCollabLocalCloudMembership } from '@/app/collab/CollabLocalProjectRepository';
+import { ManagerResponsibilityReceiptStore } from '@/app/collab/exit/LocalExitStores';
+import type { CloudManagerResponsibilityReceiptRecord } from '@/app/collab/exit/ManagerResponsibilityReceiptRecord';
 import { CollabLifecycleJournalStore } from '@/app/collab/lifecycle/CollabLifecycleJournalStore';
 import { decodeCloudProjectInvitation } from '@/app/collab/project/CloudProjectInvitation';
 import { CollabProjectSetupService } from '@/app/collab/project/CollabProjectSetupService';
@@ -104,7 +106,10 @@ describe('Cloud membership management', () => {
       await expect(client.feature.readSnapshot(PROJECT_ID)).resolves.toMatchObject({ status: 'success', value: { source: 'online', snapshot: { currentMember: { role: 'member' } } } });
       await waitUntil(() => fixture.acknowledgements.length === 2);
       expect(fixture.acknowledgements).toEqual([receipt.request, receipt.request]);
-      await waitForDocument(fixture.receiptPath, value => value.phase === 'settled');
+      await waitForReceipt(client.receipts, value => value.phase === 'settled');
+      await expect(client.feature.listManagerResponsibilityOffers(PROJECT_ID)).resolves.toMatchObject({
+        status: 'success', value: [{ offerId: 'offer-created', status: 'acknowledged' }],
+      });
       expect(JSON.parse(await readFile(fixture.receiptPath, 'utf8'))).toMatchObject({ phase: 'settled', offer: { state: 'acknowledged', revision: 2 } });
       expect(await readFile(fixture.intentPath, 'utf8')).toBe(userIntent);
       const firstResume = await client.feature.resumeManagementOperation(PROJECT_ID);
@@ -143,7 +148,7 @@ describe('Cloud membership management', () => {
       await fixture.seed(client.foundation);
       await client.feature.readSnapshot(PROJECT_ID);
       await waitUntil(() => fixture.acknowledgements.length === 1);
-      await waitForDocument(fixture.receiptPath, value => {
+      await waitForReceipt(client.receipts, value => {
         const offer = value.offer;
         return value.phase === 'settled'
           && typeof offer === 'object'
@@ -1121,7 +1126,8 @@ async function createFixture(options: { provedStaleDemotion?: boolean; blockRead
           return;
         }
         if (acknowledgements.length === 1) { request.socket.destroy(); return; }
-        response.end(JSON.stringify(collabCloudSuccessEnvelope(envelope.value.requestId, { offer: { ...offered, acknowledgedAt: createdAt, state: 'acknowledged', revision: 2 } })));
+        responsibilityOffer = { ...offered, acknowledgedAt: createdAt, state: 'acknowledged', revision: 2 };
+        response.end(JSON.stringify(collabCloudSuccessEnvelope(envelope.value.requestId, { offer: responsibilityOffer })));
         return;
       }
       if (target === collabCloudProjectOperationRoute(PROJECT_ID, 'revokeTransferredMembershipClaim').target) {
@@ -1163,7 +1169,7 @@ async function createFixture(options: { provedStaleDemotion?: boolean; blockRead
         if (decoded.status !== 'ok') throw decoded.error;
         const offer = decoded.value.offerId === 'offer-acknowledged'
           ? { ...offered, offerId: 'offer-acknowledged', acknowledgedAt: createdAt, state: 'acknowledged', revision: 2 }
-          : offered;
+          : responsibilityOffer;
         response.end(JSON.stringify(collabCloudSuccessEnvelope(envelope.value.requestId, { offer })));
         return;
       }
@@ -1299,7 +1305,7 @@ async function createFixture(options: { provedStaleDemotion?: boolean; blockRead
       const foundation = new ClaudianCollabService({ getConfiguredGitPath: () => '', installationKey: TEST_INSTALLATION_A, obsidianConfigDirectory: '.obsidian', vaultRoot });
       const projectSetup = new CollabProjectSetupService(foundation, { installationKey: TEST_INSTALLATION_A, vaultRoot });
       const feature = createCollabFeatureSubcomposition({ cloudAuthority: new CloudAuthorityAdapter(vaultRoot), foundation, projectSetup, vaultRoot }).feature;
-      return { foundation, feature, close: async () => { await feature.close(); await foundation.close(); } };
+      return { foundation, feature, receipts: new ManagerResponsibilityReceiptStore(foundation.local.projects), close: async () => { await feature.close(); await foundation.close(); } };
     },
     seed: async (foundation: ClaudianCollabService) => {
       await foundation.local.projects.saveMembership({
@@ -1445,19 +1451,21 @@ async function seedCompletedLanToCloudClaimOwner(
   });
 }
 
-async function waitForDocument(
-  documentPath: string,
-  predicate: (value: Record<string, unknown>) => boolean,
+async function waitForReceipt(
+  receipts: ManagerResponsibilityReceiptStore,
+  predicate: (value: CloudManagerResponsibilityReceiptRecord) => boolean,
 ): Promise<void> {
   const deadline = Date.now() + 10_000;
+  let lastPhase: string | undefined;
   while (Date.now() < deadline) {
-    try {
-      const value = JSON.parse(await readFile(documentPath, 'utf8')) as Record<string, unknown>;
+    // Read through the receipt owner so polling shares the repository's write
+    // queue instead of holding a native file handle during atomic replacement.
+    const value = await receipts.load(PROJECT_ID);
+    if (value?.schemaVersion === 3) {
+      lastPhase = value.phase;
       if (predicate(value)) return;
-    } catch {
-      // The lifecycle transition may not have created its document yet.
     }
     await new Promise<void>(resolve => setTimeout(resolve, 10));
   }
-  throw new Error('Timed out waiting for fixture document');
+  throw new Error(`Timed out waiting for fixture receipt (phase: ${lastPhase ?? 'missing'})`);
 }

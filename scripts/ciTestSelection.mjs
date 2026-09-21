@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -7,6 +7,7 @@ import suites from './testSuites.cjs';
 
 const fullSelection = {
   testFiles: null, scriptTests: null, crossPlatformTests: null,
+  crossPlatformShards: ['1/2', '2/2'],
   lanCompatibility: true, crossPlatform: true, piWindows: true,
 };
 const docsTest = 'tests/unit/docs/CollabDocumentation.test.ts';
@@ -87,9 +88,11 @@ export function selectCiTests({ changes, relatedTests, eventName }) {
   const piWindows = files.has(piTest);
   return {
     testFiles, scriptTests: [...scripts], crossPlatformTests,
+    crossPlatformShards: crossPlatformTests.length > 1 ? ['1/2', '2/2'] : ['1/1'],
     lanCompatibility: paths.some(file => isCollabRuntime(file) && !isDocumentation(file))
       || paths.some(file => file.startsWith('tests/compatibility/')),
-    crossPlatform: crossPlatformTests.length > 0 || piWindows,
+    crossPlatform: crossPlatformTests.length > 0 || piWindows
+      || scripts.has('scripts/ciTestSelection.test.mjs') || scripts.has('scripts/run-tests.test.mjs'),
     piWindows,
   };
 }
@@ -102,7 +105,7 @@ export function selectRelatedCiTests({ changes, eventName = 'pull_request' }) {
     const relatedTests = JSON.parse(execFileSync(process.execPath, [
       'scripts/run-jest.js', '--listTests', '--json', '--findRelatedTests', ...inputs,
     ], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }))
-      .map(file => path.relative(process.cwd(), file).split(path.sep).join('/'));
+      .map(file => path.relative(realpathSync.native(process.cwd()), realpathSync.native(file)).split(path.sep).join('/'));
     selection = selectCiTests({ changes, relatedTests, eventName });
   }
   return selection;
@@ -139,6 +142,7 @@ function main() {
     `test-shards=${JSON.stringify(selection.testFiles === null ? ['1/2', '2/2'] : ['1/1'])}`,
     `script-tests=${JSON.stringify(selection.scriptTests)}`,
     `cross-platform-tests=${JSON.stringify(selection.crossPlatformTests)}`,
+    `cross-platform-shards=${JSON.stringify(selection.crossPlatformShards)}`,
     `lan=${selection.lanCompatibility}`,
     `cross-platform=${selection.crossPlatform}`,
     `pi-windows=${selection.piWindows}`,

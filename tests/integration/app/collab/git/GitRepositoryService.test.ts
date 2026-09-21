@@ -443,6 +443,47 @@ describe('GitRepositoryService integration', () => {
       .resolves.toEqual({ leftOnly: 1, rightOnly: 1 });
   });
 
+  it('installs a bundle whose packed-object paths exceed the Windows legacy limit', async () => {
+    const sourcePath = path.join(root, 'source');
+    await mkdir(sourcePath);
+    await service.initializeWorkingRepository(sourcePath);
+    await service.configureLocalRepository(sourcePath, {
+      memberId: 'member-host',
+      personalRef: 'refs/heads/members/member-host',
+      projectId: 'project-host',
+      userDisplayName: 'Host',
+    });
+    const contents = 'Content retained across a long-path authority installation\n';
+    await writeFile(path.join(sourcePath, 'content.md'), contents);
+    await service.stageAll(sourcePath);
+    const mainOid = await service.createCommitFromIndex(sourcePath, {
+      expectedRefOid: null,
+      message: 'Initial project',
+      parents: [],
+      ref: 'refs/heads/main',
+    });
+    const bundlePath = path.join(root, 'authority.bundle');
+    await runner.run({ args: ['bundle', 'create', bundlePath, 'refs/heads/main'], cwd: sourcePath });
+    // Git for Windows caps GIT_DIR at MAX_PATH - 40; only packed-object paths should overflow.
+    const repositoryName = '.repository-00000000-0000-4000-8000-000000000001.tmp';
+    const parentName = 'authority-'.padEnd(210 - root.length - repositoryName.length - 2, 'x');
+    const parentPath = path.join(root, parentName);
+    await mkdir(parentPath);
+    const repositoryPath = path.join(parentPath, repositoryName);
+    const clone = await runner.run({
+      acceptedExitCodes: [0, 128],
+      args: ['clone', '--bare', '--no-local', bundlePath, repositoryPath],
+      cwd: parentPath,
+      suppressHooks: true,
+    });
+
+    if (clone.exitCode !== 0) throw new Error(`Bundle installation failed: ${clone.stderr}`);
+    await service.assertHealthy(repositoryPath);
+    expect(await service.resolveRef(repositoryPath, 'refs/heads/main')).toBe(mainOid);
+    const restored = await runner.run({ args: ['show', 'refs/heads/main:content.md'], cwd: repositoryPath });
+    expect(restored.stdout.toString('utf8')).toBe(contents);
+  });
+
   it('initializes a bare authority, installs an executable hook, and clones refs', async () => {
     const sourcePath = path.join(root, 'source');
     const barePath = path.join(root, 'authority.git');

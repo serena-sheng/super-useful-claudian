@@ -22,6 +22,8 @@ import { NodeCloudAuthorityHttpTransport } from '@/app/collab/remote-authority/N
 import type { CollabResult } from '@/core/collab';
 import { CollabError } from '@/core/collab/ClaudianCollabError';
 
+jest.mock('bonjour-service', () => jest.requireActual('./BonjourFixture').BonjourFixture);
+
 const current = {
   ClaudianCollabService, CollabProjectSetupService, InvitationCodec, ProjectEventClient,
   SqlJsProjectDatabase, createCollabFeatureSubcomposition,
@@ -336,15 +338,21 @@ describe('published 2.2.6 LAN compatibility', () => {
     if (!('hostTransfer' in offered) || !offered.hostTransfer) throw new Error('Missing Host offer');
     unwrap(await peer.feature.acceptHostTransfer({ projectId: project.id, transferId: offered.hostTransfer.transferId }));
     try {
+      // Handoff installs and validates a real Git repository and migrates the
+      // published database. Windows runners can outlast the normal read deadline.
       await waitFor(async () => {
         const membership = await peer.foundation.local.projects.loadMembership(project.id);
         return Boolean(membership && isCollabLocalLanMembership(membership) && membership.hostOwnership.ownsAuthority);
-      });
+      }, 30_000);
     } catch {
       const outgoing = await host.foundation.local.projects.hostTransferRecovery.load(project.id, 'outgoing');
       const incoming = await peer.foundation.local.projects.hostTransferRecovery.load(project.id, 'incoming');
       const retried = await host.feature.startHost(project.id);
-      throw new Error(`Host handoff did not converge: source=${outgoing?.phase}, target=${incoming?.phase}, retry=${retried.status === 'failure' ? retried.error.safeContext.reason : retried.status}`);
+      const targetRecovery = await peer.feature.restoreLifecycle().then(
+        () => 'completed',
+        error => error instanceof CollabError ? `${error.code}:${error.safeContext.reason}` : 'unknown',
+      );
+      throw new Error(`Host handoff did not converge: source=${outgoing?.phase}, target=${incoming?.phase}, retry=${retried.status === 'failure' ? retried.error.safeContext.reason : retried.status}, targetRecovery=${targetRecovery}`);
     }
     await waitFor(async () => {
       const result = await host.feature.readSnapshot(project.id);
@@ -460,8 +468,8 @@ async function availablePort(): Promise<number> {
   return address.port;
 }
 
-async function waitFor(predicate: () => Promise<boolean>): Promise<void> {
-  const deadline = Date.now() + 10_000;
+async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
   while (!await predicate()) {
     if (Date.now() > deadline) throw new Error('Timed out waiting for LAN convergence');
     await new Promise(resolve => setTimeout(resolve, 25));

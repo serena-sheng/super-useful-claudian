@@ -117,7 +117,7 @@ describe('production authority-transfer hosting handoff effects', () => {
       })).resolves.toMatchObject({ memberId: MEMBER_ID });
       const actualRename = fsPromises.rename;
       const retentionWrite = jest.spyOn(fsPromises, 'rename').mockImplementation(async (from, to) => {
-        if (String(to).includes('/authority-transfer-history/')) throw new Error('simulated retention persistence failure');
+        if (String(to).split(path.sep).includes('authority-transfer-history')) throw new Error('simulated retention persistence failure');
         return actualRename(from, to);
       });
       await expect(target.restartedComposition.feature.createHostTransfer({
@@ -140,6 +140,8 @@ describe('production authority-transfer hosting handoff effects', () => {
     }
   });
 
+  // This workflow combines native Git/SQL transfer, restart and recovery; its
+  // Windows execution exceeds the ordinary 30-second isolated-test budget.
   it.each(['absent', 'older', 'interrupted', 'projection-interrupted', 'activation-interrupted', 'same', 'newer'] as const)('completes or safely rejects physical Host handoff after Cloud import (former local authority: %s)', async formerState => {
     const target = await restoreImportedHost();
     const receiverRoot = await mkdtemp(path.join(tmpdir(), 'claudian-after-cloud-handoff-'));
@@ -193,7 +195,7 @@ describe('production authority-transfer hosting handoff effects', () => {
       const interruptedRequest = { ...target.claimRequest, idempotencyKey: 'claim-before-physical-handoff' };
       const actualRename = fsPromises.rename;
       const receiptWrite = jest.spyOn(fsPromises, 'rename').mockImplementation(async (from, to) => {
-        if (String(to).endsWith('/target-private.json')) {
+        if (path.basename(String(to)) === 'target-private.json') {
           const partial = JSON.parse(await readFile(from, 'utf8')) as { receipts: Record<string, { operationIntentId: string }> };
           if (Object.values(partial.receipts).some(receipt => receipt.operationIntentId === interruptedRequest.idempotencyKey)) {
             throw new Error('simulated receipt persistence failure');
@@ -404,8 +406,10 @@ describe('production authority-transfer hosting handoff effects', () => {
       await target.restartedComposition.feature.close();
       await rm(receiverRoot, { recursive: true, force: true });
     }
-  });
+  }, 90_000);
 
+  // This workflow combines native Git/SQL transfer, restart and recovery; its
+  // Windows execution exceeds the ordinary 30-second isolated-test budget.
   it.each([[false, false], [true, false], [true, true]])('moves Cloud authority through the composed feature facade (single Member: %s, interrupted Manager settlement: %s)', async (singleMember, interruptManagerSettlement) => {
     const {
       artifactBytes,
@@ -804,7 +808,7 @@ describe('production authority-transfer hosting handoff effects', () => {
           const actualRename = fsPromises.rename;
           const interruptedSettlement = interruptManagerSettlement
             ? jest.spyOn(fsPromises, 'rename').mockImplementation(async (from, to) => {
-              if (String(to).endsWith('/manager.json')) {
+              if (path.basename(String(to)) === 'manager.json') {
                 const entry = JSON.parse(await readFile(from, 'utf8'));
                 if (entry.phase === 'settled') throw new Error('process stopped after target archival');
               }
@@ -961,5 +965,5 @@ describe('production authority-transfer hosting handoff effects', () => {
       await sourceFoundation.close();
       await rm(managerRoot, { force: true, recursive: true });
     }
-  });
+  }, 90_000);
 });
