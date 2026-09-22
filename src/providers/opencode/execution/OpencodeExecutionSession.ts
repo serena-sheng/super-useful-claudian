@@ -24,6 +24,7 @@ import {
 } from '@/providers/acp';
 
 import type { OpencodeCommandCatalog } from '../commands/OpencodeCommandCatalog';
+import { loadOpencodeTurnStats } from '../history/OpencodeTurnStats';
 import { projectOpencodeMetadata } from '../metadata/OpencodeMetadataProjection';
 import { decodeOpencodeModelId } from '../models';
 import {
@@ -107,6 +108,7 @@ class OpencodeExecutionRun implements ProviderExecutionRun {
   cancellationRequested = false;
   lastSequence = 0;
   abortCleanup: (() => void) | null = null;
+  nativeCompleted = false;
 
   constructor(
     readonly sessionInstanceId: string,
@@ -257,11 +259,9 @@ export class OpencodeExecutionSession implements ProviderExecutionSession {
     if (run && !run.terminal) {
       run.cancellationRequested = true;
       run.acceptingLiveOutput = false;
-      run.finish({
-        reason: 'session-disposed',
-        scope: run.scope(),
-        type: 'cancelled',
-      });
+      run.finish(run.nativeCompleted
+        ? { reason: 'completed', scope: run.scope(), type: 'turn_completed' }
+        : { reason: 'session-disposed', scope: run.scope(), type: 'cancelled' });
     }
     this.activeRun = null;
     this.backgroundTurn = null;
@@ -395,6 +395,7 @@ export class OpencodeExecutionSession implements ProviderExecutionSession {
 
       this.#getRunNormalizer(run).reset();
       run.acceptingLiveOutput = true;
+      const promptStartedAt = Date.now();
       const response = await kernel.prompt({
         prompt: buildPromptBlocks(
           request,
@@ -404,6 +405,7 @@ export class OpencodeExecutionSession implements ProviderExecutionSession {
       });
       this.#markNativeConversationContextEstablished(run);
       if (!this.#isRunCurrent(run, generation)) return;
+      run.nativeCompleted = response.stopReason !== 'cancelled';
       run.accept(response.userMessageId ?? undefined);
       if (response.usage) {
         const usage = buildAcpUsageInfo({
@@ -413,6 +415,12 @@ export class OpencodeExecutionSession implements ProviderExecutionSession {
         });
         if (usage) run.emit({ type: 'usage_updated', scope: run.scope(), usage });
       }
+      const turnStats = response.stopReason !== 'cancelled' && native.databasePath
+        ? await loadOpencodeTurnStats(native.sessionId, {
+          databasePath: native.databasePath, ...(native.nativeVersion ? { nativeVersion: native.nativeVersion } : {}),
+        }, { userMessageId: response.userMessageId, startedAt: promptStartedAt }).catch(() => undefined)
+        : undefined;
+      if (!this.#isRunCurrent(run, generation)) return;
       this.snapshot = this.#createSnapshot(this.backgroundTurn || this.backgroundScopes.size ? 'executing' : 'idle');
       run.emit({
         scope: run.scope(),
@@ -421,7 +429,7 @@ export class OpencodeExecutionSession implements ProviderExecutionSession {
       });
       run.finish(response.stopReason === 'cancelled'
         ? { reason: 'provider-cancelled', scope: run.scope(), type: 'cancelled' }
-        : { reason: 'completed', scope: run.scope(), type: 'turn_completed' });
+        : { reason: 'completed', scope: run.scope(), type: 'turn_completed', ...(turnStats ? { turnStats } : {}) });
       this.activeRun = null;
     } catch (error) {
       if (!this.#isRunCurrent(run, generation)) return;
@@ -661,7 +669,7 @@ export class OpencodeExecutionSession implements ProviderExecutionSession {
   }
 
   #cancelRun(run: OpencodeExecutionRun): void {
-    if (!this.#isRunCurrent(run, this.lifecycleGeneration)) return;
+    if (!this.#isRunCurrent(run, this.lifecycleGeneration) || run.nativeCompleted) return;
     run.cancellationRequested = true;
     run.acceptingLiveOutput = false;
     const generation = ++this.lifecycleGeneration;

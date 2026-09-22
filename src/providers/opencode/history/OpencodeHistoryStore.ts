@@ -22,6 +22,7 @@ import {
   type StoredRow,
   type StoredSessionRows,
 } from './OpencodeSqliteReader';
+import { getMessageCompletedAt, getMessageCreatedAt, OpencodeTurnStats } from './OpencodeTurnStats';
 
 export { OPENCODE_MESSAGE_ROW_SQL } from './OpencodeSqliteReader';
 
@@ -95,14 +96,24 @@ export function mapOpencodeMessages(
   context: OpencodeHydrationDiagnosticContext = {},
 ): ChatMessage[] {
   const mappedMessages: ChatMessage[] = [];
+  const stats = new OpencodeTurnStats();
+  let previousAssistant: ChatMessage | undefined;
 
   for (const message of messages) {
     try {
       const mappedMessage = mapStoredMessage(message, context);
       if (mappedMessage) {
+        if (mappedMessage.role === 'user') previousAssistant = undefined;
+        else {
+          if (previousAssistant) previousAssistant.turnStats = undefined;
+          previousAssistant = mappedMessage;
+        }
+        mappedMessage.turnStats = stats.add(message.info, 1);
         mappedMessages.push(mappedMessage);
       }
     } catch (error) {
+      stats.reset();
+      previousAssistant = undefined;
       mappedMessages.push(createOpencodeHydrationDiagnosticMessage({
         ...context,
         messageId: getString(message.info.id) ?? undefined,
@@ -147,6 +158,10 @@ function hydrateStoredMessages(
             data_time_completed: row.data_time_completed,
             data_time_created: row.data_time_created,
             data_valid: row.data_valid,
+            parentID: row.parent_id,
+            tokens: { output: row.output_tokens, reasoning: row.reasoning_tokens },
+            finish: row.finish,
+            error: row.error,
             id,
             role: row.role,
             time_created: row.time_created,
@@ -235,6 +250,7 @@ function mergeAdjacentAssistantMessages(messages: ChatMessage[]): ChatMessage[] 
       previous.durationFlavorWord = message.durationFlavorWord ?? previous.durationFlavorWord;
       previous.durationSeconds = mergeAssistantDurationSeconds(previous, message);
       previous.completedAt = message.completedAt;
+      previous.turnStats = message.turnStats;
       previous.toolCalls = mergeOptionalArrays(previous.toolCalls, message.toolCalls);
       previous.contentBlocks = mergeOptionalArrays(previous.contentBlocks, message.contentBlocks);
       continue;
@@ -277,17 +293,6 @@ function getMessageCompletionTime(message: ChatMessage): number | null {
   }
 
   return message.timestamp + (message.durationSeconds * 1_000);
-}
-
-function getMessageCreatedAt(info: StoredRow): number | null {
-  return getNestedNumber(info, ['time', 'created'])
-    ?? getNumber(info.data_time_created)
-    ?? getNumber(info.time_created);
-}
-
-function getMessageCompletedAt(info: StoredRow): number | null {
-  return getNestedNumber(info, ['time', 'completed'])
-    ?? getNumber(info.data_time_completed);
 }
 
 function isInvalidStoredMessageData(info: StoredRow): boolean {
@@ -574,9 +579,13 @@ function mapV2Messages(
 ): ChatMessage[] {
   const result: ChatMessage[] = [];
   let segment: ChatMessage[] = [];
+  const stats = new OpencodeTurnStats();
+  let previousAssistant: ChatMessage | undefined;
   const flush = () => {
     result.push(...mergeAdjacentAssistantMessages(segment));
     segment = [];
+    stats.reset();
+    previousAssistant = undefined;
   };
   for (const { row, data } of messages) {
     if (!data) {
@@ -597,11 +606,20 @@ function mapV2Messages(
           ...(Array.isArray(data.files) ? data.files.filter(isPlainObject).map((file) => ({ ...file, type: 'file' })) : []),
         ]
       : Array.isArray(data.content) ? data.content.filter(isPlainObject) : [];
+    const info = { ...data, id: row.id, role: row.type, time_created: row.time_created };
     const message = mapStoredMessage({
-      info: { ...data, id: row.id, role: row.type, time_created: row.time_created },
+      info,
       parts,
     }, context, 2);
-    if (message) segment.push(message);
+    if (message) {
+      if (message.role === 'user') previousAssistant = undefined;
+      else {
+        if (previousAssistant) previousAssistant.turnStats = undefined;
+        previousAssistant = message;
+      }
+      message.turnStats = stats.add(info, 2);
+      segment.push(message);
+    }
   }
   flush();
   return result;

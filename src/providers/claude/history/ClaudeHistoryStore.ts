@@ -5,6 +5,7 @@ import type { ProviderHistoryPathContext } from '../../../core/providers/types';
 import type { ChatMessage, SubagentInfo, ToolCallInfo } from '../../../core/types';
 import { ClaudeTaskToolNormalizer } from '../normalization/ClaudeTaskToolNormalizer';
 import { isClaudeSubagentToolName } from '../subagentToolNames';
+import { ClaudeTurnStats } from './ClaudeTurnStats';
 import { buildAsyncSubagentInfo } from './sdkAsyncSubagent';
 import { filterActiveBranch } from './sdkBranchFilter';
 import type { SDKNativeMessage, SDKSessionLoadResult } from './sdkHistoryTypes';
@@ -15,6 +16,7 @@ import {
   extractXmlTag,
   hydrateFallbackAskUserAnswers,
   hydrateStructuredToolResults,
+  isCanonicalSdkUserMessage,
   isSystemInjectedMessage,
   mergeAssistantMessage,
   parseSDKMessageToChat,
@@ -142,7 +144,7 @@ export async function loadSDKSessionMessages(
     return { messages: [], skippedLines: result.skippedLines, error: result.error };
   }
 
-  const filteredEntries = filterActiveBranch(result.messages, resumeAtMessageId);
+  const filteredEntries = filterActiveBranch(result.messages.filter(entry => !entry.isSidechain), resumeAtMessageId);
 
   const toolResults = collectToolResults(filteredEntries);
   const toolUseResults = collectStructuredPatchResults(filteredEntries);
@@ -154,6 +156,7 @@ export async function loadSDKSessionMessages(
   let turnStartedAt: number | undefined;
   let lastAssistantAt: number | undefined;
   let requestedResponsePending = false;
+  let turnStats = new ClaudeTurnStats();
   const taskToolNormalizer = new ClaudeTaskToolNormalizer();
 
   const flushPendingAssistant = (includeDuration: boolean): void => {
@@ -167,9 +170,10 @@ export async function loadSDKSessionMessages(
         : undefined;
       if (includeDuration) {
         if (!pendingAssistant.isAutomaticResponse) {
-          pendingAssistant.durationSeconds = nativeDuration ?? inferredDuration;
+          pendingAssistant.durationSeconds = nativeDuration !== undefined ? Math.floor(nativeDuration / 1000) : inferredDuration;
         }
         pendingAssistant.completedAt = lastAssistantAt;
+        pendingAssistant.turnStats = turnStats.finish(turnStartedAt, lastAssistantAt);
       }
       chatMessages.push(pendingAssistant);
     }
@@ -177,6 +181,7 @@ export async function loadSDKSessionMessages(
     lastAssistantAt = undefined;
     turnStartedAt = undefined;
     requestedResponsePending = false;
+    turnStats = new ClaudeTurnStats();
   };
 
   // Preserve task notification boundaries without ending an unfinished requested response.
@@ -222,13 +227,14 @@ export async function loadSDKSessionMessages(
         } else {
           pendingAssistant = chatMsg;
         }
+        turnStats.add(sdkMsg);
         lastAssistantAt = parseNativeTimestamp(sdkMsg.timestamp);
         requestedResponsePending = turnStartedAt !== undefined
           && sdkMsg.message?.stop_reason === 'tool_use';
       }
     } else {
       flushPendingAssistant(!chatMsg.isInterrupt);
-      if (!chatMsg.isInterrupt && !chatMsg.isRebuiltContext) {
+      if (isCanonicalSdkUserMessage(sdkMsg)) {
         turnStartedAt = parseNativeTimestamp(sdkMsg.timestamp);
       }
       chatMessages.push(chatMsg);
@@ -332,8 +338,7 @@ function collectNativeTurnDurations(
     );
     if (!assistantUuid) continue;
 
-    const durationSeconds = Math.floor(entry.durationMs / 1_000);
-    durations.set(assistantUuid, durationSeconds);
+    durations.set(assistantUuid, entry.durationMs);
   }
   return durations;
 }

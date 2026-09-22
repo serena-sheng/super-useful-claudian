@@ -469,6 +469,11 @@ export class SideChatRuntime {
   >[0]): Promise<void> {
     const assistant = this.#activeAssistant;
     if (!assistant) return;
+    if (event.type === 'turn_completed') {
+      this.state.cancelRequested = false;
+      assistant.turnStats = event.turnStats;
+      return;
+    }
     const chunk = providerOutputEventToStreamChunk(event);
     if (!chunk) return;
     this.#activeAssistant = await continueResponseAfterNotification({
