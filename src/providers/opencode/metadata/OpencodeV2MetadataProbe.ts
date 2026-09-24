@@ -1,7 +1,8 @@
 import { formatReasoningValueLabel } from '@/core/providers/reasoning';
 import { normalizeAcpAvailableCommands } from '@/providers/acp';
 
-import { OpencodeHttpClient } from '../http/OpencodeHttpClient';
+import { pollOpencodeUntil } from '../http/OpencodeHttpClient';
+import type { OpencodeServerLease } from '../http/OpencodeServerService';
 import type {
   OpencodeMetadataCatalogResult,
   OpencodeMetadataProbe,
@@ -17,11 +18,7 @@ interface NativeModel {
 
 /** V2 catalog reads share native credentials without creating a native session. */
 export class OpencodeV2MetadataProbe implements OpencodeMetadataProbe {
-  private readonly client: OpencodeHttpClient;
-
-  constructor(cliPath: string, cwd: string, environment: NodeJS.ProcessEnv) {
-    this.client = new OpencodeHttpClient(cliPath, cwd, environment);
-  }
+  constructor(private readonly client: OpencodeServerLease) {}
 
   async loadCatalog(signal?: AbortSignal): Promise<OpencodeMetadataCatalogResult> {
     const ownedSignal = this.client.signal(signal);
@@ -37,7 +34,7 @@ export class OpencodeV2MetadataProbe implements OpencodeMetadataProbe {
   }
 
   async warmModel(rawModelId: string, signal?: AbortSignal): Promise<OpencodeMetadataWarmResult> {
-    const models = await this.loadModels(this.client.signal(signal));
+    const models = await this.loadModels(this.client.signal(signal), rawModelId);
     const model = models.find(model => `${model.providerID}/${model.id}` === rawModelId);
     if (!model) throw new Error('OpenCode model is no longer available. Refresh the model catalog.');
     const variants = model.variants.length > 0 ? [...new Set([...model.variants, 'default'])] : [];
@@ -53,24 +50,19 @@ export class OpencodeV2MetadataProbe implements OpencodeMetadataProbe {
 
   async dispose(): Promise<void> { await this.client.dispose(); }
 
-  private async loadModels(signal: AbortSignal): Promise<NativeModel[]> {
-    // Like native ACP, wait for providers that initialize their catalog asynchronously.
-    const deadline = Date.now() + 5_000;
-    do {
-      const rows = await this.read('model', signal);
-      const models = rows.filter(isNamedRecord).flatMap(model => {
-        if (model.enabled !== true || typeof model.id !== 'string' || typeof model.providerID !== 'string') return [];
-        return [{
-          id: model.id, providerID: model.providerID, name: model.name,
-          variants: Array.isArray(model.variants)
-            ? model.variants.filter(isRecord).flatMap(variant => typeof variant.id === 'string' ? [variant.id] : [])
-            : [],
-        }];
-      });
-      if (models.length > 0) return models;
-      await delay(signal);
-    } while (Date.now() < deadline);
-    return [];
+  private async loadModels(signal: AbortSignal, rawModelId?: string): Promise<NativeModel[]> {
+    // An initial snapshot may be partial. Later discovery re-reads the retained server.
+    return pollOpencodeUntil(async () => (await this.read('model', signal)).filter(isNamedRecord).flatMap(model => {
+      if (model.enabled !== true || typeof model.id !== 'string' || typeof model.providerID !== 'string') return [];
+      return [{
+        id: model.id, providerID: model.providerID, name: model.name,
+        variants: Array.isArray(model.variants)
+          ? model.variants.filter(isRecord).flatMap(variant => typeof variant.id === 'string' ? [variant.id] : [])
+          : [],
+      }];
+    }), models => rawModelId
+      ? models.some(model => `${model.providerID}/${model.id}` === rawModelId)
+      : models.length > 0, 5_000, signal);
   }
 
   private async read(resource: 'model' | 'command', signal: AbortSignal): Promise<unknown[]> {
@@ -93,19 +85,4 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNamedRecord(value: unknown): value is Record<string, unknown> & { name: string } {
   return isRecord(value) && typeof value.name === 'string';
-}
-
-function delay(signal: AbortSignal): Promise<void> {
-  signal.throwIfAborted();
-  return new Promise((resolve, reject) => {
-    const onAbort = (): void => {
-      window.clearTimeout(timer);
-      reject(new Error('OpenCode catalog probe aborted.'));
-    };
-    const timer = window.setTimeout(() => {
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    }, 25);
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
 }

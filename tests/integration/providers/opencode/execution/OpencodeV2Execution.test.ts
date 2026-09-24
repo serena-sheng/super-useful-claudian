@@ -6,6 +6,7 @@ import { type ProviderExecutionEvent, ProviderExecutionLifecycleRegistry, type P
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ChatExecutionCoordinator } from '@/features/chat/execution/ChatExecutionCoordinator';
 import { OpencodeExecutionBackend } from '@/providers/opencode/execution/OpencodeExecutionBackend';
+import { OpencodeServerService } from '@/providers/opencode/http/OpencodeServerService';
 
 import { createForkTestEnvironment } from '../../../features/chat/tabs/ProviderForkTestHarness';
 
@@ -23,6 +24,11 @@ const server = http.createServer(async (req, res) => {
   const route = new URL(req.url, 'http://localhost').pathname;
   res.setHeader('Content-Type', 'application/json');
   if (route === '/api/event') { feed = res; res.setHeader('Content-Type', 'text/event-stream'); emit('server.connected', {}); return; }
+  if (route === '/api/agent') {
+    const base = JSON.parse(require('node:fs').readFileSync(process.env.OPENCODE_CONFIG, 'utf8'));
+    const inline = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || '{}');
+    res.end(JSON.stringify({ data: [...Object.entries(inline.agent || {}).map(([id, agent]) => ({ id, system: agent.prompt })), ...Object.entries(base.agents || {}).map(([id, agent]) => ({ id, ...agent }))] })); return;
+  }
   if (route === '/api/model') { res.end(JSON.stringify({ data: [{ id: 'chat', providerID: 'deepseek', name: 'Chat', enabled: true, variants: [], limit: { context: 1000 } }] })); return; }
   if (route === '/api/command') { res.end(JSON.stringify({ data: [{ name: 'review', description: 'Review' }] })); return; }
   if (route === '/api/form') {
@@ -166,7 +172,8 @@ function createFixture(resume = false, approval?: (signal: AbortSignal) => Promi
     notifyProviderChatOptionsChanged() {},
   };
   const approvals: unknown[] = [], questions: unknown[] = [];
-  const session = new OpencodeExecutionBackend(plugin).createSession({
+  const serverService = new OpencodeServerService();
+  const session = new OpencodeExecutionBackend(plugin, { serverService }).createSession({
     ...(resume ? { resumeSeed: { providerSessionId: 'ses_test', providerState: { nativeVersion: 2 } } } : {}),
     vaultWorkingDirectory: root, lifecycle: 'ephemeral', nativePersistence: 'disabled-if-supported',
     interactionPort: {
@@ -175,7 +182,7 @@ function createFixture(resume = false, approval?: (signal: AbortSignal) => Promi
       dismissInteraction() {},
     },
   });
-  return { plugin, session, approvals, questions, async dispose() { await session.dispose(); rmSync(root, { recursive: true, force: true }); } };
+  return { plugin, session, approvals, questions, async dispose() { await session.dispose(); await serverService.dispose(); rmSync(root, { recursive: true, force: true }); } };
 }
 
 function request(text = '/review changes'): ProviderExecutionRequest {
@@ -308,7 +315,8 @@ it.each(['background-approval', 'background-nested', 'mcp-form-late'])('keeps %s
   env.host.mutateSettingsConditionally = async mutate => { await mutate(env.host.settings); };
   env.host.notifyProviderChatOptionsChanged = () => undefined;
   env.host.settings.providerConfigs.opencode = { enabled: true, visibleModels: ['deepseek/chat'], discoveredModels: [{ rawId: 'deepseek/chat', label: 'DeepSeek' }] };
-  const backend = new OpencodeExecutionBackend(env.host);
+  const serverService = new OpencodeServerService();
+  const backend = new OpencodeExecutionBackend(env.host, { serverService });
   const conversation = await env.repository.create({ providerId: 'opencode' });
   let release!: () => void, childAsked!: () => void, replied!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
@@ -365,7 +373,7 @@ it.each(['background-approval', 'background-nested', 'mcp-form-late'])('keeps %s
     expect(completions.filter(event => event.subagentId === 'ses_child').map(event => event.result)).toEqual(text === 'mcp-form-late' ? [] : ['Child result']);
     expect(new Set(completions.map(event => event.originatingTurnId)).size).toBe(text === 'mcp-form-late' ? 0 : 1);
     expect(coordinator.hasBackgroundWork).toBe(false);
-  } finally { release(); await coordinator.dispose(); await env.dispose(); }
+  } finally { release(); await coordinator.dispose(); await serverService.dispose(); await env.dispose(); }
 }, 15000);
 
 it('cancels a background child waiting for approval and can continue the native parent', async () => {

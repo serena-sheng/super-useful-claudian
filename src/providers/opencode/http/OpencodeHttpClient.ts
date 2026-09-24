@@ -3,6 +3,7 @@ import { type IncomingMessage, request } from 'node:http';
 import { StringDecoder } from 'node:string_decoder';
 
 import { ManagedStdioProcess } from '@/core/process/ManagedStdioProcess';
+import { toAbortError } from '@/utils/abort';
 
 export interface OpencodeHttpEvent {
   readonly type: string;
@@ -29,6 +30,10 @@ export class OpencodeHttpClient {
 
   signal(signal?: AbortSignal): AbortSignal {
     return signal ? AbortSignal.any([signal, this.controller.signal]) : this.controller.signal;
+  }
+
+  isReusable(): boolean {
+    return !this.controller.signal.aborted && this.process.getExitState() === null;
   }
 
   async request<T = unknown>(route: string, options: {
@@ -106,8 +111,24 @@ export class OpencodeHttpClient {
   }): Promise<IncomingMessage> {
     const signal = this.signal(options.signal);
     signal.throwIfAborted();
-    this.endpoint ??= this.start();
-    const endpoint = await this.endpoint;
+    this.endpoint ??= this.start().catch(async error => {
+      this.controller.abort(error);
+      await this.dispose();
+      throw error;
+    });
+    // Cancelling a reader must not cancel the server startup shared by other readers.
+    const endpoint = await new Promise<string>((resolve, reject) => {
+      const onAbort = (): void => reject(toAbortError(signal, 'OpenCode HTTP request aborted.'));
+      signal.addEventListener('abort', onAbort, { once: true });
+      this.endpoint!.then(
+        endpoint => { signal.removeEventListener('abort', onAbort); resolve(endpoint); },
+        error => { signal.removeEventListener('abort', onAbort); reject(error instanceof Error ? error : new Error(String(error))); },
+      );
+      if (signal.aborted) {
+        signal.removeEventListener('abort', onAbort);
+        onAbort();
+      }
+    });
     signal.throwIfAborted();
     const url = new URL(route, endpoint);
     // Callers provide paths, never credentials or arbitrary endpoints.
@@ -172,4 +193,19 @@ export class OpencodeHttpClient {
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Re-reads native state that initializes asynchronously; returns the last value after the deadline. */
+export async function pollOpencodeUntil<T>(read: () => Promise<T>, done: (value: T) => boolean, timeoutMs: number, signal: AbortSignal): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await read();
+    if (done(value) || Date.now() >= deadline) return value;
+    await new Promise<void>((resolve, reject) => {
+      signal.throwIfAborted();
+      const onAbort = (): void => { window.clearTimeout(timer); reject(toAbortError(signal, 'OpenCode request aborted.')); };
+      const timer = window.setTimeout(() => { signal.removeEventListener('abort', onAbort); resolve(); }, 25);
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
 }

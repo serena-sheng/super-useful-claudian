@@ -3,6 +3,7 @@ import { hasStoredConfigNormalization } from '../../core/providers/settings/stor
 import type { ProviderModule } from '../../core/providers/types';
 import {
   getOpencodeWorkspaceServices,
+  maybeGetOpencodeWorkspaceServices,
   opencodeWorkspaceRegistration,
 } from './app/OpencodeWorkspaceServices';
 import { OPENCODE_PROVIDER_CAPABILITIES } from './capabilities';
@@ -23,12 +24,14 @@ export const opencodeProviderRegistration: ProviderModule = {
     const workspace = getOpencodeWorkspaceServices();
     return new OpencodeExecutionBackend(plugin, {
       commandCatalog: workspace.commandCatalog,
+      serverService: workspace.serverService,
     });
   },
 
   displayName: 'OpenCode',
   environmentKeyPatterns: [/^OPENCODE_/i],
-  historyService: new OpencodeConversationHistoryService(),
+  // History recovery can run before the workspace is initialized lazily.
+  historyService: new OpencodeConversationHistoryService(() => maybeGetOpencodeWorkspaceServices()?.serverService),
   isEnabled: (settings) => getOpencodeProviderSettings(settings).enabled,
   setEnabled: (settings, enabled) => updateOpencodeProviderSettings(settings, { enabled }),
   settingsReconciler: opencodeSettingsReconciler,

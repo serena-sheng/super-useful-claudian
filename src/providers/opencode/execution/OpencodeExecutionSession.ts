@@ -26,6 +26,7 @@ import {
 import { ProviderModelUnavailableError } from '../../../core/providers/models/ProviderModelUnavailableError';
 import type { OpencodeCommandCatalog } from '../commands/OpencodeCommandCatalog';
 import { loadOpencodeTurnStats } from '../history/OpencodeTurnStats';
+import type { OpencodeServerService } from '../http/OpencodeServerService';
 import { projectOpencodeMetadata } from '../metadata/OpencodeMetadataProjection';
 import { decodeOpencodeModelId } from '../models';
 import {
@@ -53,6 +54,7 @@ export type OpencodeAcpSessionKernelFactory = (
 
 export interface OpencodeExecutionSessionOptions {
   readonly commandCatalog?: Pick<OpencodeCommandCatalog, 'setCommandSnapshot'>;
+  readonly serverService: OpencodeServerService;
   readonly createKernel?: OpencodeAcpSessionKernelFactory;
 }
 
@@ -191,10 +193,10 @@ export class OpencodeExecutionSession implements ProviderExecutionSession {
   constructor(
     private readonly plugin: ProviderHost,
     private readonly config: ProviderSessionConfig,
-    private readonly options: OpencodeExecutionSessionOptions = {},
+    private readonly options: OpencodeExecutionSessionOptions,
   ) {
     this.createKernel = options.createKernel
-      ?? ((kernelOptions) => new DefaultOpencodeSessionKernel(kernelOptions));
+      ?? ((kernelOptions) => new DefaultOpencodeSessionKernel(kernelOptions, options.serverService));
     const providerState = getOpencodeState(config.resumeSeed?.providerState);
     this.nativeSessionId = config.resumeSeed?.providerSessionId ?? providerState.sessionId ?? null;
     this.seedProviderState = Object.freeze({ ...providerState });

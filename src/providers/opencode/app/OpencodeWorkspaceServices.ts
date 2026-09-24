@@ -7,6 +7,7 @@ import type {
   ProviderWorkspaceServices,
 } from '../../../core/providers/types';
 import { OpencodeCommandCatalog } from '../commands/OpencodeCommandCatalog';
+import { OpencodeServerService } from '../http/OpencodeServerService';
 import { OpencodeMetadataService } from '../metadata/OpencodeMetadataService';
 import { OpencodeCliResolver } from '../runtime/OpencodeCliResolver';
 import { createOpencodeModels } from '../runtime/OpencodeModels';
@@ -16,6 +17,7 @@ import { OpencodeCommandLoader } from './OpencodeCommandLoader';
 export interface OpencodeWorkspaceServices extends ProviderWorkspaceServices {
   commandCatalog: ProviderCommandCatalog;
   metadataService: OpencodeMetadataService;
+  serverService: OpencodeServerService;
 }
 
 const opencodeTabWarmupPolicy: ProviderTabWarmupPolicy = {
@@ -28,7 +30,12 @@ export async function createOpencodeWorkspaceServices(
   plugin: ProviderHost,
 ): Promise<OpencodeWorkspaceServices> {
   const commandCatalog = new OpencodeCommandCatalog();
-  const metadataService = new OpencodeMetadataService(plugin, { commandCatalog });
+  const serverService = new OpencodeServerService();
+  const unregister = plugin.executionLifecycleRegistry.registerTransitionHook('opencode', {
+    beforeTransition: () => serverService.beginTransition(),
+    afterTransition: () => serverService.endTransition(),
+  });
+  const metadataService = new OpencodeMetadataService(plugin, { commandCatalog, serverService });
 
   const modelCatalog = createOpencodeModels(plugin, metadataService);
   const unregisterModels = plugin.executionLifecycleRegistry.registerTransitionHook('opencode', { beforeTransition: () => modelCatalog.beginTransition(), afterTransition: () => modelCatalog.endTransition() });
@@ -38,10 +45,15 @@ export async function createOpencodeWorkspaceServices(
     modelCatalog,
     cliResolver,
     metadataService,
+    serverService,
     commandLoader: new OpencodeCommandLoader(metadataService),
     settingsTabRenderer: createOpencodeSettingsTabRenderer({ cliResolver, metadataService, modelCatalog }),
     tabWarmupPolicy: opencodeTabWarmupPolicy,
-    dispose: async () => { unregisterModels(); await Promise.all([metadataService.dispose(), modelCatalog.dispose()]); },
+    dispose: async () => {
+      unregister();
+      unregisterModels();
+      await Promise.all([metadataService.dispose(), serverService.dispose(), modelCatalog.dispose()]);
+    },
   };
 }
 
