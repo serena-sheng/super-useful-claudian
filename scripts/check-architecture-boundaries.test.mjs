@@ -113,10 +113,6 @@ function normalizeModuleTarget(target) {
   return target.replace(/\.(?:[cm]?[jt]sx?)$/, '');
 }
 
-function importsPackage(specifier, packageName) {
-  return specifier === packageName || specifier.startsWith(`${packageName}/`);
-}
-
 function resolvedImportKey(importer, target) {
   return `${path.normalize(importer)}::${normalizeModuleTarget(path.normalize(target))}`;
 }
@@ -133,22 +129,6 @@ function resolveTypeScriptImport(importer, specifier) {
   ];
   return candidates.find(candidate => fs.existsSync(candidate) && fs.statSync(candidate).isFile())
     ?? null;
-}
-
-function listStaticSourceGraph(entry) {
-  const pending = [entry];
-  const visited = new Set();
-  while (pending.length > 0) {
-    const file = pending.pop();
-    if (!file || visited.has(file)) continue;
-    visited.add(file);
-    for (const sourceImport of listSourceImports(file)) {
-      if (sourceImport.dynamic || sourceImport.typeOnly) continue;
-      const target = resolveTypeScriptImport(file, sourceImport.specifier);
-      if (target && isPathWithin(target, sourceRoot)) pending.push(target);
-    }
-  }
-  return [...visited].sort();
 }
 
 function findResolvedImportViolations(roots, isForbidden, allowedImports = new Set()) {
@@ -204,12 +184,6 @@ const allowedAppProviderImports = new Set([
     path.join(providersRoot, 'defaultProviderConfigs'),
   ),
 ]);
-const allowedProviderAppImports = new Set([
-  resolvedImportKey(
-    path.join(providersRoot, 'claude', 'storage', 'ClaudianSettingsStorage.ts'),
-    path.join(appRoot, 'settings', 'ClaudianSettingsStorage'),
-  ),
-]);
 
 test('repository paths use POSIX separators for stable cross-platform comparison', () => {
   assert.equal(normalizeRepositoryPath('src\\main.ts'), 'src/main.ts');
@@ -254,11 +228,10 @@ test('providers are independent from main and features', () => {
   assert.deepEqual(findMatches([path.join(sourceRoot, 'providers')], pattern), []);
 });
 
-test('providers avoid root app imports outside Claude compatibility seams', () => {
+test('providers avoid root app imports', () => {
   assert.deepEqual(findResolvedImportViolations(
     [providersRoot],
     target => isPathWithin(target, appRoot),
-    allowedProviderAppImports,
   ), []);
 });
 
