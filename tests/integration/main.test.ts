@@ -49,6 +49,20 @@ describe('ClaudianPlugin', () => {
     return instance;
   }
 
+  // The awaited work stays pending, so any completion proves onload does not await it.
+  // The bound only limits how long a regression takes to report, not how fast onload runs.
+  async function completesWhilePending(promise: Promise<unknown>): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        promise.then(() => true),
+        new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 2_000); }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   function collabOf(instance: ClaudianPlugin): any {
     return (instance as any).collab;
   }
@@ -462,10 +476,7 @@ describe('ClaudianPlugin', () => {
         'createCollabFeatureService',
       );
 
-      const completedWithoutListener = await Promise.race([
-        plugin.onload().then(() => true),
-        new Promise<boolean>(resolve => setTimeout(() => resolve(false), 100)),
-      ]);
+      const completedWithoutListener = await completesWhilePending(plugin.onload());
       await new Promise(resolve => setImmediate(resolve));
 
       expect(completedWithoutListener).toBe(true);
@@ -889,10 +900,7 @@ describe('ClaudianPlugin', () => {
       });
 
       const onloadPromise = plugin.onload();
-      const completedBeforeHistoryScan = await Promise.race([
-        onloadPromise.then(() => true),
-        new Promise<boolean>(resolve => setTimeout(() => resolve(false), 20)),
-      ]);
+      const completedBeforeHistoryScan = await completesWhilePending(onloadPromise);
       finishHistoryScan({ metadata: [], complete: true, invalidMetadataCount: 0 });
       await onloadPromise;
       const cachedConversation = plugin.getCachedConversation(restoredMetadata.id);
