@@ -131,7 +131,7 @@ export class SessionMetadataLoader {
         shells,
         new Map(publishable.map(({ conversation, source }) => [
           conversation.id,
-          source === 'legacy' ? 'unscoped' : source,
+          source,
         ])),
       );
       conversations.registerHistoricalModelRecoverySources(

@@ -61,7 +61,6 @@ describe('ClaudianPlugin', () => {
     }
   }
 
-
   function getRegisteredCommand(commandId: string) {
     const call = (plugin.addCommand as jest.Mock).mock.calls.find(
       ([config]) => config.id === commandId,
@@ -520,54 +519,6 @@ describe('ClaudianPlugin', () => {
       scanSpy.mockRestore();
       loadSourceSpy.mockRestore();
       saveSpy.mockRestore();
-    });
-
-    it('migrates very old metadata into the unscoped namespace after scanning', async () => {
-      const legacyMetadata = {
-        id: 'legacy-background-conversation',
-        providerId: 'claude' as const,
-        title: 'Legacy background conversation',
-        createdAt: 1,
-        lastActivityAt: 2,
-      };
-      await plugin.onload();
-      const scanSpy = jest.spyOn(SessionStorage.prototype, 'scan')
-        .mockResolvedValue({
-          records: [{
-            metadata: legacyMetadata,
-            needsMigration: false,
-            source: 'legacy',
-          }],
-          complete: true,
-          invalidMetadataCount: 0,
-        });
-      const loadSpy = jest.spyOn(SessionStorage.prototype, 'load')
-        .mockResolvedValue({
-          metadata: legacyMetadata,
-          needsMigration: false,
-          source: 'legacy',
-        });
-      const persistence = getConversationPersistence(plugin);
-      const events: string[] = [];
-      const saveSpy = jest.spyOn(persistence, 'saveMetadata')
-        .mockImplementation(async () => {
-          events.push('save-unscoped');
-        });
-      const deleteLegacySpy = jest.spyOn(persistence, 'deleteLegacyMetadata')
-        .mockImplementation(async () => {
-          events.push('delete-legacy');
-        });
-
-      await (plugin as any).sessionMetadata.loadRemaining();
-
-      expect(events).toEqual(['save-unscoped', 'delete-legacy']);
-      expect(plugin.getCachedConversation(legacyMetadata.id)?.title)
-        .toBe(legacyMetadata.title);
-
-      scanSpy.mockRestore();
-      loadSpy.mockRestore();
-      saveSpy.mockRestore();
-      deleteLegacySpy.mockRestore();
     });
 
     it('recovers missing model metadata after the background session scan', async () => {
@@ -1310,7 +1261,6 @@ describe('ClaudianPlugin', () => {
       expect(disposeExecution).not.toHaveBeenCalled();
       expect(disposeWorkspaces).not.toHaveBeenCalled();
 
-
       resolveViewDrain();
       await (plugin as any).applicationShutdownPromise;
 
@@ -1538,37 +1488,6 @@ describe('ClaudianPlugin', () => {
       expect(JSON.parse(writeCall[1]).maxWarmAgentProcesses).toBe(5);
     });
 
-    it('should strip legacy blocklist fields when loading old settings', async () => {
-      mockApp.vault.adapter.exists.mockImplementation(async (path: string) => {
-        return path === '.claudian/claudian-settings.json';
-      });
-      mockApp.vault.adapter.read.mockImplementation(async (path: string) => {
-        if (path === '.claudian/claudian-settings.json') {
-          return JSON.stringify({
-            enableBlocklist: false,
-            blockedCommands: { unix: ['rm -rf', '  '] },
-          });
-        }
-        return '';
-      });
-
-      await plugin.loadSettings();
-
-      expect('enableBlocklist' in plugin.settings).toBe(false);
-      expect('blockedCommands' in plugin.settings).toBe(false);
-      expect(mockApp.vault.adapter.write).toHaveBeenCalledWith(
-        '.claudian/claudian-settings.json',
-        expect.any(String),
-      );
-      const writeCall = (mockApp.vault.adapter.write as jest.Mock).mock.calls.find(
-        ([path]) => path === '.claudian/claudian-settings.json',
-      );
-      expect(writeCall).toBeDefined();
-      const content = JSON.parse(writeCall[1]);
-      expect(content).not.toHaveProperty('enableBlocklist');
-      expect(content).not.toHaveProperty('blockedCommands');
-    });
-
     it('should use defaults when no saved data', async () => {
       // No settings file exists
       mockApp.vault.adapter.exists.mockResolvedValue(false);
@@ -1591,29 +1510,6 @@ describe('ClaudianPlugin', () => {
       expect(JSON.parse(JSON.stringify(plugin.settings))).toEqual(DEFAULT_SETTINGS);
     });
 
-    it('should migrate legacy openInMainTab true to main-tab placement', async () => {
-      mockApp.vault.adapter.exists.mockImplementation(async (path: string) => {
-        return path === '.claudian/claudian-settings.json';
-      });
-      mockApp.vault.adapter.read.mockImplementation(async (path: string) => {
-        if (path === '.claudian/claudian-settings.json') {
-          return JSON.stringify({ openInMainTab: true });
-        }
-        return '';
-      });
-
-      await plugin.loadSettings();
-
-      expect(plugin.settings.chatViewPlacement).toBe('main-tab');
-      const writeCall = (mockApp.vault.adapter.write as jest.Mock).mock.calls.find(
-        ([path]) => path === '.claudian/claudian-settings.json',
-      );
-      expect(writeCall).toBeDefined();
-      const content = JSON.parse(writeCall[1]);
-      expect(content.chatViewPlacement).toBe('main-tab');
-      expect(content).not.toHaveProperty('openInMainTab');
-    });
-
     it('preserves the saved model while applying environment configuration', async () => {
       // Mock claudian-settings.json with environment variables
       mockApp.vault.adapter.exists.mockImplementation(async (path: string) => {
@@ -1622,7 +1518,7 @@ describe('ClaudianPlugin', () => {
       mockApp.vault.adapter.read.mockImplementation(async (path: string) => {
         if (path === '.claudian/claudian-settings.json') {
           return JSON.stringify({
-            environmentVariables: 'ANTHROPIC_MODEL=custom-model',
+            providerConfigs: { claude: { environmentVariables: 'ANTHROPIC_MODEL=custom-model' } },
             lastEnvHash: '',
           });
         }
@@ -3711,8 +3607,7 @@ describe('ClaudianPlugin', () => {
         if (path === '.claudian/claudian-settings.json') {
           // All these fields are now in claudian-settings.json
           return JSON.stringify({
-            lastEnvHash: 'old-hash',
-            environmentVariables: 'ANTHROPIC_BASE_URL=https://api.example.com',
+            providerConfigs: { claude: { environmentHash: 'old-hash', environmentVariables: 'ANTHROPIC_BASE_URL=https://api.example.com' } },
           });
         }
         if (path === '.claudian/sessions/conv-saved-1.meta.json') {
@@ -3982,7 +3877,7 @@ describe('ClaudianPlugin', () => {
   });
 
   describe('loadSdkMessagesForConversation - subagent recovery', () => {
-    it('restores subagent data when Task tool exists but subagent content block is missing', async () => {
+    it('restores subagent data when Agent tool exists but subagent content block is missing', async () => {
       await plugin.onload();
 
       const conv = await plugin.createConversation();
@@ -4017,7 +3912,7 @@ describe('ClaudianPlugin', () => {
             toolCalls: [
               {
                 id: 'task-1',
-                name: 'Task',
+                name: 'Agent',
                 input: { description: 'Do sub task' },
                 status: 'completed',
                 result: 'Task completed',
@@ -4089,7 +3984,7 @@ describe('ClaudianPlugin', () => {
             toolCalls: [
               {
                 id: 'task-merge-1',
-                name: 'Task',
+                name: 'Agent',
                 input: { description: 'Do sub task', run_in_background: true },
                 status: 'completed',
                 result: 'Full SDK result from queue-operation',
@@ -4155,7 +4050,7 @@ describe('ClaudianPlugin', () => {
             toolCalls: [
               {
                 id: 'task-merge-2',
-                name: 'Task',
+                name: 'Agent',
                 input: { description: 'SDK async subagent', run_in_background: true },
                 status: 'completed',
                 result: 'Short SDK result',
@@ -4217,7 +4112,7 @@ describe('ClaudianPlugin', () => {
             toolCalls: [
               {
                 id: 'task-sync-1',
-                name: 'Task',
+                name: 'Agent',
                 input: { description: 'Do sync task' },
                 status: 'completed',
                 result: 'Sync result',
@@ -4275,7 +4170,7 @@ describe('ClaudianPlugin', () => {
             toolCalls: [
               {
                 id: 'task-async-sdk-terminal',
-                name: 'Task',
+                name: 'Agent',
                 input: { description: 'SDK async subagent', run_in_background: true },
                 status: 'completed',
                 result: 'Full SDK final result',
@@ -4344,7 +4239,7 @@ describe('ClaudianPlugin', () => {
             toolCalls: [
               {
                 id: 'task-async-cache-terminal',
-                name: 'Task',
+                name: 'Agent',
                 input: { description: 'SDK async subagent', run_in_background: true },
                 status: 'running',
                 result: 'Task launched in background.',
@@ -4379,7 +4274,7 @@ describe('ClaudianPlugin', () => {
       loadSpy.mockRestore();
     });
 
-    it('restores async subagent data and mode when Task tool exists but async block is missing', async () => {
+    it('restores async subagent data and mode when Agent tool exists but async block is missing', async () => {
       await plugin.onload();
 
       const conv = await plugin.createConversation();
@@ -4408,7 +4303,7 @@ describe('ClaudianPlugin', () => {
             toolCalls: [
               {
                 id: 'task-async-1',
-                name: 'Task',
+                name: 'Agent',
                 input: { description: 'Do background task', run_in_background: true },
                 status: 'completed',
                 result: 'Task started',
@@ -4476,7 +4371,7 @@ describe('ClaudianPlugin', () => {
             toolCalls: [
               {
                 id: 'task-async-tools',
-                name: 'Task',
+                name: 'Agent',
                 input: { description: 'Do background task', run_in_background: true },
                 status: 'completed',
                 result: 'Task started',

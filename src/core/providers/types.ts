@@ -77,7 +77,6 @@ export interface ProviderSettingsStorageAdapter {
   /** Whether selected models need native effort metadata discovery during startup. */
   needsReasoningMetadata?(settings: Record<string, unknown>): boolean;
   hostScopedFields?: string[];
-  legacyTopLevelFields?: string[];
   runtimeOnlyFields?: string[];
   /** Provider-owned durable projection; full discovery catalogs remain runtime-only. */
   projectPersistedConfig?(settings: Record<string, unknown>): Record<string, unknown>;
@@ -102,7 +101,7 @@ export interface ProviderSettingsReconciler {
     conversations: Conversation[],
   ): { changed: boolean; invalidatedConversations: Conversation[] };
 
-  normalizeModelVariantSettings(settings: Record<string, unknown>): boolean;
+  normalizeModelVariantSettings?(settings: Record<string, unknown>): boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -243,9 +242,6 @@ export interface ProviderChatUIConfig {
 
   /** Default reasoning value for the model. */
   getDefaultReasoningValue(model: string, settings: Record<string, unknown>): string;
-
-  /** Normalize runtime model aliases only for legacy custom-context-limit matching. */
-  normalizeCustomContextLimitModel?(this: void, model: string): string;
 
   /** Whether this is a built-in (default) model vs custom/env model. */
   isDefaultModel(model: string): boolean;

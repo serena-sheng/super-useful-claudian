@@ -37,7 +37,6 @@ function createRepository(conversation = createConversation()) {
     },
     saveMetadata: jest.fn().mockResolvedValue(undefined),
     deleteCurrentMetadata: jest.fn().mockResolvedValue(undefined),
-    deleteLegacyMetadata: jest.fn().mockResolvedValue(undefined),
     assignMetadataToDevice: jest.fn().mockResolvedValue(undefined),
   };
   const repository = new ConversationRepository({
@@ -1023,7 +1022,6 @@ describe('ConversationRepository hydration', () => {
     expect(repository.getCachedConversation(shell.id)).toBeNull();
     expect(persistence.saveMetadata).not.toHaveBeenCalled();
     expect(persistence.deleteCurrentMetadata).not.toHaveBeenCalled();
-    expect(persistence.deleteLegacyMetadata).not.toHaveBeenCalled();
   });
 
   it('allows a discarded unresolved shell ID to be published again', () => {

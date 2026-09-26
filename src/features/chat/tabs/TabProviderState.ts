@@ -293,7 +293,6 @@ export function refreshTabContextUsage(
     providerId: getTabProviderId(tab, plugin),
     model: settings.model,
     customContextLimits: settings.customContextLimits,
-    normalizeCustomContextLimitModel: getTabChatUIConfig(tab, plugin).normalizeCustomContextLimitModel,
   }));
 }
 
@@ -394,26 +393,10 @@ export async function initializeTabExecution(
   tab: AssembledTabRuntime,
   plugin: ChatFeatureHost,
   conversationOverride?: Conversation | null,
-): Promise<void>;
-export async function initializeTabExecution(
-  tab: AssembledTabRuntime,
-  plugin: ChatFeatureHost,
-  _legacyArg: unknown,
-  conversationOverride?: Conversation | null,
-): Promise<void>;
-export async function initializeTabExecution(
-  tab: AssembledTabRuntime,
-  plugin: ChatFeatureHost,
-  argOrOverride?: unknown,
-  maybeOverride?: Conversation | null,
 ): Promise<void> {
   if (tab.lifecycleState === 'closing') {
     return;
   }
-
-  const conversationOverride = isConversationLike(argOrOverride)
-    ? argOrOverride
-    : (argOrOverride === null ? null : maybeOverride);
 
   const conversation = conversationOverride ?? (
     tab.conversationId
@@ -444,13 +427,6 @@ export async function initializeTabExecution(
     tab.draftModel = null;
     tab.lifecycleState = 'warm';
   }
-}
-
-function isConversationLike(value: unknown): value is Conversation {
-  return !!value
-    && typeof value === 'object'
-    && typeof (value as Conversation).id === 'string'
-    && Array.isArray((value as Conversation).messages);
 }
 
 export async function updateTabPermissionMode(

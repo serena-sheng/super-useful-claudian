@@ -4,15 +4,14 @@ import { testDate } from '@test/helpers/testClock';
 
 import { ConversationRepository } from '@/app/conversations/ConversationRepository';
 import {
-LEGACY_SESSIONS_PATH,
-SESSIONS_PATH,
-SessionStorage,
+  SESSIONS_PATH,
+  SessionStorage,
 } from '@/core/bootstrap/SessionStorage';
 import { getDeviceSessionsPath } from '@/core/bootstrap/storagePaths';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { ProviderId } from '@/core/providers/types';
 import type { VaultFileAdapter } from '@/core/storage/VaultFileAdapter';
-import type { Conversation,SessionMetadata,UsageInfo } from '@/core/types';
+import type { Conversation, SessionMetadata, UsageInfo } from '@/core/types';
 
 const DEVICE_KEY = `device-${'a'.repeat(64)}`;
 
@@ -238,38 +237,11 @@ describe('SessionStorage', () => {
       expect(result).toBeNull();
     });
 
-    it('loads legacy metadata without migrating during the read', async () => {
-      const metadata = {
-        id: 'session-legacy',
-        title: 'Legacy Session',
-        createdAt: 1700000000,
-        lastActivityAt: 1700001000,
-      };
-
-      mockAdapter.exists.mockImplementation(async (path: string) => (
-        path === `${LEGACY_SESSIONS_PATH}/session-legacy.meta.json`
-      ));
-      mockAdapter.read.mockResolvedValue(JSON.stringify(metadata));
-
-      const result = await storage.loadMetadata('session-legacy');
-
-      expect(result).toEqual(metadata);
-      expect(mockAdapter.write).not.toHaveBeenCalled();
-      expect(mockAdapter.delete).not.toHaveBeenCalled();
-    });
-
-    it('skips mismatched legacy metadata without migrating or modifying it', async () => {
-      mockAdapter.exists.mockImplementation(async (path: string) => (
-        path === `${LEGACY_SESSIONS_PATH}/session-requested.meta.json`
-      ));
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        id: 'session-other',
-        title: 'Mismatched',
-        createdAt: 1,
-        lastActivityAt: 1,
-      }));
-
-      await expect(storage.loadMetadata('session-requested')).resolves.toBeNull();
+    it('ignores retired .claude session metadata', async () => {
+      mockAdapter.exists.mockImplementation(async path => path === '.claude/sessions/session-retired.meta.json');
+      mockAdapter.read.mockResolvedValue(JSON.stringify({ id: 'session-retired', title: 'Retired' }));
+      expect(await storage.loadMetadata('session-retired')).toBeNull();
+      expect(mockAdapter.read).not.toHaveBeenCalled();
       expect(mockAdapter.write).not.toHaveBeenCalled();
       expect(mockAdapter.delete).not.toHaveBeenCalled();
     });
@@ -462,23 +434,11 @@ describe('SessionStorage', () => {
       });
     });
 
-    it('keeps valid legacy metadata visible without migration writes', async () => {
-      mockAdapter.listFiles.mockImplementation(async (path: string) => (
-        path === LEGACY_SESSIONS_PATH
-          ? [`${LEGACY_SESSIONS_PATH}/legacy.meta.json`]
-          : []
-      ));
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        id: 'legacy',
-        title: 'Legacy session',
-        createdAt: 1,
-        lastActivityAt: 2,
-      }));
-      mockAdapter.write.mockRejectedValue(new Error('EEXIST: .claudian/sessions'));
-
-      await expect(storage.listMetadata()).resolves.toEqual([
-        expect.objectContaining({ id: 'legacy', title: 'Legacy session' }),
-      ]);
+    it('does not scan the retired metadata namespace', async () => {
+      mockAdapter.listFiles.mockImplementation(async path => path === '.claude/sessions' ? ['.claude/sessions/retired.meta.json'] : []);
+      expect(await storage.listMetadata()).toEqual([]);
+      expect(mockAdapter.listFiles).not.toHaveBeenCalledWith('.claude/sessions');
+      expect(mockAdapter.read).not.toHaveBeenCalled();
       expect(mockAdapter.write).not.toHaveBeenCalled();
       expect(mockAdapter.delete).not.toHaveBeenCalled();
     });
@@ -564,7 +524,7 @@ describe('SessionStorage', () => {
   });
 
   describe('toSessionMetadata - extractSubagentData', () => {
-    it('extracts subagent data from Task toolCalls', () => {
+    it('extracts subagent data from Agent toolCalls', () => {
       const conversation: Conversation = {
         id: 'conv-subagent',
         providerId: 'claude' as ProviderId,
@@ -582,7 +542,7 @@ describe('SessionStorage', () => {
             toolCalls: [
               {
                 id: 'task-1',
-                name: 'Task',
+                name: 'Agent',
                 input: { description: 'Test subagent' },
                 status: 'completed',
                 result: 'Done',
@@ -629,7 +589,7 @@ describe('SessionStorage', () => {
       expect((metadata.providerState as any)?.subagentData).toBeUndefined();
     });
 
-    it('ignores Task toolCalls without linked subagent', () => {
+    it('ignores Agent toolCalls without linked subagent', () => {
       const conversation: Conversation = {
         id: 'conv-task-subagent',
         providerId: 'claude' as ProviderId,
@@ -646,7 +606,7 @@ describe('SessionStorage', () => {
             toolCalls: [
               {
                 id: 'task-1',
-                name: 'Task',
+                name: 'Agent',
                 input: { description: 'Background task', run_in_background: true },
                 status: 'completed',
                 result: 'Task running',

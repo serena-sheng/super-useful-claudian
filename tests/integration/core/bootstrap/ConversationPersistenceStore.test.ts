@@ -82,7 +82,7 @@ test('execution snapshots avoid history payload serialization while persistence 
   const conversation: Conversation = {
     ...metadata, providerId: 'claude', sessionId: 'native-1', providerState,
     messages: [{ id: 'message-1', role: 'assistant', content: '', timestamp: testDate().getTime(),
-      toolCalls: [{ id: subagent.id, name: 'Task', input: {}, status: 'completed', isExpanded: false, subagent }] }],
+      toolCalls: [{ id: subagent.id, name: 'Agent', input: {}, status: 'completed', isExpanded: false, subagent }] }],
   };
   const session = new ClaudeExecutionBackend({ settings: {} } as ProviderHost).createSession({
     lifecycle: 'persistent', nativePersistence: 'enabled', vaultWorkingDirectory: root,
