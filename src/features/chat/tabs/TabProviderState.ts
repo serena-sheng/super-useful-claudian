@@ -74,16 +74,53 @@ export function getTabChatUIConfig(
 }
 
 export function getTabSettingsSnapshot(
-  tab: TabProviderContext,
+  tab: TabProviderContext & Pick<AssembledTabRuntime, 'session'>,
   plugin: ChatFeatureHost,
 ): TabProviderSettings & ChatSettings {
+  const settings = plugin.getCommittedSettings();
   const providerId = getTabProviderId(tab, plugin);
-  if (!providerId) return { ...plugin.settings, model: tab.draftModel ?? '', reasoning: null };
-  return getChatSettingsSnapshot(
-    plugin.settings,
-    providerId,
-    getTabSelectedModel(tab, plugin),
-  );
+  if (!providerId) return { ...settings, model: tab.draftModel ?? '', reasoning: null };
+  const snapshot = {
+    ...getChatSettingsSnapshot(settings, providerId, getTabSelectedModel(tab, plugin, settings)),
+  };
+  if (snapshot.reasoning !== null) {
+    const key = `${providerId}:${snapshot.model}`;
+    const uiConfig = ProviderRegistry.getChatUIConfig(providerId);
+    const selected = tab.session.reasoningSelections.get(key) ?? snapshot.reasoning;
+    const reasoning = uiConfig.getReasoningOptions(snapshot.model, snapshot)
+      .some(option => option.value === selected)
+      ? selected
+      : uiConfig.getDefaultReasoningValue(snapshot.model, snapshot);
+    tab.session.reasoningSelections.set(key, reasoning);
+    snapshot.reasoning = reasoning;
+    if (uiConfig.isAdaptiveReasoningModel(snapshot.model, snapshot)) {
+      snapshot.effortLevel = reasoning;
+    } else {
+      snapshot.thinkingBudget = reasoning;
+    }
+  }
+  return snapshot;
+}
+
+export async function updateTabReasoning(
+  tab: AssembledTabRuntime,
+  plugin: ChatFeatureHost,
+  reasoning: string,
+): Promise<void> {
+  const providerId = requireTabProviderId(tab, plugin);
+  const model = getTabSettingsSnapshot(tab, plugin).model;
+  const uiConfig = ProviderRegistry.getChatUIConfig(providerId);
+  await plugin.mutateSettings((settings) => {
+    const snapshot = getProviderSettingsSnapshotWithModel(settings, providerId, model);
+    if (uiConfig.isAdaptiveReasoningModel(model, snapshot)) {
+      snapshot.effortLevel = reasoning;
+    } else {
+      snapshot.thinkingBudget = reasoning;
+    }
+    uiConfig.applyReasoningSelection?.(model, reasoning, snapshot);
+    ProviderSettingsCoordinator.commitProviderSettingsSnapshot(settings, providerId, snapshot);
+  });
+  tab.session.reasoningSelections.set(`${providerId}:${model}`, reasoning);
 }
 
 export function getWritableTabSettingsSnapshot(
@@ -108,18 +145,19 @@ export function getTabConversation(
 export function getTabSelectedModel(
   tab: TabProviderContext,
   plugin: ChatFeatureHost,
+  settings: Readonly<ClaudianSettings> = plugin.settings,
 ): string | null {
   const providerId = getTabProviderId(tab, plugin);
   if (!providerId) return tab.draftModel;
   if (tab.conversationId === null) {
-    return normalizeProviderModelSelection(providerId, plugin.settings, tab.draftModel)
+    return normalizeProviderModelSelection(providerId, settings, tab.draftModel)
       ?? tab.draftModel
       ?? null;
   }
 
   const conversation = getTabConversation(tab, plugin);
   if (conversation) {
-    return resolveConversationModel(plugin.settings, providerId, conversation).model;
+    return resolveConversationModel(settings, providerId, conversation).model;
   }
 
   return null;
