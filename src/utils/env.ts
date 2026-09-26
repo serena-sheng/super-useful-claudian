@@ -18,6 +18,20 @@ function getHomeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || '';
 }
 
+function getMiseShimsDir(home: string): string | null {
+  if (process.env.MISE_SHIMS_DIR) return process.env.MISE_SHIMS_DIR;
+  if (process.env.MISE_DATA_DIR) return path.join(process.env.MISE_DATA_DIR, 'shims');
+  if (process.env.XDG_DATA_HOME) return path.join(process.env.XDG_DATA_HOME, 'mise', 'shims');
+
+  if (isWindows) {
+    const localAppData = process.env.LOCALAPPDATA
+      || (home ? path.join(home, 'AppData', 'Local') : null);
+    return localAppData ? path.join(localAppData, 'mise', 'shims') : null;
+  }
+
+  return home ? path.join(home, '.local', 'share', 'mise', 'shims') : null;
+}
+
 // Windows ships Obsidian.com beside the app. Unix uses registered CLI locations;
 // adding the macOS app directory can select the GUI executable as `obsidian`.
 function getAppProvidedCLIPaths(): string[] {
@@ -31,9 +45,9 @@ function getAppProvidedCLIPaths(): string[] {
 /** GUI apps like Obsidian have minimal PATH, so we add common binary locations. */
 function getExtraBinaryPaths(): string[] {
   const home = getHomeDir();
+  const paths: string[] = [];
 
   if (isWindows) {
-    const paths: string[] = [];
     const localAppData = process.env.LOCALAPPDATA;
     const appData = process.env.APPDATA;
     const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
@@ -119,18 +133,14 @@ function getExtraBinaryPaths(): string[] {
       paths.push(path.join(home, '.bun', 'bin'));
       paths.push(path.join(home, '.opencode', 'bin'));
     }
-
-    paths.push(...getAppProvidedCLIPaths());
-
-    return paths;
   } else {
     // Unix paths
-    const paths = [
+    paths.push(
       '/usr/local/bin',
       '/opt/homebrew/bin',  // macOS ARM Homebrew
       '/usr/bin',
       '/bin',
-    ];
+    );
 
     const voltaHome = process.env.VOLTA_HOME;
     if (voltaHome) {
@@ -175,11 +185,13 @@ function getExtraBinaryPaths(): string[] {
         }
       }
     }
-
-    paths.push(...getAppProvidedCLIPaths());
-
-    return paths;
   }
+
+  const miseShims = getMiseShimsDir(home);
+  if (miseShims) paths.push(miseShims);
+  paths.push(...getAppProvidedCLIPaths());
+
+  return paths;
 }
 
 function* findNodeDirectories(additionalPaths?: string): Generator<string, undefined> {
