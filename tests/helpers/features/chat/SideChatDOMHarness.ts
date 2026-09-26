@@ -61,6 +61,7 @@ export function createHarness(options: {
   const forkState = { forkSource: { resumeAt: 'checkpoint-1', sessionId: 'main-session' } };
   ProviderRegistry.register('claude', {
     capabilities: { providerId: 'claude', supportsFork: options.supportsFork ?? true, supportsEphemeralSessions: true, supportsEphemeralFork: options.supportsEphemeralFork, forkMode: options.forkMode },
+    modelPolicy: ProviderRegistry.getModelPolicy('claude'),
     chatUIConfig: ProviderRegistry.getChatUIConfig('claude'),
     createExecutionBackend: () => backend,
     subagentAdapter: options.subagentAdapter,
@@ -112,6 +113,7 @@ export function createHarness(options: {
   const settings = options.settings ?? {};
   const plugin = {
     app,
+    getConversationSummary(id: string) { return (this as unknown as { getConversationSync: (id: string) => any }).getConversationSync(id); },
     getConversationSync: () => null,
     getMainAgentDynamicSystemPromptSections: options.getMainAgentDynamicSystemPromptSections,
     providerHost: { app, settings, executionLifecycleRegistry: lifecycleRegistry },

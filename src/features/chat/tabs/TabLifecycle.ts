@@ -36,7 +36,7 @@ export function isClosingLifecycleState(
 export function commitProvisionalTab(tab: AssembledTabRuntime): void {
   tab.session.claimUserOwnership();
   if (tab.lifecycleState === 'provisional') {
-    tab.lifecycleState = 'cold';
+    tab.session.commitAdmission();
   }
 }
 
@@ -146,8 +146,9 @@ export async function destroyTab(tab: AssembledTabRuntime): Promise<void> {
 }
 
 async function destroyTabOnce(tab: AssembledTabRuntime): Promise<void> {
-  tab.lifecycleState = 'closing';
+  tab.session.beginClose();
   const drainResult = await drainTabForShutdownSnapshot(tab);
+  tab.session.sealIdentity();
   const cleanupFailures = [...drainResult.cleanupFailures];
   const { cancelledActiveTurn } = drainResult;
 
@@ -183,7 +184,7 @@ async function destroyTabOnce(tab: AssembledTabRuntime): Promise<void> {
 
 export function getTabTitle(tab: Pick<AssembledTabRuntime, 'conversationId'>, plugin: ChatFeatureHost): string {
   if (tab.conversationId) {
-    const conversation = plugin.getConversationSync(tab.conversationId);
+    const conversation = plugin.getConversationSummary(tab.conversationId);
     if (conversation?.title) {
       return conversation.title;
     }

@@ -188,18 +188,17 @@ export class SessionMetadataLoader {
       invalidatedEntries.map(({ id }) => id),
     );
     const existingIds = new Set(
-      conversations.getAll().map(({ id }) => id),
+      conversations.list().map(({ id }) => id),
     );
     await conversations.adoptMetadataConversations(entries);
     if (this.isStopped()) return;
     conversations.registerHistoricalModelRecoverySources(
       shells,
     );
-    const adoptedConversations = shells.filter((conversation) => (
-      !existingIds.has(conversation.id)
-      && conversations.getCachedConversation(conversation.id)
-        === conversation
-    ));
+    const adoptedConversations = shells
+      .filter(conversation => !existingIds.has(conversation.id))
+      .map(conversation => conversations.getCachedConversation(conversation.id))
+      .filter((conversation): conversation is Conversation => conversation !== null);
     if (adoptedConversations.length > 0) {
       addedConversations.push(...adoptedConversations);
       invalidatedConversations.push(
@@ -208,13 +207,11 @@ export class SessionMetadataLoader {
       didChangeConversationList = true;
     }
     const currentAddedConversations = addedConversations.filter((conversation) => (
-      conversations.getCachedConversation(conversation.id)
-        === conversation
+      conversations.isCurrentSnapshot(conversation)
     ));
     const currentInvalidatedConversations = invalidatedConversations.filter(
       (conversation) => (
-        conversations.getCachedConversation(conversation.id)
-          === conversation
+        conversations.isCurrentSnapshot(conversation)
       ),
     );
     const uniqueCurrentInvalidatedConversations = currentInvalidatedConversations.filter(

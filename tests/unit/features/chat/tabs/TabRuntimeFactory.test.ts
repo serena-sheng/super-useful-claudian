@@ -99,6 +99,7 @@ jest.mock('@/core/providers/ProviderRegistry', () => ({
       supportsFork: true,
       supportsImageAttachments: true,
     }),
+    getModelPolicy: (providerId: string) => ProviderRegistry.getChatUIConfig(providerId),
     getChatUIConfig: jest.fn().mockReturnValue({
       applyPermissionMode: (_mode: string, settings: Record<string, unknown>) => {
         settings.permissionMode = _mode;
@@ -132,9 +133,10 @@ jest.mock('@/core/providers/ProviderRegistry', () => ({
 
 jest.mock('@/core/providers/ProviderSettingsCoordinator', () => ({
   ProviderSettingsCoordinator: {
-    commitProviderSettingsSnapshot: (
+    commitProviderSettingsChange: (
       settings: Record<string, unknown>,
       _providerId: string,
+      _before: Record<string, unknown>,
       snapshot: Record<string, unknown>,
     ) => Object.assign(settings, snapshot),
     getProviderSettingsSnapshot: (settings: Record<string, unknown>) => ({
@@ -198,6 +200,7 @@ function createPlugin(overrides: Record<string, unknown> = {}) {
     getConversationById: jest.fn().mockResolvedValue(null),
     getCachedConversation: jest.fn().mockReturnValue(null),
     getConversationList: jest.fn().mockReturnValue([]),
+    getConversationSummary(id: string) { return this.getConversationSync(id); },
     getConversationSync: jest.fn().mockReturnValue(null),
     findConversationAcrossViews: jest.fn().mockReturnValue(null),
     handleMissingProviderSession: jest.fn(),
@@ -342,7 +345,7 @@ function installTransitionController(
     getExecutionCoordinator: () => tab.executionCoordinator,
     awaitBackgroundWork: () => tab.session.awaitBackgroundWork(),
     ensureExecutionForConversation: async (conversation) => {
-      tab.conversationId = conversation?.id ?? null;
+      tab.session.setConversationId(conversation?.id ?? null);
       await tab.executionCoordinator?.bindConversation(conversation
         ? {
           conversationId: conversation.id,
@@ -796,8 +799,8 @@ describe('Tab provider execution ownership', () => {
     expect(constructionContext).not.toHaveProperty('session');
     expect(constructionContext).not.toHaveProperty('state');
 
-    tab.draftModel = 'claude-alternate';
-    tab.lifecycleState = 'warm';
+    tab.session.selectDraft(tab.providerId, 'claude-alternate');
+    tab.session.setExecutionWarm(true);
     tab.providerCatalogResolver();
 
     const currentContext = getProviderCatalogConfig.mock.lastCall?.[0] as Record<
@@ -851,7 +854,7 @@ describe('Tab provider execution ownership', () => {
     const conversation = createConversation();
     const plugin = createPlugin({
       getCachedConversation: jest.fn().mockReturnValue(conversation),
-      getConversationSync: jest.fn().mockReturnValue(conversation),
+    getConversationSync: jest.fn().mockReturnValue(conversation),
       switchConversation: jest.fn().mockResolvedValue(conversation),
       updateConversation: jest.fn().mockResolvedValue(undefined),
     });
@@ -1151,8 +1154,8 @@ describe('Tab provider execution ownership', () => {
   it('keeps a legacy Codex draft on its recorded provider when that provider is disabled', async () => {
     const plugin = createPlugin();
     const tab = await createTestTab({ plugin, containerEl: createMockEl() as any });
-    tab.providerId = 'codex';
-    tab.draftModel = 'gpt-5.4';
+    tab.session.selectDraft('codex', tab.draftModel);
+    tab.session.selectDraft(tab.providerId, 'gpt-5.4');
     (ProviderRegistry.getEnabledProviderIds as jest.Mock).mockReturnValue(['claude']);
     (ProviderRegistry.resolveProviderForModel as jest.Mock).mockReturnValue('claude');
     onProviderAvailabilityChanged(tab, plugin);
@@ -1249,7 +1252,7 @@ describe('Tab provider execution ownership', () => {
         attempt += 1) {
         await Promise.resolve();
       }
-      tab.lifecycleState = 'closing';
+      tab.session.beginClose();
       initialization.resolve(undefined);
       await new Promise<void>(resolve => setImmediate(resolve));
 
@@ -1348,7 +1351,7 @@ describe('Tab provider execution ownership', () => {
       attempt += 1) {
       await Promise.resolve();
     }
-    tab.lifecycleState = 'closing';
+    tab.session.beginClose();
     commitGate.resolve(undefined);
     await new Promise<void>(resolve => setImmediate(resolve));
 
@@ -1484,7 +1487,7 @@ describe('Tab provider execution ownership', () => {
       attempt += 1) {
       await Promise.resolve();
     }
-    tab.lifecycleState = 'closing';
+    tab.session.beginClose();
     commitGate.resolve(undefined);
     await new Promise<void>(resolve => setImmediate(resolve));
 
@@ -1517,7 +1520,7 @@ describe('Tab provider execution ownership', () => {
       attempt += 1) {
       await Promise.resolve();
     }
-    tab.conversationId = 'conversation-2';
+    tab.session.setConversationId('conversation-2');
     persistence.resolve(undefined);
     await new Promise<void>(resolve => setImmediate(resolve));
 
@@ -1598,7 +1601,7 @@ describe('Tab provider execution ownership', () => {
       containerEl: createMockEl() as any,
       conversation: createConversation(),
     }, { component: { handleNewConversationCommand } });
-    tab.lifecycleState = 'closing';
+    tab.session.beginClose();
     tab.dom.inputEl.value = '/clear';
 
     await tab.controllers.inputController.sendMessage();
@@ -1687,7 +1690,7 @@ describe('Tab provider execution ownership', () => {
   it('keeps a browsed conversation provisional after hydration', async () => {
     const conversation = createConversation();
     const plugin = createPlugin({
-      getConversationSync: jest.fn().mockReturnValue(conversation),
+    getConversationSync: jest.fn().mockReturnValue(conversation),
       switchConversation: jest.fn().mockResolvedValue(conversation),
       updateConversation: jest.fn().mockResolvedValue(undefined),
     });
@@ -1710,7 +1713,7 @@ describe('Tab provider execution ownership', () => {
       sessionId: 'native-session-2',
     };
     const plugin = createPlugin({
-      getConversationSync: jest.fn((id) => (
+    getConversationSync: jest.fn((id) => (
         id === oldConversation.id ? oldConversation : nextConversation
       )),
       switchConversation: jest.fn().mockResolvedValue(nextConversation),
@@ -1744,7 +1747,7 @@ describe('Tab provider execution ownership', () => {
     };
     const onCommandContextChanged = jest.fn();
     const plugin = createPlugin({
-      getConversationSync: jest.fn().mockReturnValue(oldConversation),
+    getConversationSync: jest.fn().mockReturnValue(oldConversation),
       switchConversation: jest.fn().mockResolvedValue(nextConversation),
       updateConversation: jest.fn().mockResolvedValue(undefined),
     });
@@ -2116,7 +2119,7 @@ describe('Tab provider execution ownership', () => {
     const updateConversation = jest.fn().mockResolvedValue(undefined);
     const switchConversation = jest.fn().mockResolvedValue(nextConversation);
     const plugin = createPlugin({
-      getConversationSync: jest.fn((id) => (
+    getConversationSync: jest.fn((id) => (
         id === oldConversation.id ? oldConversation : nextConversation
       )),
       switchConversation,
@@ -2207,7 +2210,7 @@ describe('Tab provider execution ownership', () => {
     const updateConversation = jest.fn().mockResolvedValue(undefined);
     const switchConversation = jest.fn().mockResolvedValue(nextConversation);
     const plugin = createPlugin({
-      getConversationSync: jest.fn((id) => (
+    getConversationSync: jest.fn((id) => (
         id === oldConversation.id ? oldConversation : nextConversation
       )),
       switchConversation,
@@ -2367,6 +2370,35 @@ describe('Tab provider execution ownership', () => {
     expect(coordinator.dispose).toHaveBeenCalledTimes(1);
   });
 
+  it.each(['creation', 'hydration'] as const)('retains submitted input when close overlaps %s', async phase => {
+    const pending = deferred<any>();
+    const conversation = { providerId: 'claude', messages: [], sessionId: null, selectedModel: 'claude-default', id: 'created-during-close' };
+    const createConversation = jest.fn(() => phase === 'creation' ? pending.promise : Promise.resolve(conversation));
+    const getConversationById = jest.fn(() => pending.promise);
+    const updateConversation = jest.fn().mockResolvedValue(undefined);
+    const plugin = createPlugin({
+      createConversation, getConversationById, updateConversation,
+      renameConversation: jest.fn().mockResolvedValue(undefined),
+    });
+    const tab = await createTestTab({ plugin, containerEl: createMockEl() as any });
+    const sending = tab.controllers.inputController.sendMessage({ content: 'Preserve admitted first prompt' });
+    const blockedCall = phase === 'creation' ? createConversation : getConversationById;
+    for (let attempt = 0; attempt < 40 && blockedCall.mock.calls.length === 0; attempt++) {
+      await Promise.resolve();
+    }
+    expect(blockedCall).toHaveBeenCalledTimes(1);
+    const closing = destroyTab(tab);
+    pending.resolve(conversation);
+    await Promise.all([sending, closing]);
+    expect(tab.conversationId).toBe('created-during-close');
+    expect(coordinatorInstances[0].prepare).not.toHaveBeenCalled();
+    tab.state.currentConversationId = 'late-identity';
+    expect(tab.conversationId).toBe('created-during-close');
+    expect(updateConversation).toHaveBeenCalledWith('created-during-close', expect.objectContaining({
+      messages: [expect.objectContaining({ role: 'user', content: 'Preserve admitted first prompt' })],
+    }));
+  });
+
   it('drains an active turn without closing the runtime before its final snapshot', async () => {
     const tab = await createTestTab({ plugin: createPlugin(), containerEl: createMockEl() as any });
     const coordinator = coordinatorInstances[0];
@@ -2395,7 +2427,7 @@ describe('Tab provider execution ownership', () => {
   it('numbers a fork from canonical user turns while retaining non-canonical history', async () => {
     const conversation = createConversation();
     const plugin = createPlugin({
-      getConversationSync: jest.fn().mockReturnValue(conversation),
+    getConversationSync: jest.fn().mockReturnValue(conversation),
     });
     const forkRequest = jest.fn().mockResolvedValue(undefined);
     const tab = await createTestTab({
@@ -2525,7 +2557,7 @@ describe('Tab provider execution ownership', () => {
       await Promise.resolve();
     }
     expect(coordinatorInstances[0].resolveForkSource).toHaveBeenCalled();
-    tab.lifecycleState = 'closing';
+    tab.session.beginClose();
     forkSource.resolve({
       sessionId: 'native-session',
     });
@@ -2574,7 +2606,7 @@ describe('Tab provider execution ownership', () => {
       attempt += 1) {
       await Promise.resolve();
     }
-    tab.conversationId = 'conversation-b';
+    tab.session.setConversationId('conversation-b');
     forkSource.resolve({ sessionId: 'native-session' });
     await fork;
 
