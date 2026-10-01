@@ -886,7 +886,7 @@ describe('StreamController - Text Content', () => {
         expect.anything(),
         expect.objectContaining({ id: 'read-1', name: 'Read' }),
         expect.any(Map),
-        { initiallyExpanded: false },
+        expect.objectContaining({ initiallyExpanded: false, renderMarkdown: expect.any(Function) }),
       );
     });
 
@@ -983,7 +983,7 @@ describe('StreamController - Text Content', () => {
         expect.anything(),
         expect.objectContaining({ id: 'patch-1', name: TOOL_APPLY_PATCH }),
         expect.any(Map),
-        { initiallyExpanded: true },
+        expect.objectContaining({ initiallyExpanded: true }),
       );
     });
 
@@ -1143,7 +1143,7 @@ describe('StreamController - Text Content', () => {
       expect(createWriteEditBlock).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ id: 'write-1', name: 'Write' }),
-        { initiallyExpanded: false },
+        expect.objectContaining({ initiallyExpanded: false }),
       );
       // renderToolCall should NOT be called for Write/Edit tools
       expect(renderToolCall).not.toHaveBeenCalled();
@@ -1167,7 +1167,7 @@ describe('StreamController - Text Content', () => {
       expect(createWriteEditBlock).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ id: 'write-1', name: 'Write' }),
-        { initiallyExpanded: true },
+        expect.objectContaining({ initiallyExpanded: true }),
       );
     });
 
@@ -2475,7 +2475,7 @@ describe('StreamController - Text Content', () => {
         expect.anything(),
         expect.objectContaining({ id: 'refined-tool', name }),
         expect.any(Map),
-        { initiallyExpanded: false },
+        expect.objectContaining({ initiallyExpanded: false }),
       );
     });
 
@@ -2504,7 +2504,7 @@ describe('StreamController - Text Content', () => {
       expect(createWriteEditBlock).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({ id: 'edit-refined', name: 'Edit' }),
-        { initiallyExpanded: false },
+        expect.objectContaining({ initiallyExpanded: false }),
       );
       expect(renderToolCall).not.toHaveBeenCalled();
     });
@@ -2692,7 +2692,7 @@ describe('StreamController - Text Content', () => {
         parentEl,
         toolCall,
         deps.state.toolCallElements,
-        { initiallyExpanded: true },
+        expect.objectContaining({ initiallyExpanded: true }),
       );
       expect(updateToolCallResult).toHaveBeenCalledTimes(1);
       expect(updateToolCallResult).toHaveBeenCalledWith(
@@ -2794,14 +2794,14 @@ describe('StreamController - Text Content', () => {
         parentEl,
         toolCall,
         deps.state.toolCallElements,
-        { initiallyExpanded: true },
+        expect.objectContaining({ initiallyExpanded: true }),
       );
       expect(renderToolCall).toHaveBeenNthCalledWith(
         3,
         parentEl,
         toolCall,
         deps.state.toolCallElements,
-        { initiallyExpanded: true },
+        expect.objectContaining({ initiallyExpanded: true }),
       );
       expect(updateToolCallResult).toHaveBeenCalledTimes(2);
       expect(initialEl.remove).toHaveBeenCalledTimes(1);
@@ -3831,7 +3831,7 @@ describe('StreamController - Text Content', () => {
         expect.anything(),
         expect.objectContaining({ id: 'mixed-late-output' }),
         expect.any(Map),
-        { initiallyExpanded: false },
+        expect.objectContaining({ initiallyExpanded: false }),
       );
     });
 
@@ -3896,7 +3896,7 @@ describe('StreamController - Text Content', () => {
         expect.anything(),
         expect.objectContaining({ id: 'mixed-output' }),
         expect.any(Map),
-        { initiallyExpanded: false },
+        expect.objectContaining({ initiallyExpanded: false }),
       );
       expect(updateToolCallResult).toHaveBeenCalledWith(
         'mixed-output',

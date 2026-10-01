@@ -36,6 +36,11 @@ export interface WebSearchResultItem {
   publishedAt?: string;
 }
 
+/** Image produced by a tool: a local file or inline base64 data. */
+export type ToolResultImage =
+  | { kind: 'file'; path: string; alt?: string }
+  | { kind: 'data'; mediaType: string; data: string; alt?: string };
+
 /** A call a script tool made to another tool; it never reached the model as its own tool call. */
 export interface ScriptToolCallItem {
   /** Shared tool name when the provider maps one. */
@@ -63,12 +68,18 @@ export interface ToolCallInfo {
   input: Record<string, unknown>;
   status: 'running' | 'completed' | 'error' | 'blocked';
   result?: string;
+  /** Plain results are displayed verbatim; unmarked Read results retain legacy gutter decoding. */
+  resultFormat?: 'plain';
   providerPayload?: ToolProviderPayload;
   isExpanded?: boolean;
   diffData?: ToolDiffData;
   resolvedAnswers?: AskUserAnswers;
   /** Structured web search hits; renderers fall back to result text when absent. */
   webSearchResults?: WebSearchResultItem[];
+  /** Provider-synthesized answer accompanying structured hits. */
+  webSearchSummary?: string;
+  /** Images the tool produced, shown after its expanded result. */
+  resultImages?: ToolResultImage[];
   /** Calls a script tool made to other tools, in call order. Live snapshots only append calls or advance their status. */
   scriptToolCalls?: ScriptToolCallItem[];
   /** Live async question presentation; replay alone never opens a prompt. */

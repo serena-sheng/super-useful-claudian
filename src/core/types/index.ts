@@ -67,6 +67,7 @@ export {
   type ToolCallInfo,
   type ToolDiffData,
   type ToolProviderPayload,
+  type ToolResultImage,
   type WebSearchResultItem,
 } from './tools';
 export { createTurnStats, isTokenCount } from './turnStats';
