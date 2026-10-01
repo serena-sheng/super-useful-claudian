@@ -11,6 +11,7 @@ import type { Editor, TAbstractFile, WorkspaceLeaf } from 'obsidian';
 import { ItemView, MarkdownView, Notice, Plugin, TFolder } from 'obsidian';
 
 import { ConversationRepository } from './app/conversations/ConversationRepository';
+import { NativeSessionArchiveSync } from './app/conversations/NativeSessionArchiveSync';
 import { SessionMetadataLoader } from './app/conversations/SessionMetadataLoader';
 import { ChatModelSelectionCoordinator } from './app/settings/ChatModelSelectionCoordinator';
 import { DEFAULT_CLAUDIAN_SETTINGS } from './app/settings/defaultSettings';
@@ -117,6 +118,18 @@ export default class ClaudianPlugin extends Plugin {
   }
 
   private readonly startupMaintenanceAbort = new AbortController();
+  private readonly nativeSessionArchives = new NativeSessionArchiveSync({
+    getConversation: id => this.conversationRepository.getSync(id),
+    getSessionArchive: async (providerId) => {
+      if (!ProviderWorkspaceRegistry.providesSessionArchive(providerId)) return null;
+      await ProviderWorkspaceRegistry.ensureInitialized(this.providerHost, providerId, 'session-archive');
+      return ProviderWorkspaceRegistry.getIfInitialized(providerId)?.sessionArchive ?? null;
+    },
+    onFailure: (providerId, error) => {
+      const reason = error instanceof Error ? error.message : String(error);
+      new Notice(`${ProviderRegistry.getProviderDisplayName(providerId)} could not archive or restore its sessions: ${reason}`);
+    },
+  });
   private modelMetadataMigration: Promise<void> | null = null;
   private sessionInputCleanup: Promise<void> | null = null;
   private sessionInputCleanupTimer: number | null = null;
@@ -323,6 +336,8 @@ export default class ClaudianPlugin extends Plugin {
       this.sessionInputCleanup,
       ...this.getAllViews().map(view => view.prepareForPluginUnload()),
     ]);
+    // Admitted native archive work needs provider services that are disposed below.
+    await this.nativeSessionArchives.dispose();
     try {
       await this.executionLifecycleRegistry.dispose();
     } catch {
@@ -902,8 +917,9 @@ export default class ClaudianPlugin extends Plugin {
   }
 
   async setConversationArchived(id: string, isArchived: boolean): Promise<void> {
-    await this.conversationRepository.setArchived(id, isArchived);
+    const changed = await this.conversationRepository.setArchived(id, isArchived);
     this.notifyConversationViewsChanged();
+    if (changed) await this.nativeSessionArchives.sync([id]);
   }
 
   async setConversationsPinned(ids: readonly string[], isPinned: boolean): Promise<void> {
@@ -911,18 +927,29 @@ export default class ClaudianPlugin extends Plugin {
   }
 
   async restoreConversations(ids: readonly string[]): Promise<void> {
-    await this.mutateConversations(ids, id => this.conversationRepository.setArchived(id, false));
+    const restoredIds: string[] = [];
+    try {
+      await this.mutateConversations(ids, async (id) => {
+        if (await this.conversationRepository.setArchived(id, false)) restoredIds.push(id);
+      });
+    } finally {
+      await this.nativeSessionArchives.sync(restoredIds);
+    }
   }
 
   async archiveConversationsIf(
     ids: readonly string[],
     shouldArchive: (conversation: Readonly<Conversation>) => boolean,
   ): Promise<number> {
-    let archivedCount = 0;
-    await this.mutateConversations(ids, async (id) => {
-      if (await this.conversationRepository.archiveIf(id, shouldArchive)) archivedCount += 1;
-    });
-    return archivedCount;
+    const archivedIds: string[] = [];
+    try {
+      await this.mutateConversations(ids, async (id) => {
+        if (await this.conversationRepository.archiveIf(id, shouldArchive)) archivedIds.push(id);
+      });
+    } finally {
+      await this.nativeSessionArchives.sync(archivedIds);
+    }
+    return archivedIds.length;
   }
 
   /** Applies independent per-session writes, then refreshes views once. */

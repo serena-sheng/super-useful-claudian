@@ -372,7 +372,22 @@ export interface ProviderWorkspaceServices {
   commandLoader?: ProviderCommandLoader | null;
   settingsTabRenderer?: ProviderSettingsTabRenderer | null;
   modelCatalog?: ProviderModelCatalog;
+  sessionArchive?: ProviderSessionArchive | null;
   dispose?(): Promise<void> | void;
+}
+
+export interface ProviderSessionArchiveChange {
+  conversation: ProviderHistoryInput;
+  isArchived: boolean;
+}
+
+/** Explicit native archive operation; application archive state stays authoritative. */
+export interface ProviderSessionArchive {
+  /**
+   * Applies every change in order. Sessions that are missing or already in the requested
+   * state are unchanged; other failures reject after the remaining changes were attempted.
+   */
+  setSessionsArchived(changes: readonly ProviderSessionArchiveChange[]): Promise<void>;
 }
 
 export interface ProviderModelCatalogRefreshResult {
@@ -411,6 +426,8 @@ export interface ProviderWorkspaceRegistration<
 > {
   /** Shared skill changes invalidate resources even before lazy initialization. */
   consumesAgentSkills?: boolean;
+  /** Initialized services provide `sessionArchive`; lets callers skip initializing other providers. */
+  providesSessionArchive?: boolean;
   initialize(context: ProviderWorkspaceInitContext): Promise<TServices>;
 }
 
