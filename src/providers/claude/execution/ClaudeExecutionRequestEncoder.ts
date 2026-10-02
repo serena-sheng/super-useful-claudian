@@ -18,13 +18,12 @@ import {
 } from '../../../core/tools/toolNames';
 import type { ImageAttachment } from '../../../core/types';
 import type { ClaudianSettings } from '../../../core/types/settings';
-import { appendBrowserContext } from '../../../utils/browser';
-import { appendCanvasContext } from '../../../utils/canvas';
 import {
   appendLinkedContent,
   appendLinkedContentBody,
+  appendSelectionContexts,
+  appendSessionReferences,
 } from '../../../utils/context';
-import { appendEditorContext } from '../../../utils/editor';
 import {
   buildContextFromHistory,
   buildPromptWithHistoryContext,
@@ -150,6 +149,7 @@ export class ClaudeExecutionRequestEncoder {
         snapshot: false,
       },
       model,
+      ...(request.configuration.readableRoots?.length ? { additionalDirectories: [...request.configuration.readableRoots] } : {}),
       ...(effort ? { effort } : {}),
       settings: { outputStyle: claudeSettings.responseStyle },
       thinking: { type: 'adaptive' },
@@ -203,6 +203,7 @@ export class ClaudeExecutionRequestEncoder {
         hooks: Boolean(policy.hooks),
         cliPath,
         settingSources: options.settingSources,
+        additionalDirectories: options.additionalDirectories,
         enableChrome: claudeSettings.enableChrome,
         persistSession: options.persistSession,
       }),
@@ -251,15 +252,8 @@ export class ClaudeExecutionRequestEncoder {
           context.linkedContent.content,
         );
     }
-    if (context?.editorSelection) {
-      prompt = appendEditorContext(prompt, context.editorSelection);
-    }
-    if (context?.browserSelection) {
-      prompt = appendBrowserContext(prompt, context.browserSelection);
-    }
-    if (context?.canvasSelection) {
-      prompt = appendCanvasContext(prompt, context.canvasSelection);
-    }
+    prompt = appendSelectionContexts(prompt, context);
+    prompt = appendSessionReferences(prompt, context?.sessionReferences);
 
     const history = replayConversationHistory
       ? request.conversationHistory

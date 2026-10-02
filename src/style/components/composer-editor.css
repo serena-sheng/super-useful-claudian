@@ -75,3 +75,23 @@
   display: inline;
   margin: 0;
 }
+
+.claudian-composer-session {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0 0.3em;
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-hover);
+  vertical-align: baseline;
+}
+
+.claudian-composer-session-icon {
+  display: inline-flex;
+  color: var(--text-muted);
+}
+
+.claudian-composer-session-icon svg {
+  width: 1em;
+  height: 1em;
+}

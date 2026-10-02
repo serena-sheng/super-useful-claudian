@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import pair from '@test/fixtures/providers/codex/turn-stats-pair.json';
+import { capturedSelectionPrompt, capturedSelections } from '@test/helpers/capturedSelections';
 import { TEST_CODEX_MODEL } from '@test/helpers/codexModels';
 
 import type {
@@ -16,6 +17,7 @@ import type {
 import { isSteerableExecutionSession } from '@/core/execution';
 import type { ProviderHost } from '@/core/providers/ProviderHost';
 import type { ClaudianSettings } from '@/core/types';
+import { createCodexPathMapper } from '@/providers/codex/runtime/CodexPathMapper';
 type MutableTestHost = ProviderHost & { settings: ClaudianSettings };
 
 const mockTransportRequest = jest.fn();
@@ -818,6 +820,25 @@ describe('CodexExecutionBackend', () => {
     },
   );
 
+  it.each([false, true])('steers session references with target-visible paths (WSL: %s)', async wsl => {
+    if (wsl) {
+      const launch = await mockResolveLaunchSpec();
+      mockResolveLaunchSpec.mockResolvedValue({ ...launch, pathMapper: createCodexPathMapper({ method: 'wsl', platformFamily: 'unix', platformOs: 'linux', distroName: 'Ubuntu' }) });
+    }
+    configureSteerTransport('thread-reference', 'turn-reference', () => ({ turnId: 'turn-reference' }));
+    const { run, session } = await createActiveSteerSession();
+    try {
+      await expect(session.steer(createRequest(new AbortController().signal, {
+        input: [{ type: 'text', text: 'Use @"Review"' }],
+        context: { ...capturedSelections, sessionReferences: [{ id: 'conv-1-ref', title: 'Review & fix', providerId: 'codex', updatedAt: 'updated',
+          snapshotPath: wsl ? 'C:\\Temp\\claudian-sessions\\ref.md' : '/tmp/claudian-sessions/ref.md' }] },
+      }))).resolves.toBe(true);
+      const input = mockTransportRequest.mock.calls.find(([method]) => method === 'turn/steer')![1].input;
+      expect(input).toEqual([{ type: 'text', text_elements: [], text: 'Use @"Review"\n\n<context_sessions>\n<context_session title="Review &amp; fix" id="conv-1-ref" provider="codex" updated="updated" path="'
+        + (wsl ? '/mnt/c/Temp/claudian-sessions/ref.md' : '/tmp/claudian-sessions/ref.md') + '" />\n</context_sessions>' + '\n\n' + capturedSelectionPrompt }]);
+    } finally { run.cancel(); await collectEvents(run.events); await session.dispose(); }
+  });
+
   it.each([true, false])('retains steering image bytes until native acknowledgement (accepted: %s)', async accepted => {
     const steerResult = createDeferred<{ turnId: string }>();
     configureSteerTransport('thread-image', 'turn-image', () => steerResult.promise);
@@ -1504,7 +1525,11 @@ describe('CodexExecutionBackend', () => {
     }
   });
 
-  it('sends all attached context using canonical escaped XML', async () => {
+  it.each([false, true])('sends escaped context using target-visible snapshot paths (WSL: %s)', async wsl => {
+    if (wsl) {
+      const launch = await mockResolveLaunchSpec();
+      mockResolveLaunchSpec.mockResolvedValue({ ...launch, pathMapper: createCodexPathMapper({ method: 'wsl', platformFamily: 'unix', platformOs: 'linux', distroName: 'Ubuntu' }) });
+    }
     mockTransportRequest.mockImplementation(async (method: string) => {
       if (method === 'initialize') {
         return {
@@ -1528,6 +1553,7 @@ describe('CodexExecutionBackend', () => {
       new AbortController().signal,
       {
         context: {
+          sessionReferences: [{ id: 'conv-1-ref', title: 'Review', providerId: 'codex', updatedAt: 'updated', snapshotPath: wsl ? 'C:\\Temp\\claudian-sessions\\ref.md' : '/tmp/claudian-sessions/ref.md' }],
           linkedContent: {
             path: 'notes/"draft" & review.md',
             content: 'Before\n]]>\nAfter',
@@ -1567,6 +1593,7 @@ describe('CodexExecutionBackend', () => {
     expect(prompt).toContain(
       '<canvas_selection path="boards/&quot;draft&quot; &amp; review.canvas">',
     );
+    expect(prompt).toContain(`<context_sessions>\n<context_session title="Review" id="conv-1-ref" provider="codex" updated="updated" path="${wsl ? "/mnt/c/Temp/claudian-sessions/ref.md" : "/tmp/claudian-sessions/ref.md"}" />\n</context_sessions>`);
     expect(prompt).not.toContain('[Editor selection from');
     expect(prompt).not.toContain('<linked_note');
     expect(prompt).not.toContain('<current_note');
@@ -1597,7 +1624,7 @@ describe('CodexExecutionBackend', () => {
     await collectEvents(session.execute(createRequest(
       new AbortController().signal,
       {
-        context: { linkedContent: { path: 'Projects/Research' } },
+        context: { ...capturedSelections, linkedContent: { path: 'Projects/Research' } },
         input: [{ type: 'text', text: 'Inspect linked content' }],
       },
     )).events);
@@ -1610,7 +1637,7 @@ describe('CodexExecutionBackend', () => {
       };
     expect(threadStartParams.cwd).toBe('/vault');
     expect(turnStartParams.input.find(block => block.type === 'text')?.text).toBe(
-      'Inspect linked content\n\n<linked_content path="Projects/Research" />',
+      'Inspect linked content\n\n<linked_content path="Projects/Research" />\n\n' + capturedSelectionPrompt,
     );
 
     await session.dispose();

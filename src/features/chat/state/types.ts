@@ -1,5 +1,7 @@
 import type { EditorView } from '@codemirror/view';
 
+import type { ProviderSelectionSnapshot, ProviderSessionReference } from '@/core/execution/ProviderExecutionRequest';
+
 import type {
   ChatMessage,
   ImageAttachment,
@@ -14,6 +16,10 @@ import type { ThinkingBlockState } from '../rendering/ThinkingBlockRenderer';
 import type { WriteEditState } from '../rendering/WriteEditRenderer';
 
 export interface ChatTurnRequest {
+  selections?: readonly ProviderSelectionSnapshot[];
+  /** Original composer text for recovery before provider acceptance. */
+  draftContent?: string;
+  sessionReferences?: readonly ProviderSessionReference[];
   text: string;
   images?: ImageAttachment[];
   linkedContentPath?: string;
