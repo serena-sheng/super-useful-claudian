@@ -1516,6 +1516,67 @@ describe('StreamController - Text Content', () => {
       expect(deps.state.thinkingEl).toBeNull();
     });
 
+    it('drops explicit compaction status once the compaction boundary renders', async () => {
+      const msg = createTestMessage();
+      controller.showThinkingIndicator('Compacting...', 'claudian-thinking--compact');
+      jest.advanceTimersByTime(500);
+      expect(deps.state.waitingStatus).toBe('Compacting...');
+
+      await controller.handleStreamChunk({ type: 'context_compacted' }, msg);
+      controller.showThinkingIndicator();
+      jest.advanceTimersByTime(500);
+
+      expect(deps.state.waitingStatus).not.toBeNull();
+      expect(deps.state.waitingStatus).not.toBe('Compacting...');
+    });
+
+    it('ignores indicator work left over from a superseded stream', () => {
+      controller.showThinkingIndicator();
+      deps.state.bumpStreamGeneration();
+      jest.advanceTimersByTime(500);
+      expect(deps.state.thinkingEl).toBeNull();
+      expect(deps.state.waitingStatus).toBeNull();
+
+      controller.showThinkingIndicator();
+      jest.advanceTimersByTime(500);
+      const staleEl = deps.state.thinkingEl;
+      expect(staleEl).not.toBeNull();
+      deps.state.bumpStreamGeneration();
+
+      controller.showThinkingIndicator();
+      jest.advanceTimersByTime(500);
+      expect(deps.state.thinkingEl).not.toBeNull();
+      expect(deps.state.thinkingEl).not.toBe(staleEl);
+    });
+
+    it('cancels a pending or visible indicator on dispose', () => {
+      controller.showThinkingIndicator();
+      controller.dispose();
+      jest.advanceTimersByTime(500);
+      expect(deps.state.thinkingEl).toBeNull();
+      expect(deps.state.waitingStatus).toBeNull();
+
+      const visible = new StreamController(deps);
+      visible.showThinkingIndicator();
+      jest.advanceTimersByTime(500);
+      expect(deps.state.waitingStatus).not.toBeNull();
+      visible.dispose();
+      expect(deps.state.thinkingEl).toBeNull();
+      expect(deps.state.waitingStatus).toBeNull();
+      expect(deps.state.flavorTimerInterval).toBeNull();
+    });
+
+    it('keeps the pending delay when asked to show again before it elapses', () => {
+      controller.showThinkingIndicator();
+      jest.advanceTimersByTime(300);
+      controller.showThinkingIndicator();
+      jest.advanceTimersByTime(300);
+      controller.showThinkingIndicator();
+      jest.advanceTimersByTime(100);
+
+      expect(deps.state.thinkingEl).not.toBeNull();
+    });
+
     it('should re-append existing indicator to bottom when called again', () => {
       deps.state.responseStartTime = performance.now();
 

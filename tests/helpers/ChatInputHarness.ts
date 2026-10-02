@@ -129,6 +129,7 @@ export function createFixture(overrides: Record<string, unknown> = {}) {
       finalizeCurrentThinkingBlock: jest.fn(),
       handleStreamChunk: jest.fn(),
       hideThinkingIndicator: jest.fn(),
+      resumeThinkingIndicator: jest.fn(),
       showThinkingIndicator: jest.fn(),
     },
     selectionController: {
