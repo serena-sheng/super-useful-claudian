@@ -10,8 +10,10 @@ import {
 import { parseCodexQuestionReply } from '../normalization/codexQuestionNormalization';
 import {
   appendCodexCommandOutput,
+  codexToolRequestsMatch,
   decodeCodexExecEnvelopeCalls,
   extractCodexExecCellId,
+  isCodexInternalToolCall,
   isCodexToolOutputError,
   normalizeCodexToolCall,
   normalizeCodexToolInput,
@@ -19,6 +21,7 @@ import {
   normalizeCodexToolResult,
   parseCodexArguments,
   readCodexExecCellIdArgument,
+  stableValueKey,
   stringifyCodexToolOutput,
 } from '../normalization/codexToolNormalization';
 import type {
@@ -94,6 +97,8 @@ interface DeferredRawExecCall {
   }>;
   hasRawOutput?: boolean;
   rawOutput?: unknown;
+  /** The unsplit script output also contains hidden internal calls' values. */
+  withholdsRawOutput?: boolean;
 }
 
 const COLLAB_AGENT_TOOL_MAP: Record<string, string> = {
@@ -151,6 +156,9 @@ export class CodexNotificationRouter {
   #deferredOwnedCanonicalItemIds = new Set<string>();
   #ignoredLateRawOutputCallIds = new Set<string>();
   #suppressedRawCallIds = new Set<string>();
+  /** Yielded cells of scripts whose output is withheld, and the calls whose output carries them. */
+  #withheldExecCellIds = new Set<string>();
+  #withheldOutputCallIds = new Set<string>();
   #fileChangeInputsById = new Map<string, Record<string, unknown>>();
 
   private readonly rawExecAliases = new Map<string, string>();
@@ -237,6 +245,8 @@ export class CodexNotificationRouter {
     this.#wrappedCommandCallIdsByCellId.clear();
     this.#wrappedCommandOutputByCallId.clear();
     this.#wrappedWaitCallsByCallId.clear();
+    this.#withheldExecCellIds.clear();
+    this.#withheldOutputCallIds.clear();
     this.#pendingWrappedWaitCallsByCallId.clear();
     this.#canonicalCommandOutputByItemId.clear();
     this.#pendingCanonicalToolOutputByItemId.clear();
@@ -276,6 +286,8 @@ export class CodexNotificationRouter {
     this.#wrappedCommandCallIdsByCellId.clear();
     this.#wrappedCommandOutputByCallId.clear();
     this.#wrappedWaitCallsByCallId.clear();
+    this.#withheldExecCellIds.clear();
+    this.#withheldOutputCallIds.clear();
     this.#pendingWrappedWaitCallsByCallId.clear();
     this.#canonicalCommandOutputByItemId.clear();
     this.#pendingCanonicalToolOutputByItemId.clear();
@@ -420,7 +432,7 @@ export class CodexNotificationRouter {
         break;
 
       case 'webSearch':
-        this.#emitToolUseFromWebSearch(item);
+        this.#emitToolUseFromWebSearch(item, true);
         break;
 
       case 'collabAgentToolCall':
@@ -526,6 +538,7 @@ export class CodexNotificationRouter {
         break;
 
       case 'webSearch':
+        this.#emitToolUseFromWebSearch(item);
         this.#emitToolResultFromWebSearch(item);
         break;
 
@@ -639,6 +652,10 @@ export class CodexNotificationRouter {
     const rawArguments = parseRawArguments(item);
     if (rawName === 'wait') {
       const cellId = readCodexExecCellIdArgument(rawArguments);
+      if (cellId && this.#withheldExecCellIds.delete(cellId)) {
+        this.#withheldOutputCallIds.add(callId);
+        return;
+      }
       const commandCallId = cellId
         ? this.#wrappedCommandCallIdsByCellId.get(cellId)
         : undefined;
@@ -657,7 +674,10 @@ export class CodexNotificationRouter {
       }
     }
 
-    if (rawName === 'write_stdin' && isSilentWriteStdinInput(rawArguments)) {
+    if (
+      (rawName === 'write_stdin' && isSilentWriteStdinInput(rawArguments))
+      || isCodexInternalToolCall(rawName, item.namespace)
+    ) {
       this.#suppressedRawCallIds.add(callId);
       return;
     }
@@ -696,14 +716,21 @@ export class CodexNotificationRouter {
     }
 
     if (rawName === 'exec') {
-      const expectedCalls = decodeCodexExecEnvelopeCalls(rawArguments);
-      const isSingleCommand = expectedCalls?.length === 1
-        && expectedCalls[0]?.name === 'Bash';
+      const decodedCalls = decodeCodexExecEnvelopeCalls(rawArguments);
+      const isSingleCommand = decodedCalls?.length === 1
+        && decodedCalls[0]?.name === 'Bash';
+      const expectedCalls = decodedCalls?.filter(call => !isCodexInternalToolCall(call.rawName));
+      if (expectedCalls?.length === 0) {
+        // Its output, and any yielded continuation, carries only internal values.
+        this.#withheldOutputCallIds.add(callId);
+        return;
+      }
       if (expectedCalls && !isSingleCommand) {
         this.#deferredRawExecCalls.set(callId, {
           callId,
           item,
           rawArguments,
+          withholdsRawOutput: expectedCalls.length < decodedCalls!.length,
           expectedCalls: expectedCalls.map((call) => {
             const semanticCall = projectRawSemanticToolCall(
               call.name,
@@ -819,6 +846,11 @@ export class CodexNotificationRouter {
     this.#handledRawOutputCallIds.add(callId);
     this.#inFlightRawFunctionCallIds.delete(callId);
 
+    if (this.#withheldOutputCallIds.delete(callId)) {
+      this.#withholdExecCell(item.output);
+      return;
+    }
+
     const wrappedWaitCall = this.#wrappedWaitCallsByCallId.get(callId);
     if (wrappedWaitCall) {
       this.#wrappedWaitCallsByCallId.delete(callId);
@@ -843,6 +875,7 @@ export class CodexNotificationRouter {
       if (deferredExec.expectedCalls.length > 0) {
         deferredExec.hasRawOutput = true;
         deferredExec.rawOutput = item.output;
+        if (deferredExec.withholdsRawOutput) this.#withholdExecCell(item.output);
         if (this.streamRawExecCalls) this.#emitDeferredRawExecFallback(deferredExec, item.output, true);
         if (deferredExec.expectedCalls.every(call => (
           call.claimed && call.canonicalCompleted
@@ -905,6 +938,12 @@ export class CodexNotificationRouter {
     }
 
     this.#rawToolOutputsByCallId.set(callId, result);
+  }
+
+  /** A yielded withheld script continues through `wait` calls that carry the same combined output. */
+  #withholdExecCell(rawOutput: unknown): void {
+    const cellId = extractCodexExecCellId(stringifyCodexToolOutput(rawOutput));
+    if (cellId) this.#withheldExecCellIds.add(cellId);
   }
 
   #replayPendingRawToolOutput(item: Record<string, unknown>): void {
@@ -1064,6 +1103,7 @@ export class CodexNotificationRouter {
         deferredExec.rawOutput,
         true,
         terminalError,
+        true,
       )) {
         continue;
       }
@@ -1139,6 +1179,8 @@ export class CodexNotificationRouter {
     this.#wrappedCommandCallIdsByCellId.clear();
     this.#wrappedCommandOutputByCallId.clear();
     this.#wrappedWaitCallsByCallId.clear();
+    this.#withheldExecCellIds.clear();
+    this.#withheldOutputCallIds.clear();
     this.#pendingWrappedWaitCallsByCallId.clear();
     this.#inFlightRawFunctionCallIds.clear();
     this.#immediateRawOutputCallIds.clear();
@@ -1149,6 +1191,7 @@ export class CodexNotificationRouter {
     rawOutput?: unknown,
     emitResult = false,
     terminalError = false,
+    turnEnded = false,
   ): boolean {
     if (deferredExec.expectedCalls.length === 0) {
       return false;
@@ -1157,12 +1200,15 @@ export class CodexNotificationRouter {
     const rawOutputText = stringifyCodexToolOutput(rawOutput);
     deferredExec.expectedCalls.forEach((call, index) => {
       if (call.claimed) {
-        if (emitResult && !call.canonicalCompleted && call.canonicalItemId) {
+        // Native completion carries search sources and withheld command output;
+        // script output closes those only when the turn ends.
+        if (emitResult && !call.canonicalCompleted && call.canonicalItemId
+          && (turnEnded || (call.name !== 'WebSearch' && !deferredExec.withholdsRawOutput))) {
           this.#completedCanonicalToolItemIds.add(call.canonicalItemId);
           this.emit({
             type: 'tool_result',
             id: call.canonicalItemId,
-            content: normalizeRawToolOutput(call.name, rawOutput, call.input),
+            content: deferredExec.withholdsRawOutput ? '' : normalizeRawToolOutput(call.name, rawOutput, call.input),
             isError: isCodexToolOutputError(rawOutputText)
               || (terminalError && !deferredExec.hasRawOutput),
           });
@@ -1182,7 +1228,7 @@ export class CodexNotificationRouter {
         this.emit({
           type: 'tool_result',
           id: fallbackId,
-          content: normalizeRawToolOutput(call.name, rawOutput, call.input),
+          content: deferredExec.withholdsRawOutput ? '' : normalizeRawToolOutput(call.name, rawOutput, call.input),
           isError: isCodexToolOutputError(rawOutputText)
             || (terminalError && !deferredExec.hasRawOutput),
         });
@@ -1312,8 +1358,8 @@ export class CodexNotificationRouter {
     }
 
     const { deferredExec, expectedCall } = match;
-    if (projectedName === 'WebSearch' && canonicalItemId
-      && (Array.isArray(expectedCall.input.actions) || expectedCall.input.actionType === 'click')) {
+    // Native web actions abbreviate the request ("first query ...", openPage, other); keep the requested one.
+    if (projectedName === 'WebSearch' && canonicalItemId) {
       this.#rawToolInputsByCallId.set(canonicalItemId, expectedCall.input);
       if (this.#seenWebSearchIds.has(canonicalItemId)) {
         this.emit({ type: 'tool_use', id: canonicalItemId, name: 'WebSearch', input: expectedCall.input });
@@ -1588,23 +1634,22 @@ export class CodexNotificationRouter {
 
   // -- webSearch --------------------------------------------------------------
 
-  #emitToolUseFromWebSearch(item: WebSearchItem): void {
+  #emitToolUseFromWebSearch(item: WebSearchItem, started = false): void {
     if (this.#seenWebSearchIds.has(item.id)) return;
+    const input = this.#rawToolInputsByCallId.get(item.id) ?? normalizeCodexToolInput('web_search', {
+      query: item.query ?? '',
+      queries: item.queries ?? [],
+      url: item.url ?? '',
+      pattern: item.pattern ?? '',
+      action: item.action ?? {},
+    });
+    // Native searches start before their request is known. Publishing then would
+    // leave an empty card beside the raw exec card that completion later claims.
+    if (started && !['query', 'url', 'pattern', 'actions', 'requests'].some(key => key in input)) return;
     this.#seenWebSearchIds.add(item.id);
 
     this.#resetAssistantSegmentText();
-    this.emit({
-      type: 'tool_use',
-      id: item.id,
-      name: 'WebSearch',
-      input: this.#rawToolInputsByCallId.get(item.id) ?? normalizeCodexToolInput('web_search', {
-        query: item.query ?? '',
-        queries: item.queries ?? [],
-        url: item.url ?? '',
-        pattern: item.pattern ?? '',
-        action: item.action ?? {},
-      }),
-    });
+    this.emit({ type: 'tool_use', id: item.id, name: 'WebSearch', input });
   }
 
   #emitToolResultFromWebSearch(item: WebSearchItem): void {
@@ -1613,6 +1658,7 @@ export class CodexNotificationRouter {
       id: item.id,
       content: 'Search complete',
       isError: item.status === 'failed' || item.status === 'error',
+      ...(Array.isArray(item.results) ? { toolUseResult: { webSearchResults: item.results } } : {}),
     });
   }
 
@@ -2180,57 +2226,7 @@ function toolInputsCompatible(
     }
   }
 
-  if (name === 'WebSearch') {
-    if (Array.isArray(expected.actions) && expected.actions.length > 1) {
-      return expected.actions.some(action => {
-        const record = asRecord(action);
-        return record !== null && toolInputsCompatible(name, record, actual, workingDirectory);
-      });
-    }
-    const expectedWeb = normalizeComparedWebInput(expected);
-    const actualWeb = normalizeComparedWebInput(actual);
-    // Native reference-based opens and clicks can expose only an `other` action.
-    // The caller still requires a unique candidate; concurrent calls stay distinct.
-    if (
-      actualWeb.actionType === 'other'
-      && (expectedWeb.actionType === 'open_page'
-        || expectedWeb.actionType === 'click')
-    ) {
-      return true;
-    }
-    // Native find events can retain the pattern but omit the opaque page reference.
-    if (actualWeb.actionType === 'find_in_page' && !actualWeb.url) {
-      delete expectedWeb.url;
-    }
-    return stableValueKey(expectedWeb) === stableValueKey(actualWeb);
-  }
-
-  return stableValueKey(expected) === stableValueKey(actual);
-}
-
-function normalizeComparedWebInput(input: Record<string, unknown>): Record<string, unknown> {
-  const actionType = firstString(input.actionType);
-  const normalizedActionType = actionType === 'openPage'
-    ? 'open_page'
-    : actionType === 'findInPage'
-      ? 'find_in_page'
-      : actionType;
-  const normalized: Record<string, unknown> = {
-    ...input,
-    ...(normalizedActionType ? { actionType: normalizedActionType } : {}),
-  };
-  if (normalizedActionType === 'open_page' || normalizedActionType === 'find_in_page') {
-    delete normalized.query;
-    delete normalized.queries;
-  } else if (Array.isArray(normalized.queries) && normalized.queries.length > 0) {
-    // The query field can be a display summary (first query + " ...").
-    // Compare the actual query list when the native event supplies it.
-    normalized.query = normalized.queries[0];
-    if (normalized.queries.length === 1) {
-      delete normalized.queries;
-    }
-  }
-  return normalized;
+  return codexToolRequestsMatch(name, expected, actual);
 }
 
 interface ComparedFileChange {
@@ -2392,20 +2388,6 @@ function normalizeComparedFilePath(filePath: string, workingDirectory?: string):
   return workingDirectory
     ? path.resolve(workingDirectory, trimmedPath)
     : path.normalize(trimmedPath);
-}
-
-function stableValueKey(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(stableValueKey).join(',')}]`;
-  }
-  const record = asRecord(value);
-  if (record) {
-    return `{${Object.keys(record)
-      .sort()
-      .map(key => `${JSON.stringify(key)}:${stableValueKey(record[key])}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(value) ?? String(value);
 }
 
 function mergeOverlappingCommandOutput(previous: string | undefined, next: string): string {
