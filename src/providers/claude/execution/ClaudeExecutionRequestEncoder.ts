@@ -135,6 +135,9 @@ export class ClaudeExecutionRequestEncoder {
           ? [...request.configuration.systemInstructions.dynamicSections]
           : undefined,
       });
+    const promptSuggestions = Boolean(
+      request.configuration.promptSuggestions && claudeSettings.promptSuggestions,
+    );
     const options: Options = {
       ...buildClaudeLaunchOptions(
         this.deps.host,
@@ -150,7 +153,14 @@ export class ClaudeExecutionRequestEncoder {
       model,
       ...(request.configuration.readableRoots?.length ? { additionalDirectories: [...request.configuration.readableRoots] } : {}),
       ...(effort ? { effort } : {}),
-      ...(claudeSettings.outputStyle ? { settings: { outputStyle: claudeSettings.outputStyle } } : {}),
+      ...(claudeSettings.outputStyle || promptSuggestions ? {
+        settings: {
+          ...(claudeSettings.outputStyle ? { outputStyle: claudeSettings.outputStyle } : {}),
+          // The flag layer outranks `promptSuggestionEnabled: false` in settings.json. The
+          // CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION override would also bypass near-limit suppression.
+          ...(promptSuggestions ? { promptSuggestionEnabled: true } : {}),
+        },
+      } : {}),
       thinking: { type: 'adaptive' },
       abortController,
       permissionMode: sdkPermissionMode,
@@ -165,6 +175,7 @@ export class ClaudeExecutionRequestEncoder {
       includePartialMessages: true,
       // Subagent cards show the SDK's periodic one-line summaries while they run.
       agentProgressSummaries: true,
+      ...(promptSuggestions ? { promptSuggestions: true } : {}),
       enableFileCheckpointing: true,
       canUseTool,
       disallowedTools: [
@@ -205,6 +216,7 @@ export class ClaudeExecutionRequestEncoder {
         additionalDirectories: options.additionalDirectories,
         enableChrome: claudeSettings.enableChrome,
         persistSession: options.persistSession,
+        promptSuggestions: options.promptSuggestions,
       }),
       allowedTools: policy.allowedTools,
     };

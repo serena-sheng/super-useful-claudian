@@ -32,7 +32,7 @@ import { ClaudeConversationHistoryService } from '@/providers/claude/history/Cla
 import * as historyStore from '@/providers/claude/history/ClaudeHistoryStore';
 import { assertClaudeModelAvailable } from '@/providers/claude/runtime/ClaudeModelAvailability';
 import { buildClaudeSDKUserMessage } from '@/providers/claude/runtime/ClaudeUserMessageFactory';
-import { getClaudeProviderSettings } from '@/providers/claude/settings';
+import { getClaudeProviderSettings, updateClaudeProviderSettings } from '@/providers/claude/settings';
 
 jest.mock('@/providers/claude/runtime/ClaudeUserMessageFactory', () => {
   const actual = jest.requireActual('@/providers/claude/runtime/ClaudeUserMessageFactory');
@@ -3695,4 +3695,70 @@ it('keeps a completion during automatic request startup for the following turn',
     ]) await session.handleNativeMessage(message as any, 1);
     expect(order).toEqual(['FIRST_DONE', 'First automatic answer', 'SECOND_DONE', 'Second automatic answer']);
   } finally { await session.dispose(); }
+});
+
+
+describe('Claude prompt suggestions', () => {
+  beforeEach(() => { sdkMock.resetMockMessages(); });
+
+  it('opts in only for requested main turns and restarts when the setting changes', async () => {
+    const host = createHost();
+    const session = new ClaudeExecutionBackend(host).createSession(createConfig());
+    const request = createRequest();
+    Object.assign(request.configuration, { promptSuggestions: true });
+    const launch = () => sdkMock.getLastOptions();
+    const flagEnabled = () => (launch()?.settings as { promptSuggestionEnabled?: boolean } | undefined)
+      ?.promptSuggestionEnabled;
+    try {
+      await collectEvents(session.execute(request).events);
+      expect(launch()).not.toHaveProperty('promptSuggestions');
+      expect(flagEnabled()).toBeUndefined();
+      const initialQuery = sdkMock.getLastResponse();
+      updateClaudeProviderSettings(host.settings, { promptSuggestions: true });
+      await collectEvents(session.execute(request).events);
+      expect(launch()?.promptSuggestions).toBe(true);
+      // The flag-settings layer outranks `promptSuggestionEnabled: false` in settings.json, while
+      // leaving the env override unset keeps Claude Code's near-limit suppression.
+      expect(flagEnabled()).toBe(true);
+      expect(launch()?.env).not.toHaveProperty('CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION');
+      expect(sdkMock.getLastResponse()).not.toBe(initialQuery);
+      const enabledQuery = sdkMock.getLastResponse();
+      updateClaudeProviderSettings(host.settings, { promptSuggestions: false });
+      await collectEvents(session.execute(request).events);
+      expect(launch()).not.toHaveProperty('promptSuggestions');
+      expect(flagEnabled()).toBeUndefined();
+      expect(sdkMock.getLastResponse()).not.toBe(enabledQuery);
+      updateClaudeProviderSettings(host.settings, { promptSuggestions: true });
+      await collectEvents(session.execute(createRequest()).events);
+      expect(launch()).not.toHaveProperty('promptSuggestions');
+      expect(flagEnabled()).toBeUndefined();
+    } finally { await session.dispose(); }
+  });
+
+  it('delivers a trailing suggestion as a transient event owned by the completed turn', async () => {
+    const host = createHost();
+    updateClaudeProviderSettings(host.settings, { promptSuggestions: true });
+    const session = new ClaudeExecutionBackend(host).createSession(createConfig());
+    const events: ProviderSessionEvent[] = [];
+    session.onEvent(event => events.push(event));
+    const request = createRequest();
+    Object.assign(request.configuration, { promptSuggestions: true });
+    sdkMock.setMockMessages([
+      { type: 'system', subtype: 'init', session_id: 'suggestion-session' },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Done' }] } },
+      { type: 'result', subtype: 'success', session_id: 'suggestion-session' },
+      { type: 'prompt_suggestion', suggestion: 'Add tests', session_id: 'suggestion-session', uuid: 'suggestion' },
+    ], { appendResult: false });
+    try {
+      const run = session.execute(request);
+      const output = await collectEvents(run.events);
+      await new Promise(resolve => setImmediate(resolve));
+      expect(output.at(-1)?.type).toBe('turn_completed');
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'prompt_suggestion', suggestion: 'Add tests', originatingTurnId: run.turnId,
+      }));
+      expect(JSON.stringify(session.getSnapshot())).not.toContain('Add tests');
+      expect(output.some(event => (event as { type: string }).type === 'prompt_suggestion')).toBe(false);
+    } finally { await session.dispose(); }
+  });
 });
