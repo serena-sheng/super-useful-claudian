@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { createForkTestEnvironment, type ForkTestEnvironment } from '@test/helpers/features/chat/ProviderForkTestHarness';
 import { testDate } from '@test/helpers/testClock';
 
+import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
 import { OpencodeExecutionBackend } from '@/providers/opencode/execution/OpencodeExecutionBackend';
 import { OpencodeConversationHistoryService } from '@/providers/opencode/history/OpencodeConversationHistoryService';
 import { OpencodeServerService } from '@/providers/opencode/http/OpencodeServerService';
@@ -59,7 +60,8 @@ describe('OpenCode v2 checkpoint forks', () => {
   beforeEach(async () => {
     env = await createForkTestEnvironment();
     server = new OpencodeServerService();
-    history = new OpencodeConversationHistoryService(() => server);
+    ProviderWorkspaceRegistry.setServices('opencode', { serverService: server } as any);
+    history = new OpencodeConversationHistoryService(async () => server);
     backend = new OpencodeExecutionBackend(env.host, { serverService: server });
     databasePath = path.join(env.root, 'native.db');
     const cliPath = path.join(env.root, 'opencode.cjs');
@@ -67,7 +69,7 @@ describe('OpenCode v2 checkpoint forks', () => {
     writeFileSync(databasePath, JSON.stringify({ sessions: { source: nativeMessages }, requests: [] }));
     env.host.settings.providerConfigs.opencode = { enabled: true, cliPath, environmentVariables: `OPENCODE_DB=${databasePath}` };
   });
-  afterEach(async () => { await server.dispose(); await env.dispose(); });
+  afterEach(async () => { ProviderWorkspaceRegistry.setServices('opencode', undefined); await server.dispose(); await env.dispose(); });
 
   async function openSource() {
     const conversation = await env.repository.create({ providerId: 'opencode' });
