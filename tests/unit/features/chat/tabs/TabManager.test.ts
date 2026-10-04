@@ -124,7 +124,7 @@ jest.mock('@/features/chat/tabs/TabRuntimeFactory', () => ({
   createTabRuntime: (options: Record<string, any>) => mockCreateTabRuntime(options),
 }));
 
-jest.mock('@/shared/modals/ForkTargetModal', () => ({
+jest.mock('@/features/chat/tabs/ForkTargetModal', () => ({
   chooseForkTarget: (...args: unknown[]) => mockChooseForkTarget(...args),
 }));
 
@@ -215,10 +215,11 @@ function createManager(plugin = createPlugin(), callbacks: Record<string, unknow
 
 function expectTabMetadataReleased(manager: TabManager, tabId: string): void {
   const internals = manager as any;
-  expect(internals.providerRuntimeCommandLoads.has(tabId)).toBe(false);
-  expect(internals.providerRuntimeCommandCache.has(tabId)).toBe(false);
-  expect(internals.providerCommandDiscoveryStores.has(tabId)).toBe(false);
-  expect(internals.tabCommandContextRevisions.has(tabId)).toBe(false);
+  const discovery = internals.commandDiscovery;
+  expect(discovery.providerRuntimeCommandLoads.has(tabId)).toBe(false);
+  expect(discovery.providerRuntimeCommandCache.has(tabId)).toBe(false);
+  expect(discovery.providerCommandDiscoveryStores.has(tabId)).toBe(false);
+  expect(discovery.tabCommandContextRevisions.has(tabId)).toBe(false);
   expect(internals.tabActivationRevisions.has(tabId)).toBe(false);
 }
 
@@ -445,12 +446,8 @@ describe('TabManager provider execution orchestration', () => {
   });
 
   it.each([
-    ['foreground streaming', (tab: any) => { tab.state.isStreaming = true; }],
-    ['turn orchestration', (tab: any) => { void tab.session.turns.run(() => Promise.resolve()); }],
+    ['a foreground turn', (tab: any) => { void tab.session.turns.run(() => Promise.resolve()); }],
     ['provider background work', (tab: any) => { tab.executionCoordinator.hasBackgroundWork = true; }],
-    ['async subagent work', (tab: any) => {
-      tab.services.subagentManager.hasActiveAsyncSubagents.mockReturnValue(true);
-    }],
   ])('projects %s as working in tab bar items', async (_source, makeWorking) => {
     const { manager } = createManager();
     const tab = await manager.createTab();
@@ -1257,9 +1254,9 @@ describe('TabManager provider execution orchestration', () => {
     const retainedDraft = await manager.createTab();
     const conversationChanged = mockCreateTabRuntime.mock.calls[0]?.[0]
       .onConversationIdChanged as (runtime: any, conversationId: string) => void;
-    const internals = manager as any;
-    const initialCommandRevision = internals.tabCommandContextRevisions.get(retainedDraft!.id);
-    internals.providerRuntimeCommandCache.set(retainedDraft!.id, { stale: true });
+    const discovery = (manager as any).commandDiscovery;
+    const initialCommandRevision = discovery.tabCommandContextRevisions.get(retainedDraft!.id);
+    discovery.providerRuntimeCommandCache.set(retainedDraft!.id, { stale: true });
     mockCreateTabRuntime.mockImplementationOnce(() => replacementAssembly.promise);
 
     const close = manager.discardTab(retainedDraft!.id);
@@ -1274,9 +1271,9 @@ describe('TabManager provider execution orchestration', () => {
       retainedDraft!.id,
       'conversation-created-during-close',
     );
-    expect(internals.tabCommandContextRevisions.get(retainedDraft!.id))
+    expect(discovery.tabCommandContextRevisions.get(retainedDraft!.id))
       .toBe(initialCommandRevision + 1);
-    expect(internals.providerRuntimeCommandCache.has(retainedDraft!.id)).toBe(false);
+    expect(discovery.providerRuntimeCommandCache.has(retainedDraft!.id)).toBe(false);
     expect(manager.getAllTabs()).toEqual([retainedDraft]);
     expect(retainedDraft!.session.acceptsIntents).toBe(true);
     expect(retainedDraft!.controllers.inputController.resumeQueuedTurnAfterIntentAdmission)
@@ -1421,6 +1418,27 @@ describe('TabManager provider execution orchestration', () => {
     expect(mockDrainTabForShutdownSnapshot).toHaveBeenCalledWith(second);
     expect(first!.lifecycleState).toBe('open');
     expect(second!.lifecycleState).toBe('open');
+    await manager.destroy();
+  });
+
+  it('aborts each admitted turn and supersedes its presentation as soon as shutdown begins', async () => {
+    const { manager } = createManager();
+    const tab = await manager.createTab();
+    const release = deferred<void>();
+    let turnSignal: AbortSignal | null = null;
+    const turn = tab!.session.turns.run(async signal => {
+      turnSignal = signal;
+      await release.promise;
+    });
+    const generation = tab!.session.turns.streamGeneration;
+
+    manager.beginShutdown();
+
+    expect(turnSignal!.aborted).toBe(true);
+    expect(tab!.session.turns.cancelRequested).toBe(true);
+    expect(tab!.session.turns.streamGeneration).toBeGreaterThan(generation);
+    release.resolve();
+    await turn;
     await manager.destroy();
   });
 
@@ -1653,6 +1671,61 @@ describe('TabManager provider execution orchestration', () => {
     expect(manager.getAllTabs()).toEqual([current]);
     expect(current?.lifecycleState).toBe('open');
     expect(mockDestroyTab).toHaveBeenCalledWith(first);
+  });
+
+  it('retains only live runtime tabs and commits their provisional previews', async () => {
+    const getCachedConversation = jest.fn((id: string) => ({
+      id,
+      providerId: 'claude',
+    }));
+    const { manager } = createManager(createPlugin({ getCachedConversation }));
+    const open = await manager.createTab('open-conversation');
+    const preview = await manager.createTab('preview-conversation', undefined, {
+      lifecycleState: 'provisional',
+    });
+    const closingPreview = await manager.createTab('closing-conversation', undefined, {
+      activate: false,
+      lifecycleState: 'provisional',
+    });
+    const untouchedPreview = await manager.createTab('untouched-conversation', undefined, {
+      activate: false,
+      lifecycleState: 'provisional',
+    });
+    await manager.restoreState({
+      openTabs: [{ tabId: 'cold-shell', conversationId: 'cold-conversation' }],
+      activeTabId: preview!.id,
+    });
+    const save = deferred<void>();
+    closingPreview!.controllers.conversationController.save = jest.fn(() => save.promise);
+    const close = manager.closeTab(closingPreview!.id);
+    for (let attempt = 0;
+      attempt < 10 && closingPreview!.lifecycleState !== 'closing';
+      attempt += 1) {
+      await Promise.resolve();
+    }
+    expect(closingPreview!.lifecycleState).toBe('closing');
+
+    manager.retainTabs([
+      open!.id,
+      preview!.id,
+      closingPreview!.id,
+      'cold-shell',
+      'unknown-tab',
+    ]);
+
+    expect(open!.lifecycleState).toBe('open');
+    expect(open!.session.userOwnershipRevision).toBe(1);
+    expect(preview!.lifecycleState).toBe('open');
+    expect(preview!.session.userOwnershipRevision).toBe(1);
+    expect(closingPreview!.session.userOwnershipRevision).toBe(0);
+    expect(untouchedPreview!.lifecycleState).toBe('provisional');
+    expect(untouchedPreview!.session.userOwnershipRevision).toBe(0);
+    expect(manager.getTab('cold-shell')).toBeNull();
+
+    save.resolve(undefined);
+    await expect(close).resolves.toBe(true);
+    await manager.discardProvisionalTabs();
+    expect(manager.getAllTabs()).toEqual([open, preview]);
   });
 
   it('captures every open tab and the actual active tab regardless of lifecycle', async () => {

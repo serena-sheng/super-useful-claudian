@@ -395,6 +395,27 @@ describe('CodexNotificationRouter', () => {
       ]);
     });
 
+    it.each([
+      ['raw tool call', 'rawResponseItem/completed', { item: {
+        type: 'function_call', name: 'shell_command', call_id: 'call_ls', arguments: '{"command":"ls"}',
+      } }],
+      ['canonical tool item', 'item/started', { item: {
+        type: 'imageView', id: 'view_1', path: '/workspace/diagram.png',
+      } }],
+    ])('starts a new assistant segment after a %s', (_label, method, params) => {
+      router.handleNotification('item/agentMessage/delta', { threadId: 't1', turnId: 'turn1', itemId: 'msg1', delta: 'Checking' });
+      router.handleNotification(method, params);
+      // A later raw message that repeats earlier text as its prefix is new text, not a completion.
+      router.handleNotification('rawResponseItem/completed', { item: {
+        type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Checking done' }],
+      } });
+
+      expect(chunks.filter(chunk => chunk.type === 'text')).toEqual([
+        { type: 'text', content: 'Checking' },
+        { type: 'text', content: 'Checking done' },
+      ]);
+    });
+
     it('does not render raw user bootstrap messages as assistant text', () => {
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -3834,7 +3855,7 @@ describe('CodexNotificationRouter', () => {
 
       const results = chunks.filter(chunk => chunk.type === 'tool_result');
       expect(new Set(results.map(chunk => chunk.id))).toEqual(new Set(['call-web']));
-      expect(results.at(-1)).toMatchObject({ toolUseResult: { webSearchResults: [expect.objectContaining({ title: 'Source' })] } });
+      expect(results.at(-1)).toMatchObject({ resultDetails: { webSearchResults: [expect.objectContaining({ title: 'Source' })] } });
     });
 
     it.each([false, true])('keeps all raw web actions when a same-id native event summarizes one (native first: %s)', nativeFirst => {

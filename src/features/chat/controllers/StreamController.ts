@@ -1,4 +1,9 @@
-import { TFile } from 'obsidian';
+import { resolveToolDiffData } from '@/core/tools/toolDiff';
+import {
+  cancelScheduledAnimationFrame,
+  scheduleAnimationFrame,
+  type ScheduledAnimationFrame,
+} from '@/features/chat/utils/animationFrame';
 
 import type {
   ProviderBackgroundOutputEvent,
@@ -10,7 +15,7 @@ import {
   type ProviderSubagentAdapter,
   type ProviderSubagentLifecycleAdapter,
 } from '../../../core/providers/types';
-import { extractResolvedAnswers, extractResolvedAnswersFromResultText } from '../../../core/tools/toolInput';
+import { extractResolvedAnswersFromResultText } from '../../../core/tools/toolInput';
 import {
   isEditTool,
   isWriteEditTool,
@@ -18,35 +23,18 @@ import {
   TOOL_ASK_USER_QUESTION,
   TOOL_SUBAGENT,
 } from '../../../core/tools/toolNames';
-import {
-  extractToolProviderPayload,
-  normalizeToolProviderPayload,
-} from '../../../core/tools/toolProviderPayload';
-import {
-  extractResultImages,
-  extractScriptToolCalls,
-  extractToolResultContent,
-  extractToolResultFormat,
-  extractWebSearchResults,
-  extractWebSearchSummary,
-} from '../../../core/tools/toolResultContent';
+import { normalizeToolProviderPayload } from '../../../core/tools/toolProviderPayload';
+import { extractToolResultContent } from '../../../core/tools/toolResultContent';
+import { applyToolResultPresentation } from '../../../core/tools/toolResultDetails';
 import type {
   ChatMessage,
-  ScriptToolCallItem,
   StreamChunk,
   SubagentInfo,
   SubagentProgress,
   ToolCallInfo,
 } from '../../../core/types';
-import {
-  cancelScheduledAnimationFrame,
-  scheduleAnimationFrame,
-  type ScheduledAnimationFrame,
-} from '../../../utils/animationFrame';
 import { formatDurationMmSs } from '../../../utils/date';
-import { extractDiffData } from '../../../utils/diff';
 import { hasStreamingMathDelimiters } from '../../../utils/markdownMath';
-import { getVaultPath, normalizePathForVault } from '../../../utils/path';
 import type { ChatFeatureHost } from '../ChatFeatureHost';
 import { FLAVOR_TEXTS } from '../constants';
 import { hasMermaidFence } from '../rendering/DisplayOnlyCodeFences';
@@ -74,7 +62,13 @@ import type { SubagentManager } from '../services/SubagentManager';
 import type { AsyncSubagentCompletion } from '../services/SubagentManager';
 import type { ChatState } from '../state/ChatState';
 import { mergeReportedUsage } from '../utils/usageInfo';
+import type { AsyncSubagentHistoryRecovery } from './AsyncSubagentHistoryRecovery';
 import { StreamingRenderCoordinator } from './StreamingRenderCoordinator';
+import {
+  notifyApplyPatchFileChanges,
+  notifyScriptFileChanges,
+  notifyVaultFileChange,
+} from './vaultFileChangeNotifications';
 
 export interface StreamControllerDeps {
   onQuestionToolChanged?: (tool: ToolCallInfo) => void;
@@ -86,20 +80,8 @@ export interface StreamControllerDeps {
   updateQueueIndicator: () => void;
   getProviderId?: () => ProviderId;
   getProviderSessionId?: () => string | null;
-  loadSubagentToolCalls?: (
-    request: SubagentHistoryRecoveryRequest,
-  ) => Promise<ToolCallInfo[] | undefined>;
-  loadSubagentFinalResult?: (
-    request: SubagentHistoryRecoveryRequest,
-  ) => Promise<string | null | undefined>;
-  enqueueBackgroundWork?: (work: () => Promise<void>) => Promise<void> | null;
-  persistConversation?: () => Promise<void>;
-}
-
-export interface SubagentHistoryRecoveryRequest {
-  readonly providerId: ProviderId;
-  readonly providerSessionId: string;
-  readonly subagentId: string;
+  /** Recovers finished async subagents from provider history; absent when the owner has none. */
+  asyncSubagentHistoryRecovery?: AsyncSubagentHistoryRecovery;
 }
 
 interface StreamingContentSnapshot {
@@ -112,12 +94,6 @@ interface StreamingContentSnapshot {
 const STREAMING_RENDER_MIN_INTERVAL_MS = 150;
 
 export class StreamController {
-  private static readonly ASYNC_SUBAGENT_RESULT_RETRY_DELAYS_MS = [
-    200,
-    600,
-    1500,
-  ] as const;
-
   private deps: StreamControllerDeps;
   private readonly textRenderCoordinator: StreamingRenderCoordinator<StreamingContentSnapshot>;
   private readonly thinkingRenderCoordinator: StreamingRenderCoordinator<StreamingContentSnapshot>;
@@ -585,9 +561,9 @@ export class StreamController {
     }
 
     if (chunk.content) existingToolCall.result = (existingToolCall.result ?? '') + chunk.content;
-    const scriptToolCalls = extractScriptToolCalls(chunk.toolUseResult);
+    const scriptToolCalls = chunk.resultDetails?.scriptToolCalls;
     if (scriptToolCalls) {
-      this.#notifyScriptFileChanges(existingToolCall.scriptToolCalls, scriptToolCalls);
+      notifyScriptFileChanges(this.deps.plugin.app, existingToolCall.scriptToolCalls, scriptToolCalls);
       existingToolCall.scriptToolCalls = scriptToolCalls;
     }
     this.#scheduleToolOutputRender(chunk.id, existingToolCall);
@@ -743,14 +719,9 @@ export class StreamController {
     const { state, subagentManager } = this.deps;
     const normalizedContent = this.#normalizeToolResultContent(chunk.content);
 
-    const lifecycleToolCall = msg.toolCalls?.find(toolCall => toolCall.id === chunk.id);
-    if (lifecycleToolCall) mergeToolProviderPayload(lifecycleToolCall, chunk.providerPayload);
-    const lifecycleAdapter = lifecycleToolCall
-      ? this.getSubagentAdapter(lifecycleToolCall.name)
-      : null;
-    if (lifecycleToolCall && lifecycleAdapter?.protocol === 'lifecycle') {
-      mergeToolProviderPayload(lifecycleToolCall, chunk.toolUseResult?.providerPayload);
-    }
+    // The payload belongs to the tool even when a subagent path below consumes its result.
+    const resultToolCall = msg.toolCalls?.find(toolCall => toolCall.id === chunk.id);
+    if (resultToolCall) mergeToolProviderPayload(resultToolCall, chunk.providerPayload);
 
     // Resolve pending Task before processing result.
     if (subagentManager.hasPendingTask(chunk.id)) {
@@ -794,13 +765,6 @@ export class StreamController {
 
     if (existingToolCall) {
       mergeToolProviderPayload(existingToolCall, chunk.providerPayload);
-      const providerPayload = extractToolProviderPayload(chunk.toolUseResult);
-      if (providerPayload) {
-        existingToolCall.providerPayload = {
-          ...existingToolCall.providerPayload,
-          ...providerPayload,
-        };
-      }
       if (isBlocked) {
         existingToolCall.status = 'blocked';
       } else if (chunk.isError) {
@@ -809,16 +773,12 @@ export class StreamController {
         existingToolCall.status = 'completed';
       }
       existingToolCall.result = normalizedContent;
-      existingToolCall.resultFormat = extractToolResultFormat(chunk.toolUseResult) ?? existingToolCall.resultFormat;
-      existingToolCall.webSearchResults = extractWebSearchResults(chunk.toolUseResult) ?? existingToolCall.webSearchResults;
-      existingToolCall.webSearchSummary = extractWebSearchSummary(chunk.toolUseResult) ?? existingToolCall.webSearchSummary;
-      existingToolCall.resultImages = extractResultImages(chunk.toolUseResult) ?? existingToolCall.resultImages;
       const previousScriptToolCalls = existingToolCall.scriptToolCalls;
-      existingToolCall.scriptToolCalls = extractScriptToolCalls(chunk.toolUseResult) ?? previousScriptToolCalls;
+      applyToolResultPresentation(existingToolCall, chunk.resultDetails);
 
       if (existingToolCall.name === TOOL_ASK_USER_QUESTION) {
         const answers =
-          extractResolvedAnswers(chunk.toolUseResult) ??
+          chunk.resultDetails?.resolvedAnswers ??
           extractResolvedAnswersFromResultText(normalizedContent);
         if (answers) existingToolCall.resolvedAnswers = answers;
         this.deps.onQuestionToolChanged?.(existingToolCall);
@@ -827,7 +787,7 @@ export class StreamController {
       const writeEditState = state.writeEditStates.get(chunk.id);
       if (writeEditState && isWriteEditTool(existingToolCall.name)) {
         if (!chunk.isError && !isBlocked) {
-          const diffData = extractDiffData(chunk.toolUseResult, existingToolCall);
+          const diffData = resolveToolDiffData(chunk.resultDetails?.diff, existingToolCall);
           if (diffData) {
             existingToolCall.diffData = diffData;
             updateWriteEditWithDiff(writeEditState, diffData);
@@ -841,15 +801,15 @@ export class StreamController {
 
       // Notify Obsidian vault so the file tree refreshes after Write/Edit/NotebookEdit
       if (!chunk.isError && !isBlocked && isEditTool(existingToolCall.name)) {
-        this.#notifyVaultFileChange(existingToolCall.input);
+        notifyVaultFileChange(this.deps.plugin.app, existingToolCall.input);
       }
 
       // Runtime apply_patch: refresh each changed file path
       if (!chunk.isError && !isBlocked && existingToolCall.name === TOOL_APPLY_PATCH) {
-        this.#notifyApplyPatchFileChanges(existingToolCall.input);
+        notifyApplyPatchFileChanges(this.deps.plugin.app, existingToolCall.input);
       }
 
-      this.#notifyScriptFileChanges(previousScriptToolCalls, existingToolCall.scriptToolCalls);
+      notifyScriptFileChanges(this.deps.plugin.app, previousScriptToolCalls, existingToolCall.scriptToolCalls);
     }
 
     this.showThinkingIndicator();
@@ -1055,7 +1015,7 @@ export class StreamController {
 
   /** Resolves a pending Agent tool call when its own tool_result arrives. */
   #renderPendingTaskFromTaskResultViaManager(
-    chunk: { id: string; content: string; isError?: boolean; toolUseResult?: unknown },
+    chunk: Extract<StreamChunk, { type: 'tool_result' }>,
     msg: ChatMessage
   ): void {
     const result = this.deps.subagentManager.renderPendingTaskFromTaskResult(
@@ -1063,7 +1023,7 @@ export class StreamController {
       chunk.content,
       chunk.isError || false,
       this.#getMessageContentEl(msg),
-      chunk.toolUseResult
+      chunk.providerPayload
     );
     if (!result) return;
 
@@ -1160,14 +1120,9 @@ export class StreamController {
             ? 'blocked'
             : (chunk.isError ? 'error' : 'completed');
           toolCall.result = normalizedContent;
-          toolCall.resultFormat = extractToolResultFormat(chunk.toolUseResult) ?? toolCall.resultFormat;
-          mergeToolProviderPayload(toolCall, chunk.toolUseResult?.providerPayload);
           mergeToolProviderPayload(toolCall, chunk.providerPayload);
-          toolCall.diffData = extractDiffData(chunk.toolUseResult, toolCall) ?? toolCall.diffData;
-          toolCall.webSearchResults = extractWebSearchResults(chunk.toolUseResult) ?? toolCall.webSearchResults;
-          toolCall.webSearchSummary = extractWebSearchSummary(chunk.toolUseResult) ?? toolCall.webSearchSummary;
-          toolCall.resultImages = extractResultImages(chunk.toolUseResult) ?? toolCall.resultImages;
-          toolCall.scriptToolCalls = extractScriptToolCalls(chunk.toolUseResult) ?? toolCall.scriptToolCalls;
+          toolCall.diffData = resolveToolDiffData(chunk.resultDetails?.diff, toolCall) ?? toolCall.diffData;
+          applyToolResultPresentation(toolCall, chunk.resultDetails);
           subagentManager.updateSyncToolResult(parentToolUseId, chunk.id, toolCall);
         }
         break;
@@ -1180,14 +1135,14 @@ export class StreamController {
 
   /** Finalizes a sync subagent when its Agent tool_result is received. */
   #finalizeSubagent(
-    chunk: { type: 'tool_result'; id: string; content: string; isError?: boolean; toolUseResult?: unknown },
+    chunk: Extract<StreamChunk, { type: 'tool_result' }>,
     msg: ChatMessage
   ): void {
     const isError = chunk.isError || false;
     const normalizedContent = this.#normalizeToolResultContent(chunk.content);
     const taskToolCall = this.#ensureTaskToolCall(msg, chunk.id);
     const finalized = this.deps.subagentManager.finalizeSyncSubagent(
-      chunk.id, chunk.content, isError, chunk.toolUseResult, taskToolCall.subagent,
+      chunk.id, chunk.content, isError, chunk.providerPayload, taskToolCall.subagent,
     );
 
     const extractedResult = finalized?.result ?? normalizedContent;
@@ -1237,7 +1192,7 @@ export class StreamController {
   }
 
   async #handleAsyncTaskToolResult(
-    chunk: { type: 'tool_result'; id: string; content: string; isError?: boolean; toolUseResult?: unknown },
+    chunk: Extract<StreamChunk, { type: 'tool_result' }>,
     msg: ChatMessage,
   ): Promise<boolean> {
     const { subagentManager } = this.deps;
@@ -1248,8 +1203,8 @@ export class StreamController {
       return false;
     }
 
-    subagentManager.handleTaskToolResult(chunk.id, chunk.content, chunk.isError, chunk.toolUseResult);
-    await this.#hydrateAsyncSubagentHistory(
+    subagentManager.handleTaskToolResult(chunk.id, chunk.content, chunk.isError, chunk.providerPayload);
+    await this.deps.asyncSubagentHistoryRecovery?.recover(
       subagentManager.getByTaskId(chunk.id),
     );
     this.#renderManagedSubagentHistory(msg, subagentManager.getByTaskId(chunk.id));
@@ -1258,7 +1213,7 @@ export class StreamController {
 
   /** Handles TaskOutput result to finalize async subagent. */
   private async handleAgentOutputToolResult(
-    chunk: { type: 'tool_result'; id: string; content: string; isError?: boolean; toolUseResult?: unknown }
+    chunk: Extract<StreamChunk, { type: 'tool_result' }>
   ): Promise<boolean> {
     const { subagentManager } = this.deps;
     const isLinked = subagentManager.isLinkedAgentOutputTool(chunk.id);
@@ -1267,10 +1222,10 @@ export class StreamController {
       chunk.id,
       chunk.content,
       chunk.isError || false,
-      chunk.toolUseResult
+      chunk.providerPayload
     );
 
-    await this.#hydrateAsyncSubagentHistory(handled);
+    await this.deps.asyncSubagentHistoryRecovery?.recover(handled);
 
     return isLinked || handled !== undefined;
   }
@@ -1296,7 +1251,7 @@ export class StreamController {
     completion: AsyncSubagentCompletion,
   ): Promise<boolean> {
     const handled = this.deps.subagentManager.handleAsyncSubagentCompletion(completion);
-    await this.#hydrateAsyncSubagentHistory(
+    await this.deps.asyncSubagentHistoryRecovery?.recover(
       handled,
       completion.providerSessionId,
     );
@@ -1304,192 +1259,6 @@ export class StreamController {
       this.showThinkingIndicator();
     }
     return handled !== undefined;
-  }
-
-  async #hydrateAsyncSubagentHistory(
-    subagent: SubagentInfo | undefined,
-    providerSessionId?: string,
-  ): Promise<void> {
-    if (!this.#canRecoverAsyncSubagent(subagent)) return;
-    if (
-      !this.deps.loadSubagentToolCalls
-      && !this.deps.loadSubagentFinalResult
-    ) return;
-
-    const providerId = this.#getActiveProviderId();
-    const ownerSessionId = providerSessionId
-      ?? this.deps.getProviderSessionId?.()
-      ?? null;
-    if (
-      !ownerSessionId
-      || !this.#ownsAsyncSubagent(
-        subagent,
-        providerId,
-        ownerSessionId,
-      )
-    ) return;
-
-    const result = await this.#tryHydrateAsyncSubagent(
-      subagent,
-      providerId,
-      ownerSessionId,
-      true,
-    );
-    if (!result.isCurrent) return;
-    if (result.hasHydrated) {
-      this.deps.subagentManager.refreshAsyncSubagent(subagent);
-    }
-    if (!result.finalResultHydrated) {
-      this.#scheduleAsyncSubagentResultRetry(
-        subagent,
-        providerId,
-        ownerSessionId,
-        0,
-      );
-    }
-  }
-
-  async #tryHydrateAsyncSubagent(
-    subagent: SubagentInfo,
-    providerId: ProviderId,
-    providerSessionId: string,
-    hydrateToolCalls: boolean,
-  ): Promise<{
-    finalResultHydrated: boolean;
-    hasHydrated: boolean;
-    isCurrent: boolean;
-  }> {
-    const request: SubagentHistoryRecoveryRequest = {
-      providerId,
-      providerSessionId,
-      subagentId: subagent.agentId ?? '',
-    };
-    let hasHydrated = false;
-
-    if (
-      hydrateToolCalls
-      && !subagent.toolCalls?.length
-      && this.deps.loadSubagentToolCalls
-    ) {
-      const recoveredToolCalls = await this.deps.loadSubagentToolCalls(request);
-      if (!this.#ownsAsyncSubagent(subagent, providerId, providerSessionId)) {
-        return {
-          finalResultHydrated: false,
-          hasHydrated: false,
-          isCurrent: false,
-        };
-      }
-      if (recoveredToolCalls === undefined) {
-        return {
-          finalResultHydrated: true,
-          hasHydrated: false,
-          isCurrent: true,
-        };
-      }
-      if (recoveredToolCalls.length > 0) {
-        this.deps.subagentManager.applyRecoveredData(subagent, { toolCalls: recoveredToolCalls });
-        hasHydrated = true;
-      }
-    }
-
-    if (!this.deps.loadSubagentFinalResult) {
-      return { finalResultHydrated: true, hasHydrated, isCurrent: true };
-    }
-    const recoveredFinalResult = await this.deps.loadSubagentFinalResult(request);
-    if (!this.#ownsAsyncSubagent(subagent, providerId, providerSessionId)) {
-      return {
-        finalResultHydrated: false,
-        hasHydrated: false,
-        isCurrent: false,
-      };
-    }
-    if (recoveredFinalResult === undefined) {
-      return { finalResultHydrated: true, hasHydrated, isCurrent: true };
-    }
-    const finalResultHydrated = Boolean(recoveredFinalResult?.trim());
-    if (finalResultHydrated && recoveredFinalResult !== subagent.result) {
-      this.deps.subagentManager.applyRecoveredData(subagent, { result: recoveredFinalResult ?? undefined });
-      hasHydrated = true;
-    }
-    return { finalResultHydrated, hasHydrated, isCurrent: true };
-  }
-
-  #canRecoverAsyncSubagent(
-    subagent: SubagentInfo | undefined,
-  ): subagent is SubagentInfo & { agentId: string } {
-    if (!subagent || subagent.mode !== 'async' || !subagent.agentId) return false;
-    const status = subagent.asyncStatus ?? subagent.status;
-    return status === 'completed' || status === 'error';
-  }
-
-  #ownsAsyncSubagent(
-    subagent: SubagentInfo,
-    providerId: ProviderId,
-    providerSessionId: string,
-  ): boolean {
-    return this.#getActiveProviderId() === providerId
-      && this.deps.getProviderSessionId?.() === providerSessionId
-      && this.deps.subagentManager.getByTaskId(subagent.id) === subagent;
-  }
-
-  #scheduleAsyncSubagentResultRetry(
-    subagent: SubagentInfo,
-    providerId: ProviderId,
-    providerSessionId: string,
-    attempt: number,
-  ): void {
-    if (
-      !subagent.agentId
-      || attempt >= StreamController.ASYNC_SUBAGENT_RESULT_RETRY_DELAYS_MS.length
-    ) return;
-
-    const delay = StreamController.ASYNC_SUBAGENT_RESULT_RETRY_DELAYS_MS[attempt];
-    const ownerWindow = this.deps.getMessagesEl().ownerDocument.defaultView
-      ?? window;
-    ownerWindow.setTimeout(() => {
-      const work = () => this.#retryAsyncSubagentResult(
-        subagent,
-        providerId,
-        providerSessionId,
-        attempt,
-      );
-      const pending = this.deps.enqueueBackgroundWork
-        ? this.deps.enqueueBackgroundWork(work)
-        : work();
-      void pending?.catch(() => undefined);
-    }, delay);
-  }
-
-  async #retryAsyncSubagentResult(
-    subagent: SubagentInfo,
-    providerId: ProviderId,
-    providerSessionId: string,
-    attempt: number,
-  ): Promise<void> {
-    if (
-      !this.#canRecoverAsyncSubagent(subagent)
-      || !this.#ownsAsyncSubagent(subagent, providerId, providerSessionId)
-    ) return;
-
-    const result = await this.#tryHydrateAsyncSubagent(
-      subagent,
-      providerId,
-      providerSessionId,
-      false,
-    );
-    if (!result.isCurrent) return;
-    if (result.hasHydrated) {
-      this.deps.subagentManager.refreshAsyncSubagent(subagent);
-      await this.deps.persistConversation?.();
-    }
-    if (!result.finalResultHydrated) {
-      this.#scheduleAsyncSubagentResultRetry(
-        subagent,
-        providerId,
-        providerSessionId,
-        attempt + 1,
-      );
-    }
   }
 
   /** Callback from SubagentManager when async state changes. Updates messages only (DOM handled by manager). */
@@ -1721,79 +1490,6 @@ export class StreamController {
   // Utilities
   // ============================================
 
-  /**
-   * Nudges Obsidian's vault after a Write/Edit/NotebookEdit so the file tree
-   * refreshes. Direct `fs` writes bypass the Vault API, and macOS + iCloud
-   * FSWatcher often misses the event.
-   */
-  #notifyVaultFileChange(input: Record<string, unknown>): void {
-    const rawPathValue = input.file_path ?? input.notebook_path;
-    const rawPath = typeof rawPathValue === 'string' ? rawPathValue : undefined;
-    const vaultPath = getVaultPath(this.deps.plugin.app);
-    const relativePath = normalizePathForVault(rawPath, vaultPath);
-    if (!relativePath || relativePath.startsWith('/')) return;
-
-    window.setTimeout(() => {
-      const { vault } = this.deps.plugin.app;
-      const file = vault.getAbstractFileByPath(relativePath);
-      if (file instanceof TFile) {
-        // Existing file — tell listeners the content changed
-        vault.trigger('modify', file);
-      } else {
-        // New file — scan parent directory so Obsidian discovers it
-        const parentDir = relativePath.includes('/')
-          ? relativePath.substring(0, relativePath.lastIndexOf('/'))
-          : '';
-        vault.adapter.list(parentDir).catch(() => { /* ignore */ });
-      }
-    }, 200);
-  }
-
-  /**
-   * Refreshes files nested script calls finished changing since the previous snapshot.
-   * A later script failure or cancellation does not undo them.
-   */
-  #notifyScriptFileChanges(
-    previous: readonly ScriptToolCallItem[] | undefined,
-    next: readonly ScriptToolCallItem[] | undefined,
-  ): void {
-    next?.forEach((call, index) => {
-      if (call.status !== 'completed' || !call.input || previous?.[index]?.status === 'completed') return;
-      if (isEditTool(call.name)) this.#notifyVaultFileChange(call.input);
-      else if (call.name === TOOL_APPLY_PATCH) this.#notifyApplyPatchFileChanges(call.input);
-    });
-  }
-
-  /** Refreshes vault for each file path in an apply_patch changes array or patch text. */
-  #notifyApplyPatchFileChanges(input: Record<string, unknown>): void {
-    const notified = new Set<string>();
-
-    // Codex fileChange events supply structured changes.
-    const changes = input.changes;
-    if (Array.isArray(changes)) {
-      for (const change of changes) {
-        if (change && typeof change === 'object' && !Array.isArray(change)) {
-          const changeRecord = change as Record<string, unknown>;
-          if (typeof changeRecord.path === 'string') {
-            notified.add(changeRecord.path);
-            this.#notifyVaultFileChange({ file_path: changeRecord.path });
-          }
-        }
-      }
-    }
-
-    // Parse file paths from patch text markers (current custom_tool_call format)
-    const patchText = typeof input.patch === 'string' ? input.patch : '';
-    if (patchText) {
-      for (const match of patchText.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)) {
-        const filePath = match[1]?.trim();
-        if (filePath && !notified.has(filePath)) {
-          this.#notifyVaultFileChange({ file_path: filePath });
-        }
-      }
-    }
-  }
-
   /** Scrolls messages to bottom if auto-scroll is enabled. */
   private scrollToBottom(): void {
     if (this.pendingScrollFrame !== null) return;
@@ -1929,7 +1625,7 @@ export function providerOutputEventToStreamChunk(
           content: event.content,
           id: event.toolCallId,
           type: 'tool_output',
-          ...(event.toolUseResult ? { toolUseResult: event.toolUseResult } : {}),
+          ...(event.resultDetails ? { resultDetails: event.resultDetails } : {}),
         };
     case 'tool_completed':
       return event.toolScope.kind === 'subagent'
@@ -1940,7 +1636,7 @@ export function providerOutputEventToStreamChunk(
           ...(event.isBlocked !== undefined ? { isBlocked: event.isBlocked } : {}),
           subagentId: event.toolScope.subagentId,
           ...(event.providerPayload ? { providerPayload: event.providerPayload } : {}),
-          ...(event.toolUseResult ? { toolUseResult: event.toolUseResult } : {}),
+          ...(event.resultDetails ? { resultDetails: event.resultDetails } : {}),
           type: 'subagent_tool_result',
         }
         : {
@@ -1949,7 +1645,7 @@ export function providerOutputEventToStreamChunk(
           ...(event.isError !== undefined ? { isError: event.isError } : {}),
           ...(event.isBlocked !== undefined ? { isBlocked: event.isBlocked } : {}),
           ...(event.providerPayload ? { providerPayload: event.providerPayload } : {}),
-          ...(event.toolUseResult ? { toolUseResult: event.toolUseResult } : {}),
+          ...(event.resultDetails ? { resultDetails: event.resultDetails } : {}),
           type: 'tool_result',
         };
     case 'usage_updated':

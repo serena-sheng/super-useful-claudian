@@ -1,6 +1,9 @@
 import type { EditorView } from '@codemirror/view';
 
 import type { ProviderSelectionSnapshot, ProviderSessionReference } from '@/core/execution/ProviderExecutionRequest';
+import type { BrowserSelectionContext } from '@/core/prompt/browserContext';
+import type { CanvasSelectionContext } from '@/core/prompt/canvasContext';
+import type { EditorSelectionContext } from '@/core/prompt/editorContext';
 
 import type {
   ChatMessage,
@@ -9,9 +12,6 @@ import type {
   ToolCallInfo,
   UsageInfo,
 } from '../../../core/types';
-import type { BrowserSelectionContext } from '../../../utils/browser';
-import type { CanvasSelectionContext } from '../../../utils/canvas';
-import type { EditorSelectionContext } from '../../../utils/editor';
 import type { ThinkingBlockState } from '../rendering/ThinkingBlockRenderer';
 import type { WriteEditState } from '../rendering/WriteEditRenderer';
 
@@ -80,12 +80,8 @@ export interface ChatStateData {
   // Message state
   messages: ChatMessage[];
 
-  // Streaming control
-  isStreaming: boolean;
-  cancelRequested: boolean;
-  streamGeneration: number;
-  /** Guards against concurrent operations during conversation creation. */
-  isCreatingConversation: boolean;
+  /** Guards against concurrent operations while the tab resets to a new chat. */
+  isResettingToNewChat: boolean;
   /** Guards against concurrent operations during conversation switching. */
   isSwitchingConversation: boolean;
   /** Guards the destructive rewind transaction from overlapping tab actions. */

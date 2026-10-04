@@ -1093,7 +1093,6 @@ describe('OpencodeExecutionBackend', () => {
         content: expect.stringContaining('Updated file'),
         isError: false,
         toolCallId: 'tool-edit',
-        toolUseResult: { filePath: '/vault/notes/today.md' },
         type: 'tool_completed',
       }),
     ]));
@@ -1112,6 +1111,20 @@ describe('OpencodeExecutionBackend', () => {
 
     expect((await collect(run.events)).at(-1)?.type).toBe('turn_completed');
     expect(harness.kernels[0].prompts).toHaveLength(1);
+  });
+
+  it('cancels a request whose signal aborted before execution without starting native work', async () => {
+    const harness = createHarness();
+    const controller = new AbortController();
+    controller.abort();
+
+    const run = harness.session.execute(createRequest({ signal: controller.signal }));
+    for (let attempt = 0; attempt < 20; attempt += 1) await Promise.resolve();
+
+    expect(harness.kernels).toEqual([]);
+    const events = await collect(run.events);
+    expect(events.at(-1)).toMatchObject({ reason: 'cancelled', type: 'cancelled' });
+    expect(events.some(event => event.type === 'turn_started')).toBe(false);
   });
 
   it('cancels, invalidates, fences late events, and resumes lazily on a fresh kernel', async () => {

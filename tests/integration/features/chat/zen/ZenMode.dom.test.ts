@@ -190,14 +190,14 @@ async function createZenFixture(options: { enabled?: boolean; ready?: boolean } 
       activeInputTabId: null,
       containerEl: viewContainerEl,
       isWideSessionLayout: false,
-      viewLifecycleRevision: 1,
-      initializedTabWorkspaceLifecycleRevision: ready ? 1 : -1,
       tabManager: {
         getActiveTab: () => tab,
         getTab: (id: string) => id === tab.id ? tab : null,
         getTabCount: () => 1,
       },
     });
+    view.tabWorkspace = view.createTabWorkspace();
+    Object.assign(view.tabWorkspace, { lifecycleRevision: 1, initializedRevision: ready ? 1 : -1 });
     leaf.view = view;
     layout.leaves.push(leaf);
     view.updateInputLocation();
@@ -296,7 +296,7 @@ it('waits for ordinary restoration before presenting an already collapsed sideba
   expect(zenPanel()).toBeNull();
   expect(fixture.sessions).toHaveLength(0);
 
-  fixture.view.initializedTabWorkspaceLifecycleRevision = 1;
+  fixture.view.tabWorkspace.initializedRevision = 1;
   fixture.view.notifyZenPresentationChanged();
 
   expect(zenPanel()!.contains(fixture.tab.dom.inputComposerEl)).toBe(true);
@@ -435,14 +435,9 @@ it.each([
   const chunks: StreamChunk[] = [];
   const router = new CodexNotificationRouter(chunk => chunks.push(chunk));
   router.handleNotification(method, { threadId: 'thread', turnId: 'turn', itemId: 'item', delta: '' });
-  const events = chunks.flatMap(chunk => {
-    const adapted = adaptCodexStreamChunk(chunk, {} as never);
-    if (!adapted) return [];
-    const { scope, ...event } = adapted;
-    return [event];
-  });
+  const events = chunks.flatMap(chunk => adaptCodexStreamChunk(chunk) ?? []);
   expect(events).not.toHaveLength(0);
-  for (const event of events) session.emitOutput(event as never);
+  for (const event of events) session.emitOutput(event);
   await new Promise(resolve => setTimeout(resolve, 600));
 
   // Empty provider output must not replace the visible waiting surface or create empty reasoning.
