@@ -1,4 +1,5 @@
 import type { StreamChunk } from '../../../core/types';
+import { getPiCustomMessageDisplayText } from './piCustomMessageNormalization';
 import {
   extractPiToolResultText,
   extractPiToolTextContent,
@@ -46,6 +47,8 @@ export function normalizePiRPCEvent(
       return typeof event.parentToolCallId === 'string'
         ? recordNestedToolCall(event, event.parentToolCallId, state)
         : normalizeToolExecution(event, state);
+    case 'message_start':
+      return normalizeCustomMessage(event);
     case 'message_end':
     case 'turn_end':
       return normalizeTerminalError(event);
@@ -89,6 +92,19 @@ function normalizeToolExecution(
     default:
       return normalizeToolResult(event, state);
   }
+}
+
+/** Extension messages (`pi.sendMessage`) enter the conversation as role `custom`. */
+function normalizeCustomMessage(event: Record<string, unknown>): StreamChunk[] {
+  const message = getNestedRecord(event, 'message');
+  if (message?.role !== 'custom') return [];
+  const content = getPiCustomMessageDisplayText(message);
+  return content ? [{ type: 'task_notification', content }] : [];
+}
+
+/** A custom message that renders, so it opens a notification boundary in the transcript. */
+export function isPiDisplayedCustomMessageStart(event: Record<string, unknown>): boolean {
+  return event.type === 'message_start' && normalizeCustomMessage(event).length > 0;
 }
 
 export function getPiTerminalErrorMessage(event: Record<string, unknown>): string | null {
