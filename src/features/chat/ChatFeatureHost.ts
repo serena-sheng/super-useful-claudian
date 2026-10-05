@@ -1,12 +1,11 @@
 import type { AppTabManagerState } from '@/core/bootstrap/tabManagerState';
-
-import type { ProviderId } from '../../core/providers/types';
-import type { Conversation, ConversationMeta, ConversationMutablePatch, ConversationSummary, StoredChatModelSelection } from '../../core/types';
-import type { FeatureHost } from '../FeatureHost';
-import type { ChatExecutionPersistence } from './execution/ChatExecutionCoordinator';
-import type { ChatTab, TabId, TabManagerViewHost, TabProviderCatalogContext } from './tabs/types';
-import type { ConversationLifecycle } from './workspace/ConversationLifecycle';
-import type { ZenModeSource } from './zen/types';
+import type { ProviderId } from '@/core/providers/types';
+import type { Conversation, ConversationMeta, ConversationMutablePatch, ConversationSummary, StoredChatModelSelection } from '@/core/types';
+import type { ConversationLifecycle } from '@/features/chat/conversation/ConversationLifecycle';
+import type { ChatExecutionPersistence } from '@/features/chat/execution/ChatExecutionCoordinator';
+import type { ChatTab, TabId, TabManagerViewHost, TabProviderCatalogContext } from '@/features/chat/tabs/ChatTab';
+import type { ZenModeSource } from '@/features/chat/zen/types';
+import type { FeatureHost } from '@/features/FeatureHost';
 
 export interface ChatModelSelectionPort {
   beginIntent(): number;
