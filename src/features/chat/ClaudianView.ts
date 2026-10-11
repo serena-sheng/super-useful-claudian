@@ -285,8 +285,9 @@ export class ClaudianView extends ItemView implements ZenModeSource {
         onTabRewindingChanged: () => {
           if (isTabWorkspaceInitialized()) this.updateTabBar();
         },
-        onTabTitleChanged: () => {
+        onTabLabelChanged: () => {
           if (isTabWorkspaceInitialized()) this.updateTabBar();
+          persist();
         },
         onTabWorkChanged: () => {
           if (isTabWorkspaceInitialized()) {
@@ -410,7 +411,8 @@ export class ClaudianView extends ItemView implements ZenModeSource {
       onTabClose: (tabId) => {
         void this.handleTabClose(tabId);
       },
-      onTitleExpansionChanged: () => this.tabWorkspace.persist(),
+      onTabLabelChange: (tabId, label) => this.tabManager?.setTabLabel(tabId, label),
+      onDisplayStateChanged: () => this.tabWorkspace.persist(),
     });
 
     const navActionsEl = wrapper.createDiv({ cls: 'claudian-input-nav-actions' });
@@ -491,7 +493,7 @@ export class ClaudianView extends ItemView implements ZenModeSource {
   }
 
   /** The compact tab bar shows once the view holds two tabs, restored tabs included. */
-  private isTabBarVisible(): boolean {
+  isTabBarVisible(): boolean {
     return !this.layout.isWide && (this.tabManager?.getTabCount() ?? 0) >= 2;
   }
 
@@ -643,6 +645,7 @@ export class ClaudianView extends ItemView implements ZenModeSource {
       if (e.isComposing || this.sessions.isComposing) return;
       const activeTab = this.tabManager?.getActiveTab();
       if (this.sessions.handleEscape()) return false;
+      if (this.tabBar?.handleEscape()) return false;
       // Menus also consume Escape in the capture phase; this covers a keymap that sees it first.
       if (activeTab?.composer.closeOpenMenu()) return false;
       if (!e.defaultPrevented && activeTab) {
@@ -699,6 +702,11 @@ export class ClaudianView extends ItemView implements ZenModeSource {
   /** Focuses the active tab's composer. */
   focusActiveInput(): void {
     this.tabManager?.getActiveTab()?.composer.focus();
+  }
+
+  renameActiveTab(): boolean {
+    const activeTabId = this.tabManager?.getActiveTabId();
+    return !!activeTabId && this.isTabBarVisible() && !!this.tabBar?.beginRename(activeTabId);
   }
 
   /** Appends text to the active composer without sending it. */
