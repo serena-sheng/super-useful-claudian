@@ -47,6 +47,7 @@ async function createCodexChildTab() {
     updateConversation: jest.fn(async (_id: string, patch: ConversationMutablePatch) => {
       saves.push(structuredClone(patch.messages ?? []));
     }),
+    switchConversation: jest.fn(async (id: string) => ({ id, providerId: 'codex', messages: [], sessionId: null })),
   } as any;
   const renderer = new MessageRenderer(plugin,
     new Component(), messagesEl,
@@ -70,11 +71,19 @@ async function createCodexChildTab() {
     providerId: 'codex', lifecycleState: 'ready' } as any, coordinator);
   const conversationController = new ConversationController({
     plugin, state, renderer, subagentManager: subagents,
+    session, drafts: { restore: jest.fn() }, clearQueuedMessage: jest.fn(),
+    getLinkedContentController: () => ({ lock: jest.fn() }),
+    getWelcomeEl: () => null, setWelcomeEl: () => undefined,
     getExecutionCoordinator: () => coordinator,
+    awaitBackgroundWork: () => session.awaitBackgroundWork(),
+    ensureExecutionForConversation: async (conversation: { id: string; providerId: 'codex' } | null) => {
+      await coordinator.bindConversation(conversation && { conversationId: conversation.id, providerId: conversation.providerId });
+    },
     isConversationHydrated: () => true,
   } as any);
   const tab: any = { state, renderer, session, executionCoordinator: coordinator, lifecycleState: 'ready',
     dom: { contentEl: messagesEl }, services: { subagentManager: subagents },
+    ui: { promptSuggestion: { discard: () => undefined, receive: () => undefined } },
     controllers: { streamController: stream, conversationController } };
 
   await coordinator.bindConversation({ conversationId: 'conversation', providerId: 'claude' });
@@ -113,7 +122,7 @@ async function createCodexChildTab() {
   };
   return {
     messagesEl, saves, workChanges, tracker, conversationController, child, settle,
-    childTool, savedChildTool, savedStatus, dispose,
+    childTool, savedChildTool, savedStatus, dispose, plugin, state, session, backend,
   };
 }
 
@@ -184,6 +193,55 @@ it('flushes pending Codex child progress with the next direct save and does not 
     await jest.advanceTimersByTimeAsync(QUIET_PERIOD_MS);
     await view.settle();
     expect(view.saves).toHaveLength(1);
+  } finally {
+    await view.dispose();
+  }
+});
+
+it('refuses a conversation switch when work starts while it saves and loads history', async () => {
+  const view = await createCodexChildTab();
+  try {
+    // The tab is idle when the switch is requested; the child starts while the next history loads.
+    expect(view.session.isIdle).toBe(true);
+    view.plugin.switchConversation.mockImplementationOnce(async (id: string) => {
+      startChild(view);
+      return { id, providerId: 'codex', messages: [], sessionId: null };
+    });
+
+    await expect(view.conversationController.switchTo('next-conversation')).resolves.toBe(false);
+
+    expect(view.plugin.switchConversation).toHaveBeenCalledTimes(1);
+    expect(view.state.currentConversationId).toBe('conversation');
+    expect(view.session.hasBackgroundWork).toBe(true);
+    // The live child keeps reporting into the conversation that owns it.
+    streamOutput(view, ['after refused switch\n']);
+    await view.settle();
+    expect(view.childTool()?.result).toBe('after refused switch\n');
+  } finally {
+    await view.dispose();
+  }
+});
+
+it('keeps a background turn that starts while a refused switch loads history', async () => {
+  const view = await createCodexChildTab();
+  try {
+    view.plugin.switchConversation.mockImplementationOnce(async (id: string) => {
+      view.backend.latest.emitBackgroundEvent({ type: 'background_turn_started' });
+      return { id, providerId: 'codex', messages: [], sessionId: null };
+    });
+
+    await expect(view.conversationController.switchTo('next-conversation')).resolves.toBe(false);
+    expect(view.state.currentConversationId).toBe('conversation');
+
+    // Output after the refusal belongs to the turn that started during the switch.
+    view.backend.latest.emitBackgroundEvent({ type: 'text_delta', text: 'Background answer.' });
+    view.backend.latest.emitBackgroundEvent({ type: 'background_turn_completed', reason: 'completed' });
+    await view.settle();
+
+    expect(view.messagesEl.textContent).toContain('Background answer.');
+    expect(view.plugin.updateConversation).toHaveBeenLastCalledWith('conversation', expect.anything());
+    expect(view.saves.at(-1)?.some(message => message.role === 'assistant' && message.content.includes('Background answer.')))
+      .toBe(true);
   } finally {
     await view.dispose();
   }
