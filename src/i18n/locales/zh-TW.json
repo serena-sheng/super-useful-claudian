@@ -184,6 +184,10 @@
       "enteringPlan": "正在進入規劃模式",
       "planComplete": "規劃完成",
       "messageAgent": "向代理傳送訊息",
+      "listDestinations": "列出目標",
+      "messageSession": "向工作階段傳送訊息",
+      "stopSession": "停止工作階段",
+      "readSession": "讀取工作階段",
       "continueAgent": "繼續代理任務",
       "listAgents": "列出代理",
       "interruptAgent": "中斷代理",
@@ -314,6 +318,33 @@
     "pi": {
       "extension": "Pi 擴充功能",
       "notification": "Pi 擴充功能通知。"
+    },
+    "sessionMessage": {
+      "undelivered": "無法傳遞來自 {senders} 的訊息。",
+      "fromLabel": "來自工作階段："
+    },
+    "sessionTools": {
+      "noSessions": "沒有工作階段",
+      "thisSession": "此工作階段",
+      "truncated": "還有更多工作階段未顯示",
+      "recipient": "接收者",
+      "model": "模型",
+      "reasoning": "推理",
+      "message": "訊息",
+      "openSession": "開啟工作階段 {sessionId}",
+      "openProviderSession": "開啟 {provider} 工作階段 {sessionId}",
+      "sessionMissing": "該工作階段已不存在。",
+      "openFailed": "無法開啟工作階段：{message}",
+      "openUnavailable": "無法從這裡開啟工作階段。",
+      "providersIncluded": "已包含可用的提供者和模型",
+      "newSession": "新工作階段",
+      "session": "工作階段",
+      "turns": "輪次",
+      "turnRange": "{from}–{to}，共 {total}",
+      "noTurns": "尚無",
+      "mode": "傳遞方式",
+      "modeSteer": "插入進行中的輪次",
+      "modeInterrupt": "中斷目前工作"
     }
   },
   "settings": {

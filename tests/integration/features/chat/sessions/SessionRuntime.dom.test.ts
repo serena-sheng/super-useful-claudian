@@ -60,13 +60,11 @@ function setup() {
     app, settings,
     providerHost: { app, settings, executionLifecycleRegistry: registry },
     getCommittedSettings: () => settings, getActiveEnvironmentVariables: () => '',
-    getSessionSnapshotDirectory: () => '/tmp/claudian-sessions',
     getConversationSummary: () => conversation, getConversationSync: () => conversation,
     getCachedConversation: () => conversation,
     getConversationById: jest.fn(async () => ({ ...conversation, messages: structuredClone(nativeHistory) })),
     getConversationList: () => [conversation], renameConversation: async () => undefined,
     findConversationAcrossViews: () => null,
-    writeSessionSnapshot: async () => '/tmp/claudian-sessions/reference.md',
     updateConversation: async (_id: string, patch: ConversationMutablePatch) => { saves.push(structuredClone(patch)); },
     mutateSettings: async (mutate: (settings: ClaudianSettings) => void) => mutate(settings),
     executionPersistence: {
@@ -569,4 +567,25 @@ it('retains a detached model until its uncertain branch navigation is reconciled
   h.backend.latest.complete();
   await sending;
   await destroyTab(second);
+});
+
+it('holds mailbox delivery behind a branch preview and wakes when the full transcript returns', async () => {
+  const h = setup();
+  h.setNativeHistory(branchHistory());
+  const tab = await h.attach();
+  await tab.controllers.conversationController.navigateBranch('u2');
+  expect(tab.controllers.conversationController.hasBranchDraft).toBe(true);
+  expect(tab.dom.messagesEl.textContent).not.toContain('Second answer');
+  const runtime = tab.session.runtime;
+  expect(await runtime.mailbox!.deliver({ message: { from: 'Sender', sessionId: 'sender', text: 'New incoming task' }, signal: new AbortController().signal })).toBe('queued');
+  expect(h.backend.sessions.flatMap(session => session.requests)).toHaveLength(0);
+  expect(tab.controllers.drafts.capture('main').content).toBe('Second prompt');
+  tab.controllers.conversationController.cancelBranchDraft();
+  expect(tab.dom.messagesEl.textContent).toContain('Second answer');
+  await waitFor(() => expect(h.backend.latest?.requests).toHaveLength(1));
+  expect(h.backend.latest.requests[0].conversationHistory?.map(message => message.content))
+    .toEqual(['First prompt', 'First answer', 'Second prompt', 'Second answer']);
+  h.backend.latest.complete();
+  await runtime.turns.drain();
+  await destroyTab(tab);
 });

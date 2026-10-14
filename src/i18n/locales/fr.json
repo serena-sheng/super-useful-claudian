@@ -184,6 +184,10 @@
       "enteringPlan": "Passage en mode planification",
       "planComplete": "Plan terminé",
       "messageAgent": "Envoyer un message à l’agent",
+      "listDestinations": "Lister les destinations",
+      "messageSession": "Envoyer un message à la session",
+      "stopSession": "Arrêter la session",
+      "readSession": "Lire la session",
       "continueAgent": "Continuer l’agent",
       "listAgents": "Lister les agents",
       "interruptAgent": "Interrompre l’agent",
@@ -314,6 +318,33 @@
     "pi": {
       "extension": "Extension Pi",
       "notification": "Notification de l’extension Pi."
+    },
+    "sessionMessage": {
+      "undelivered": "Les messages de {senders} n’ont pas pu être remis.",
+      "fromLabel": "De la session :"
+    },
+    "sessionTools": {
+      "noSessions": "Aucune session",
+      "thisSession": "Cette session",
+      "truncated": "D’autres sessions ne sont pas affichées",
+      "recipient": "Destinataire",
+      "model": "Modèle",
+      "reasoning": "Raisonnement",
+      "message": "Message",
+      "openSession": "Ouvrir la session {sessionId}",
+      "openProviderSession": "Ouvrir la session {provider} {sessionId}",
+      "sessionMissing": "Cette session n’existe plus.",
+      "openFailed": "Impossible d’ouvrir la session : {message}",
+      "openUnavailable": "Les sessions ne peuvent pas être ouvertes ici.",
+      "providersIncluded": "Fournisseurs et modèles disponibles inclus",
+      "newSession": "Nouvelle session",
+      "session": "Session",
+      "turns": "Tours",
+      "turnRange": "{from}–{to} sur {total}",
+      "noTurns": "Aucun pour l’instant",
+      "mode": "Remise",
+      "modeSteer": "Orienter le tour en cours",
+      "modeInterrupt": "Interrompre le travail en cours"
     }
   },
   "settings": {

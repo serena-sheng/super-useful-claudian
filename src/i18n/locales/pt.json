@@ -184,6 +184,10 @@
       "enteringPlan": "Entrando no modo de planejamento",
       "planComplete": "Plano concluído",
       "messageAgent": "Enviar mensagem ao agente",
+      "listDestinations": "Listar destinos",
+      "messageSession": "Enviar mensagem à sessão",
+      "stopSession": "Parar sessão",
+      "readSession": "Ler sessão",
       "continueAgent": "Continuar agente",
       "listAgents": "Listar agentes",
       "interruptAgent": "Interromper agente",
@@ -314,6 +318,33 @@
     "pi": {
       "extension": "Extensão Pi",
       "notification": "Notificação da extensão Pi."
+    },
+    "sessionMessage": {
+      "undelivered": "Não foi possível entregar as mensagens de {senders}.",
+      "fromLabel": "Da sessão:"
+    },
+    "sessionTools": {
+      "noSessions": "Nenhuma sessão",
+      "thisSession": "Esta sessão",
+      "truncated": "Há mais sessões não exibidas",
+      "recipient": "Destinatário",
+      "model": "Modelo",
+      "reasoning": "Raciocínio",
+      "message": "Mensagem",
+      "openSession": "Abrir a sessão {sessionId}",
+      "openProviderSession": "Abrir a sessão {provider} {sessionId}",
+      "sessionMissing": "Essa sessão não existe mais.",
+      "openFailed": "Não foi possível abrir a sessão: {message}",
+      "openUnavailable": "Não é possível abrir sessões aqui.",
+      "providersIncluded": "Provedores e modelos disponíveis incluídos",
+      "newSession": "Nova sessão",
+      "session": "Sessão",
+      "turns": "Turnos",
+      "turnRange": "{from}–{to} de {total}",
+      "noTurns": "Nenhum ainda",
+      "mode": "Entrega",
+      "modeSteer": "Direcionar o turno em andamento",
+      "modeInterrupt": "Interromper o trabalho atual"
     }
   },
   "settings": {

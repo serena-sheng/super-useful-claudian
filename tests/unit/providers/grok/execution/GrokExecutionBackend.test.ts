@@ -29,6 +29,7 @@ import {
   isSteerableExecutionSession,
 } from '@/core/execution';
 import type { ProviderHost } from '@/core/providers/ProviderHost';
+import type { SessionToolCallHandler, SessionToolListDestinationsArgs } from '@/core/session-tools/sessionToolSpecs';
 import type {
   ACPLoadSessionRequest,
   ACPNewSessionRequest,
@@ -369,6 +370,166 @@ class FakeNativeConnection implements GrokExecutionNativeConnection {
 }
 
 describe('GrokExecutionBackend', () => {
+  function sessionToolFixture() {
+    const dispose = jest.fn();
+    const route = { url: 'http://127.0.0.1:1234/mcp', routeId: 'private-route', headers: { 'X-Claudian-Route': 'private-route' }, dispose };
+    const registerMCPRoute = jest.fn(async (_handler: SessionToolCallHandler) => route);
+    const host = { ...createGrokHost(), sessionToolEndpoint: { registerMCPRoute, registerCallRoute: jest.fn() } };
+    const port = { list: jest.fn(async (_args: SessionToolListDestinationsArgs, _signal: AbortSignal) => ({ sessions: [] })), send: jest.fn(async () => ({ sessionId: 'recipient', title: 'Review', provider: 'codex', status: 'queued' as const })), read: jest.fn() };
+    const servers = [{ type: 'http', name: 'claudian_sessions', url: route.url, headers: [{ name: 'X-Claudian-Route', value: route.routeId }] }];
+    return { host, port, route, registerMCPRoute, servers };
+  }
+
+  it.each(['new', 'load', 'fork'] as const)('binds session tools on %s and process replacement, then revokes the route', async mode => {
+    const fixture = sessionToolFixture();
+    const natives = [new FakeNativeConnection(), new FakeNativeConnection()];
+    const create = jest.fn().mockReturnValueOnce(natives[0]).mockReturnValueOnce(natives[1]);
+    const config = mode === 'fork' ? forkSessionConfig() : mode === 'new' ? { ...sessionConfig, resumeSeed: undefined } : sessionConfig;
+    const session = new GrokExecutionBackend(fixture.host, { nativeFactory: { create } })
+      .createSession({ ...config, sessionTools: fixture.port });
+    await collect(session.execute(executionRequest()).events);
+    const initial = mode === 'new' ? natives[0].newRequests[0] : natives[0].loadRequests[0];
+    expect(initial.mcpServers).toEqual(fixture.servers);
+    await collect(session.execute(featurePermissionRequest('yolo')).events);
+    expect(natives[1].loadRequests[0].mcpServers).toEqual(fixture.servers);
+    expect(fixture.registerMCPRoute).toHaveBeenCalledTimes(1);
+    await session.dispose();
+    expect(fixture.route.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('revokes the route even when native shutdown rejects', async () => {
+    const fixture = sessionToolFixture();
+    const native = new FakeNativeConnection();
+    const session = new GrokExecutionBackend(fixture.host, { nativeFactory: { create: () => native } })
+      .createSession({ ...sessionConfig, sessionTools: fixture.port });
+    await collect(session.execute(executionRequest()).events);
+    native.shutdownImplementation = async () => { throw new Error('shutdown failed'); };
+    await expect(session.dispose()).rejects.toThrow('shutdown failed');
+    expect(fixture.route.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['cancel', 'dispose'] as const)('does not bind a native session when %s wins delayed route registration', async ending => {
+    const fixture = sessionToolFixture();
+    const registration = createDeferred<typeof fixture.route>();
+    fixture.registerMCPRoute.mockImplementation(() => registration.promise);
+    const native = new FakeNativeConnection();
+    const session = new GrokExecutionBackend(fixture.host, { nativeFactory: { create: () => native } })
+      .createSession({ ...sessionConfig, sessionTools: fixture.port });
+    const run = session.execute(executionRequest());
+    while (!fixture.registerMCPRoute.mock.calls.length) await Promise.resolve();
+    let disposal: Promise<void> | undefined;
+    if (ending === 'cancel') run.cancel();
+    else disposal = session.dispose();
+    await collect(run.events);
+    registration.resolve(fixture.route);
+    await drainMicrotasks();
+    expect(native.loadRequests).toEqual([]);
+    await (disposal ?? session.dispose());
+    expect(fixture.route.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['new', 'load', 'fork'] as const)('omits the session MCP server on %s without a port', async mode => {
+    const fixture = sessionToolFixture();
+    const native = new FakeNativeConnection();
+    const config = mode === 'fork' ? forkSessionConfig() : mode === 'new' ? { ...sessionConfig, resumeSeed: undefined } : sessionConfig;
+    const session = new GrokExecutionBackend(fixture.host, { nativeFactory: { create: () => native } }).createSession(config);
+    await collect(session.execute(executionRequest()).events);
+    expect((mode === 'new' ? native.newRequests[0] : native.loadRequests[0]).mcpServers).toEqual([]);
+    expect(fixture.registerMCPRoute).not.toHaveBeenCalled();
+    await session.dispose();
+  });
+
+  it.each(['provider-default', 'unrestricted', 'passive', 'read-only'] as const)(
+    'checks %s policy at MCP call time', async kind => {
+      const fixture = sessionToolFixture();
+      const native = new FakeNativeConnection();
+      const session = new GrokExecutionBackend(fixture.host, { nativeFactory: { create: () => native } })
+        .createSession({ ...sessionConfig, sessionTools: fixture.port });
+      await collect(session.execute(executionRequest()).events);
+      native.promptImplementation = () => new Promise(() => {});
+      const run = session.execute({
+        ...executionRequest(),
+        toolPolicy: { kind },
+      });
+      while (native.promptRequests.length < 2) await Promise.resolve();
+      expect(fixture.registerMCPRoute).toHaveBeenCalledTimes(1);
+      const handler = fixture.registerMCPRoute.mock.calls[0][0];
+      const result = await handler({ name: 'claudian_send_message', args: { text: 'hello' }, signal: new AbortController().signal });
+      const allowed = kind === 'provider-default' || kind === 'unrestricted';
+      expect(result.isError).toBe(!allowed);
+      expect(fixture.port.send).toHaveBeenCalledTimes(allowed ? 1 : 0);
+      expect(result.text).toEqual(allowed
+        ? JSON.stringify({ sessionId: 'recipient', title: 'Review', provider: 'codex', status: 'queued' })
+        : 'Session tools are only available in Claudian main chat sessions with the default tool policy.');
+      await session.dispose();
+      await collect(run.events);
+    },
+  );
+
+  it.each(['complete', 'error', 'cancel', 'dispose', 'native-cancel'] as const)(
+    'revokes the owning call signal on %s and denies idle calls', async ending => {
+      const fixture = sessionToolFixture();
+      const native = new FakeNativeConnection();
+      const prompt = createDeferred<{ stopReason: string }>();
+      native.promptImplementation = () => prompt.promise;
+      const session = new GrokExecutionBackend(fixture.host, { nativeFactory: { create: () => native } })
+        .createSession({ ...sessionConfig, sessionTools: fixture.port });
+      const run = session.execute(executionRequest());
+      while (!native.promptRequests.length) await Promise.resolve();
+      expect(fixture.registerMCPRoute).toHaveBeenCalledTimes(1);
+      const handler = fixture.registerMCPRoute.mock.calls[0][0];
+      const nativeCancel = new AbortController();
+      fixture.port.list.mockImplementation((_args, signal) => new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
+      }));
+      const call = handler({ name: 'claudian_list_destinations', args: {}, signal: nativeCancel.signal });
+      const owningSignal = fixture.port.list.mock.calls[0][1];
+      expect(owningSignal.aborted).toBe(false);
+      if (ending === 'native-cancel') nativeCancel.abort();
+      else if (ending === 'complete') prompt.resolve({ stopReason: 'end_turn' });
+      else if (ending === 'error') prompt.reject(new Error('transport closed'));
+      else if (ending === 'cancel') run.cancel();
+      else await session.dispose();
+      if (ending !== 'native-cancel') await collect(run.events);
+      expect(owningSignal.aborted).toBe(true);
+      expect((await call).isError).toBe(true);
+      if (ending === 'native-cancel') {
+        await session.dispose();
+        await collect(run.events);
+      }
+      expect((await handler({ name: 'claudian_list_destinations', args: {}, signal: new AbortController().signal })).isError).toBe(true);
+      expect(fixture.port.list).toHaveBeenCalledTimes(1);
+      if (ending === 'complete') {
+        await collect(session.execute(executionRequest('next run')).events);
+      }
+      expect(owningSignal.aborted).toBe(true);
+      await session.dispose();
+    },
+  );
+
+  it('auto-allows session MCP permissions without prompting and rejects them after cancellation', async () => {
+    const fixture = sessionToolFixture();
+    const native = new FakeNativeConnection();
+    native.promptImplementation = () => new Promise(() => {});
+    let options!: GrokExecutionNativeCreateOptions;
+    const session = new GrokExecutionBackend(fixture.host, {
+      nativeFactory: { create: value => { options = value; return native; } },
+    }).createSession({ ...sessionConfig, sessionTools: fixture.port });
+    const run = session.execute(executionRequest());
+    while (!native.promptRequests.length) await Promise.resolve();
+    const request = {
+      sessionId: 'session-existing',
+      options: [{ kind: 'allow_once' as const, name: 'Allow', optionId: 'allow-once' }],
+      toolCall: { toolCallId: 'session-tool', title: 'use_tool', rawInput: { tool_name: 'claudian_sessions__claudian_send_message', tool_input: { text: 'hello' } } },
+    };
+    await expect(options.requestPermission(request)).resolves.toEqual({ outcome: { outcome: 'selected', optionId: 'allow-once' } });
+    expect(interactionPort.requestApproval).not.toHaveBeenCalled();
+    run.cancel();
+    await expect(options.requestPermission(request)).resolves.toEqual({ outcome: { outcome: 'cancelled' } });
+    await collect(run.events);
+    await session.dispose();
+  });
+
   it('rejects an unavailable selected model before native startup with a configuration error', async () => {
     const host = createGrokHost();
     host.settings.providerConfigs!.grok!.visibleModels = [];
@@ -440,7 +601,7 @@ describe('GrokExecutionBackend', () => {
           mediaType: 'image/png', size: 5, source: 'paste',
         } }],
         context: { ...capturedSelections, linkedContent: { path: 'note.md' },
-          sessionReferences: [{ id: 'ref', title: 'Review', providerId: 'grok', updatedAt: 'updated', snapshotPath: '/tmp/ref.md' }],
+          sessionReferences: [{ id: 'ref', title: 'Review', providerId: 'grok', updatedAt: 'updated' }],
         },
       }).events);
       expect(native.promptRequests).toEqual([{ sessionId: 'session-existing', prompt: [{ type: 'text', text: command }] }]);
@@ -652,12 +813,12 @@ describe('GrokExecutionBackend', () => {
 
     await collect(session.execute({
       ...baseRequest,
-      context: { ...capturedSelections, sessionReferences: [{ id: 'conv-1-ref', title: 'Review', providerId: 'codex', updatedAt: 'updated', snapshotPath: '/tmp/claudian-sessions/ref.md' }], linkedContent: { path: 'Projects/Research' } },
+      context: { ...capturedSelections, sessionReferences: [{ id: 'conv-1-ref', title: 'Review', providerId: 'codex', updatedAt: 'updated' }], linkedContent: { path: 'Projects/Research' } },
     }).events);
 
     expect(native.loadRequests[0]?.cwd).toBe('/tmp/vault');
     expect(native.promptRequests[0]?.prompt).toEqual([{
-      text: 'Inspect linked content\n\n<linked_content path="Projects/Research" />\n\n' + capturedSelectionPrompt + '\n\n<context_sessions>\n<context_session title="Review" id="conv-1-ref" provider="codex" updated="updated" path="/tmp/claudian-sessions/ref.md" />\n</context_sessions>',
+      text: 'Inspect linked content\n\n<linked_content path="Projects/Research" />\n\n' + capturedSelectionPrompt + '\n\n<context_sessions>\n<context_session title="Review" id="conv-1-ref" provider="codex" updated="updated" />\n</context_sessions>',
       type: 'text',
     }]);
     expect(JSON.stringify(native.promptRequests[0]?.prompt)).not.toMatch(
@@ -1774,15 +1935,24 @@ describe('GrokExecutionBackend', () => {
     ]);
   });
 
-  it('normalizes live Grok tool names, inputs, results, and provider payloads like replay', async () => {
+  it.each([
+    {
+      rawName: 'read_file', rawInput: { target_file: 'README.md' }, rawOutput: { bytes: 12 },
+      name: 'Read', input: { file_path: 'README.md', target_file: 'README.md' },
+    },
+    {
+      rawName: 'use_tool',
+      rawInput: { tool_name: 'claudian_sessions__claudian_send_message', tool_input: { text: 'hello' } },
+      rawOutput: { type: 'MCP', server_name: 'claudian_sessions', tool_name: 'claudian_send_message', output: { OkayOutput: 'queued' } },
+      name: 'claudian_send_message', input: { text: 'hello' },
+    },
+  ])('normalizes live $rawName names, inputs, results, and provider payloads like replay', async ({ rawName, rawInput, rawOutput, name, input }) => {
     const native = new FakeNativeConnection();
-    const rawInput = { target_file: 'README.md' };
-    const rawOutput = { bytes: 12 };
     native.promptImplementation = async () => {
       native.emit({
         rawInput,
         sessionUpdate: 'tool_call',
-        title: 'read_file',
+        title: rawName,
         toolCallId: 'tool-read',
       });
       native.emit({
@@ -1801,14 +1971,11 @@ describe('GrokExecutionBackend', () => {
     const events = await collect(session.execute(executionRequest()).events);
 
     expect(events).toContainEqual(expect.objectContaining({
-      input: {
-        file_path: 'README.md',
-        target_file: 'README.md',
-      },
-      name: 'Read',
+      input,
+      name,
       providerPayload: {
         rawInput,
-        rawName: 'read_file',
+        rawName,
       },
       toolCallId: 'tool-read',
       type: 'tool_started',
@@ -1817,7 +1984,7 @@ describe('GrokExecutionBackend', () => {
       toolCallId: 'tool-read',
       providerPayload: {
         rawInput,
-        rawName: 'read_file',
+        rawName,
         rawOutput,
       },
       type: 'tool_completed',
@@ -2710,22 +2877,25 @@ describe('GrokExecutionBackend', () => {
     await collect(run.events);
   });
 
-  it('fails closed before native startup when exact allow-list enforcement is unavailable', async () => {
+  it.each(['read_file', 'claudian_send_message'])('fails closed before native startup for allow-list containing %s', async name => {
+    const fixture = sessionToolFixture();
     const nativeFactory: GrokExecutionNativeFactory = {
       create: jest.fn(() => new FakeNativeConnection()),
     };
     const session = new GrokExecutionBackend(
-      createGrokHost(),
+      fixture.host,
       { nativeFactory },
-    ).createSession(sessionConfig);
+    ).createSession({ ...sessionConfig, sessionTools: fixture.port });
     const request: ProviderExecutionRequest = {
       ...executionRequest(),
-      toolPolicy: { kind: 'allow-list', names: ['read_file'] },
+      toolPolicy: { kind: 'allow-list', names: [name] },
     };
 
     const events = await collect(session.execute(request).events);
 
     expect(nativeFactory.create).not.toHaveBeenCalled();
+    expect(fixture.registerMCPRoute).not.toHaveBeenCalled();
+    expect(fixture.port.send).not.toHaveBeenCalled();
     expect(events).toEqual([
       expect.objectContaining({
         snapshot: expect.objectContaining({

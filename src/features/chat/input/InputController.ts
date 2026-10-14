@@ -12,6 +12,7 @@ import type { CanvasSelectionContext } from '@/core/prompt/canvasContext';
 import type { EditorSelectionContext } from '@/core/prompt/editorContext';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { ProviderCapabilities, ProviderId, TitleGenerationService } from '@/core/providers/types';
+import { encodeSessionMessage, type SessionMessage } from '@/core/session-tools/sessionMessageEnvelope';
 import type { AskUserAnswers, ChatMessage, ToolCallInfo } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import type { ChatSettings } from '@/features/chat/ChatSettings';
@@ -27,7 +28,8 @@ import { deliverAsyncQuestion } from '@/features/chat/interactions/asyncQuestion
 import type { SessionInteractions } from '@/features/chat/interactions/SessionInteractions';
 import type { LinkedContentController } from '@/features/chat/linked-content';
 import type { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
-import type { ChatSessionRuntime } from '@/features/chat/sessions/ChatSessionRuntime';
+import type { SessionMessageUnsentReason } from '@/features/chat/session-messaging/SessionMailbox';
+import type { ChatSessionRuntime, TurnCancelOptions } from '@/features/chat/sessions/ChatSessionRuntime';
 import type { SessionComposerPort } from '@/features/chat/sessions/SessionComposer';
 import type { SideChatController } from '@/features/chat/side-chat/SideChatController';
 import type { ChatState } from '@/features/chat/state/ChatState';
@@ -72,7 +74,7 @@ export interface InputControllerDeps {
   canStartTurn: () => boolean;
   isClosing: () => boolean;
   /** The session-owned turn activity and its single cancellation recipe. */
-  session: Pick<ChatSessionRuntime, 'turns' | 'cancelTurn' | 'stopMainBackgroundWork'>;
+  session: Pick<ChatSessionRuntime, 'turns' | 'cancelTurn' | 'stopMainBackgroundWork' | 'mailbox'>;
   /** Queued work and preparation can outlive the foreground turn's idle notification. */
   onWorkChanged?: () => void;
   /** Destination seam for the shared composer; absent means main-only. */
@@ -137,6 +139,7 @@ export class InputController {
         this.deps.conversationController.cancelBranchDraft();
         const images = message.turnRequest.images ?? [];
         return this.execution.run({
+          origin: 'user',
           displayContent: message.content,
           request: cloneChatTurnRequest(message.turnRequest),
           images: images.length > 0 ? [...images] : undefined,
@@ -209,6 +212,57 @@ export class InputController {
     } finally {
       if (!queued) options?.onDelivery?.(false);
     }
+  }
+
+  /** Mailbox dispatch never reads the composer destination, drafts, or live selections. */
+  get canStartSessionMessage(): boolean {
+    return this.deps.canStartTurn() && !this.turns.isActive && !this.queue.message
+      && !this.preparations.pendingMainAdmission && !this.isPreparingMainTurn
+      && !this.deps.conversationController.hasBranchDraft;
+  }
+
+  async sendSessionMessage(message: SessionMessage, options: {
+    assertBeforeHandoff(): void;
+    onUnsent(reason: SessionMessageUnsentReason): void;
+  }): Promise<void> {
+    if (!this.canStartSessionMessage) {
+      options.onUnsent('deferred');
+      return;
+    }
+    if (this.deps.getTabProviderId() === null) {
+      options.onUnsent('failed');
+      return;
+    }
+    await this.turns.run(signal => this.execution.run({
+      origin: 'session-message',
+      displayContent: message.text,
+      request: { text: encodeSessionMessage(message), images: [], editorSelection: null, browserSelection: null, canvasSelection: null },
+      images: [],
+      composerDraft: 'none',
+      ...options,
+    }, signal));
+  }
+
+  /** Joins another session's message to the running turn; an unsent steer is dropped, never returned to the composer. */
+  async steerSessionMessage(message: SessionMessage, signal: AbortSignal): Promise<'accepted' | 'uncertain' | 'not-sent'> {
+    // A turn waiting on the user's answer is not steered by another session; the message waits its turn.
+    if (!this.steering.canSteer || this.deps.inlinePrompts.pendingCount > 0) return 'not-sent';
+    const request: ChatTurnRequest = {
+      text: encodeSessionMessage(message), images: [], editorSelection: null, browserSelection: null, canvasSelection: null,
+    };
+    const pending = await this.steering.steer(createQueuedMessage(message.text, request), () => undefined, signal);
+    if (pending.providerDisposition === 'definitely-unsent') {
+      this.steering.release(pending);
+      return 'not-sent';
+    }
+    return pending.providerDisposition === 'accepted-awaiting-correlation' ? 'accepted' : 'uncertain';
+  }
+
+  /** Another session's interrupt: the user's Stop for main work, keeping pending session messages. */
+  interruptForSessionMessage(): void {
+    const cancelledPreparation = this.preparations.isPreparing('main');
+    this.preparations.abort('main');
+    if (!this.#cancelMainStreaming({ keepMailbox: true }) && !cancelledPreparation) this.deps.session.stopMainBackgroundWork();
   }
 
   updateAsyncQuestion(tool: ToolCallInfo): void {
@@ -490,6 +544,7 @@ export class InputController {
     const { displayContent, turnRequest } = this.#buildTurnSubmission(content, imagesForMessage, options);
     const fromComposer = options?.content === undefined || options?.draftConsumed === true;
     return {
+      origin: 'user',
       displayContent,
       request: turnRequest,
       images: imagesForMessage,
@@ -552,19 +607,20 @@ export class InputController {
       sideChat.cancelSide();
       return;
     }
+    this.deps.session.mailbox?.clear();
     // Withdrawing a preparation is the whole Stop; background work keeps running.
     if (!this.#cancelMainStreaming() && !cancelledPreparation) this.deps.session.stopMainBackgroundWork();
   }
 
   /** Returns whether an in-flight response was cancelled. */
-  #cancelMainStreaming(): boolean {
+  #cancelMainStreaming(options: TurnCancelOptions = {}): boolean {
     this.deps.inlinePrompts.cancelAsyncSubmissions();
     // Settlement already owns the response; only queued input can still be withdrawn.
     if (!this.turns.isInFlight) {
       this.queue.restoreToComposer();
       return false;
     }
-    this.deps.session.cancelTurn('user');
+    this.deps.session.cancelTurn('user', options);
     this.queue.restoreToComposer();
     this.steering.clearCurrentUi();
     this.deps.streamController.thinkingIndicator.hide();
