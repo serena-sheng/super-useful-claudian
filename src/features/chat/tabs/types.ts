@@ -8,6 +8,7 @@ import type { ComposerPromptSuggestion } from '@/features/chat/composer/Composer
 import type { FileContextManager } from '@/features/chat/composer/FileContextManager';
 import type { ImageContextManager } from '@/features/chat/composer/ImageContextManager';
 import type { MainChatComposerDropdown } from '@/features/chat/composer/MainChatComposerDropdown';
+import type { PromptHistoryNavigation } from '@/features/chat/composer/PromptHistoryNavigation';
 import type { ContextUsageMeter } from '@/features/chat/composer/toolbar/ContextUsageMeter';
 import type { EffortSelector } from '@/features/chat/composer/toolbar/EffortSelector';
 import type { ModelSelector } from '@/features/chat/composer/toolbar/ModelSelector';
@@ -79,6 +80,7 @@ export interface TabControllers {
   readonly inputController: InputController;
   readonly builtInCommandController: BuiltInCommandController;
   readonly navigationController: NavigationController;
+  readonly promptHistoryNavigation: PromptHistoryNavigation;
   /** Owner of this tab's single temporary side chat and composer destination. */
   readonly sideChatController: SideChatController;
 }

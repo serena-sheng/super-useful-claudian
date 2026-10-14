@@ -1200,6 +1200,7 @@ describe('ClaudianView Escape handling', () => {
             inputController: { cancelStreaming },
             builtInCommandController: { handleResumeKeydown: () => options.escapeConsumer === 'resume dropdown' },
             sideChatController: { destination: 'main', runtime: null },
+            promptHistoryNavigation: { handleKeydown: () => false },
           },
           composer: { closeOpenMenu },
           linkedContent: { handleActiveFileMetadataChanged: jest.fn() },
