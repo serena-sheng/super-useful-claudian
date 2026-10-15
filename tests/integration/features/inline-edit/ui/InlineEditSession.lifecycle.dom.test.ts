@@ -169,6 +169,7 @@ it.each([
   h.backend.sessions[0].complete();
   const control = await screen.findByRole('button', { name: `${action} inline edit` });
   expect(h.editorView.state.doc.toString()).toBe('hello world');
+  expect(screen.getByRole('toolbar', { name: 'Inline edit actions' }).textContent).toContain('−1+1lines');
   expect(await axe(screen.getByRole('toolbar', { name: 'Inline edit actions' }))).toHaveNoViolations();
   let nativeActivationAllowed = true;
   if (keyboard) {
@@ -183,6 +184,57 @@ it.each([
     : { decision: 'reject' });
   expect(h.editorView.state.doc.toString()).toBe(action === 'Accept' ? 'Hi world' : 'hello world');
   expect(h.backend.sessions[0].getStatus()).toBe('disposed');
+});
+
+it('saves the model and effort chosen on its composer chip as the inline edit default', async () => {
+  const h = createHarness();
+  h.createSession().show();
+  expect(await axe(input().closest('.claudian-inline-input-container')!)).toHaveNoViolations();
+  fireEvent.click(screen.getByRole('button', { name: 'Model: Sonnet, effort High' }));
+  fireEvent.click(screen.getByRole('option', { name: 'Opus' }));
+  await screen.findByRole('button', { name: 'Model: Opus, effort High' });
+  fireEvent.change(screen.getByRole('slider', { name: 'Effort' }), { target: { value: '0' } });
+  await screen.findByRole('button', { name: 'Model: Opus, effort Low' });
+  submitInstruction();
+  await waitFor(() => expect(h.backend.sessions[0]?.requests).toHaveLength(1));
+  expect(h.backend.sessions[0].requests[0].configuration).toMatchObject({ model: 'opus', reasoning: 'low' });
+  // A running request hides the chip, so its choices cannot change mid-request.
+  expect(screen.getByRole('button', { name: 'Model: Opus, effort Low' }).closest('.claudian-hidden')).not.toBeNull();
+  // The chat's own selection is untouched.
+  expect(h.plugin.settings).toEqual({
+    model: 'sonnet',
+    effortLevel: 'high',
+    inlineEditModel: { providerId: 'claude', model: 'opus', reasoning: 'low' },
+  });
+});
+
+it('runs a new edit with the model and effort its chip shows when nothing is chosen or saved', async () => {
+  const h = createHarness();
+  void h.createModal().openAndWait();
+  // The chip resolves the provider's saved model and effort; the request must use exactly those.
+  await screen.findByRole('button', { name: 'Model: Sonnet, effort High' });
+  submitInstruction();
+  await waitFor(() => expect(h.backend.sessions[0]?.requests).toHaveLength(1));
+  expect(h.backend.sessions[0].requests[0].configuration).toMatchObject({ model: 'sonnet', reasoning: 'high' });
+});
+
+it.each([
+  { saved: { providerId: 'claude', model: 'opus', reasoning: 'low' }, chip: 'Model: Opus, effort Low', model: 'opus', reasoning: 'low' },
+  // An unavailable saved model falls back to the chat selection. The provider's saved effort, not its
+  // default, is what the chip shows, and it is sent explicitly: some providers omit an unset effort.
+  { saved: { providerId: 'claude', model: 'retired' }, chip: 'Model: Sonnet, effort Low', model: 'sonnet', reasoning: 'low' },
+])('starts a new edit from the saved inline default ($saved.model) or else the chat selection', async ({ saved, chip, model, reasoning }) => {
+  const h = createHarness();
+  h.plugin.settings.effortLevel = 'low';
+  h.plugin.settings.inlineEditModel = saved;
+  h.plugin.getActiveModelSelection = () => ({ providerId: 'claude', model: 'sonnet' });
+  void h.createModal().openAndWait();
+  await screen.findByRole('button', { name: chip });
+  submitInstruction();
+  await waitFor(() => expect(h.backend.sessions[0]?.requests).toHaveLength(1));
+  const { configuration } = h.backend.sessions[0].requests[0];
+  expect(configuration.model).toBe(model);
+  expect(configuration.reasoning).toBe(reasoning);
 });
 
 it('continues provider execution when vault mentions cannot load and reports one notice', async () => {
