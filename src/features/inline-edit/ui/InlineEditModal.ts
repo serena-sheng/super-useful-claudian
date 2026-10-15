@@ -519,7 +519,12 @@ export class InlineEditSession {
     this.spinnerEl = inputWrap.createDiv({ cls: 'claudian-inline-spinner claudian-hidden' });
     this.modelToolbarEl = inputWrap.createDiv({ cls: 'claudian-input-toolbar claudian-inline-model-toolbar' });
     const menus = new ToolbarMenuGroup();
-    const modelSelector = new ModelSelector(this.modelToolbarEl, this.#modelPickerCallbacks(), menus);
+    // Obsidian clips editor widgets, so the open model menu floats in a layer outside the editor.
+    const menuLayer = ownerDocument.body.createDiv({
+      cls: 'claudian-inline-menu-layer',
+      attr: { 'data-provider': this.resolvedProviderId },
+    });
+    const modelSelector = new ModelSelector(this.modelToolbarEl, this.#modelPickerCallbacks(), menus, menuLayer);
     const effortSelector = new EffortSelector(modelSelector, this.#modelPickerCallbacks());
     this.#showGenerating(this.generating);
 
@@ -554,7 +559,12 @@ export class InlineEditSession {
     };
     inputEl.addEventListener('keydown', onKeydown);
     inputEl.addEventListener('input', onInput);
-    const focusTimer = window.setTimeout(() => inputEl.focus(), 50);
+    const focusTimer = window.setTimeout(() => {
+      // A model menu opened before this fires keeps focus; moving it would close the menu.
+      const active = ownerDocument.activeElement;
+      if (active && (container.contains(active) || menuLayer.contains(active))) return;
+      inputEl.focus();
+    }, 50);
     this.inputResources = {
       container,
       dropdown,
@@ -563,6 +573,7 @@ export class InlineEditSession {
       dispose: () => {
         window.clearTimeout(focusTimer);
         menus.destroy();
+        menuLayer.remove();
         inputEl.removeEventListener('keydown', onKeydown);
         inputEl.removeEventListener('input', onInput);
         dropdown.destroy();
