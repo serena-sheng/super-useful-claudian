@@ -78,7 +78,7 @@ it('retains clarification when CodeMirror releases and later recreates the input
   submitInstruction();
   await waitFor(() => expect(h.backend.sessions[0]?.getStatus()).toBe('executing'));
   // WidgetType.destroy/toDOM are CodeMirror's viewport resource callbacks.
-  const oldContainer = input().parentElement!.parentElement!;
+  const oldContainer = input().closest<HTMLElement>('.claudian-inline-input-container')!;
   session.destroyInputDOM(oldContainer);
   oldContainer.remove();
   h.backend.sessions[0].emitText('Which tone?');
@@ -235,6 +235,28 @@ it.each([
   const { configuration } = h.backend.sessions[0].requests[0];
   expect(configuration.model).toBe(model);
   expect(configuration.reasoning).toBe(reasoning);
+});
+
+it.each([
+  { key: 'Enter', from: 'where focus lands after generation' },
+  { key: 'Escape', from: 'where focus lands after generation' },
+  { key: 'Enter', from: 'the note editor' },
+  { key: 'Escape', from: 'the note editor' },
+] as const)('settles the preview with $key pressed in $from', async ({ key, from }) => {
+  const h = createHarness();
+  const result = h.createModal().openAndWait();
+  await screen.findByRole('textbox', { name: 'Edit instructions' });
+  await showReplacementPreview(h);
+  if (from === 'the note editor') h.editorView.contentDOM.focus();
+  // CodeMirror would insert a newline on Enter, so the decision must be taken before it sees the key.
+  const reachedEditor = jest.fn();
+  h.editorView.contentDOM.addEventListener('keydown', reachedEditor);
+  fireEvent.keyDown(document.activeElement ?? document.body, { key });
+  expect(reachedEditor).not.toHaveBeenCalled();
+  await expect(result).resolves.toEqual(key === 'Enter'
+    ? { decision: 'accept', editedText: 'Hi' }
+    : { decision: 'reject' });
+  expect(h.editorView.state.doc.toString()).toBe(key === 'Enter' ? 'Hi world' : 'hello world');
 });
 
 it('continues provider execution when vault mentions cannot load and reports one notice', async () => {
