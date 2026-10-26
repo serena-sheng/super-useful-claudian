@@ -1,13 +1,11 @@
 import { parseEnvironmentVariables } from '@/core/process/env';
 
-import { getRuntimeEnvironmentText } from '../../../core/providers/providerEnvironment';
-import type { ProviderHost } from '../../../core/providers/ProviderHost';
-import { getVaultPath } from '../../../utils/path';
+import type { ProviderRuntimeHost } from '../../../core/providers/ProviderRuntimeHost';
+import { decodeOmpConfig } from '../config';
 import {
   normalizeOmpDiscoveredModels,
   type OmpDiscoveredModel,
 } from '../models';
-import { getOmpProviderSettings } from '../settings';
 import { buildOmpEnvironment, buildOmpLaunchSpec } from './OmpLaunchSpecBuilder';
 import { OmpRPCTransport } from './OmpRPCTransport';
 import { OmpSubprocess } from './OmpSubprocess';
@@ -24,17 +22,17 @@ export type OmpModelDiscoveryResult =
   };
 
 export class OmpModelDiscoveryService {
-  constructor(private readonly plugin: ProviderHost) {}
+  constructor(private readonly host: ProviderRuntimeHost) {}
 
   async discoverModels(signal?: AbortSignal): Promise<OmpModelDiscoveryResult> {
-    const settings = getOmpProviderSettings(this.plugin.settings);
+    const settings = decodeOmpConfig(this.host.config, this.host.selection);
     if (!settings.enabled) {
       return { kind: 'skipped', reason: 'provider-disabled' };
     }
 
-    const cwd = getVaultPath(this.plugin.app) ?? process.cwd();
-    const command = await this.plugin.getResolvedProviderCliPath('omp') ?? 'omp';
-    const envText = getRuntimeEnvironmentText(this.plugin.settings, 'omp');
+    const cwd = this.host.workingDirectory ?? process.cwd();
+    const command = await this.host.resolveCliPath() ?? 'omp';
+    const envText = this.host.environmentText;
     const env = buildOmpEnvironment(process.env, parseEnvironmentVariables(envText));
     const launchSpec = buildOmpLaunchSpec({
       command,

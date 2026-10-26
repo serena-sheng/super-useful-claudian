@@ -1,12 +1,11 @@
 import { parseEnvironmentVariables } from '@/core/process/env';
 import { OwnedProbeRegistry } from '@/core/providers/metadata/OwnedProbeRegistry';
 import { ProviderTransitionFence } from '@/core/providers/metadata/ProviderTransitionFence';
-import { getRuntimeEnvironmentText } from '@/core/providers/providerEnvironment';
-import type { ProviderHost } from '@/core/providers/ProviderHost';
+import type { ProviderRuntimeHost } from '@/core/providers/ProviderRuntimeHost';
 import type { SlashCommand } from '@/core/types';
 
+import { decodeOmpConfig } from '../config';
 import { buildOmpEnvironment, buildOmpLaunchSpec } from '../runtime/OmpLaunchSpecBuilder';
-import { getOmpProviderSettings } from '../settings';
 import {
   createOmpExecutionKernel,
   type OmpExecutionKernel,
@@ -29,7 +28,7 @@ export class OmpCommandMetadataProbe {
   });
 
   constructor(
-    private readonly host: ProviderHost,
+    private readonly host: ProviderRuntimeHost,
     private readonly createKernel: OmpExecutionKernelFactory =
       createOmpExecutionKernel,
   ) {
@@ -51,16 +50,16 @@ export class OmpCommandMetadataProbe {
 
     return await this.probes.run({
       create: async (ownedSignal) => {
-        const command = await this.host.getResolvedProviderCliPath('omp') ?? 'omp';
+        const command = await this.host.resolveCliPath() ?? 'omp';
         ownedSignal.throwIfAborted();
-        const envText = getRuntimeEnvironmentText(this.host.settings, 'omp');
+        const envText = this.host.environmentText;
         const launchSpec = buildOmpLaunchSpec({
           command,
           cwd: vaultWorkingDirectory,
           env: buildOmpEnvironment(process.env, parseEnvironmentVariables(envText)),
           envText,
           noSession: true,
-          settings: getOmpProviderSettings(this.host.settings),
+          settings: decodeOmpConfig(this.host.config, this.host.selection),
         });
         let pushedCommands: SlashCommand[] | null = null;
         const kernel = this.createKernel(

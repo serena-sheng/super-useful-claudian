@@ -1,9 +1,12 @@
 import { ProviderModelUnavailableError } from '../../../core/providers/models/ProviderModelUnavailableError';
-import { getOmpProviderSettings } from '../settings';
+import type { OmpProviderSettings } from '../config';
 
-export function assertOmpModelAvailable(settings: Record<string, unknown>, requestedModel: string | undefined): void {
-  const model = requestedModel ?? (typeof settings.model === 'string' ? settings.model : '');
-  const config = getOmpProviderSettings(settings);
+export function assertOmpModelAvailable(
+  config: OmpProviderSettings,
+  requestedModel: string | undefined,
+  fallbackModel: string | undefined,
+): void {
+  const model = requestedModel ?? fallbackModel ?? '';
   if (!(config.enabled && config.visibleModels.includes(model)
     && config.discoveredModels.some(candidate => candidate.encodedId === model))) {
     throw new ProviderModelUnavailableError('OMP');

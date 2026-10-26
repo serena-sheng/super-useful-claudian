@@ -34,20 +34,15 @@ import {
   type SteerableExecutionSession,
   type WithoutEventScope,
 } from '../../../core/execution';
-import {
-  buildSystemPrompt,
-  type SystemPromptSettings,
-} from '../../../core/prompt/mainAgent';
 import { ProviderModelUnavailableError } from '../../../core/providers/models/ProviderModelUnavailableError';
-import { getRuntimeEnvironmentText } from '../../../core/providers/providerEnvironment';
-import type { ProviderHost } from '../../../core/providers/ProviderHost';
+import type { ProviderRuntimeHost } from '../../../core/providers/ProviderRuntimeHost';
 import type {
   ChatMessage,
   SlashCommand,
   StreamChunk,
   TurnStats,
 } from '../../../core/types';
-import type { OmpWorkspaceServices } from '../app/OmpWorkspaceServices';
+import { decodeOmpConfig, type OmpProviderSettings } from '../config';
 import { OmpConversationHistoryService } from '../history/OmpConversationHistoryService';
 import {
   isOmpSessionPathReference,
@@ -91,10 +86,6 @@ import { buildOmpSetModelPayload } from '../runtime/OmpRPCPayloads';
 import { type OmpRPCRecord, OmpRPCResponseError } from '../runtime/OmpRPCTransport';
 import { OMP_TREE_COMMAND } from '../runtime/OmpTreeBridge';
 import {
-  getOmpProviderSettings,
-  type OmpProviderSettings,
-} from '../settings';
-import {
   getOmpState,
   type OmpProviderState,
   type OmpTreeCursor,
@@ -111,8 +102,6 @@ interface OmpExecutionSessionOptions {
   readonly extensionUiRenderer: OmpExtensionUIRenderer | null;
   readonly rollbackForkSessionFile: typeof rollbackCreatedOmpForkSessionFile;
 }
-
-type OmpExecutionServices = Pick<OmpWorkspaceServices, 'commandCatalog'>;
 
 interface EncodedOmpRequest {
   readonly input:
@@ -228,8 +217,7 @@ implements ProviderExecutionSession, SteerableExecutionSession {
   private shutdownPromise: Promise<void> | null = null;
 
   constructor(
-    private readonly host: ProviderHost,
-    private readonly services: OmpExecutionServices,
+    private readonly host: ProviderRuntimeHost,
     private readonly config: ProviderSessionConfig,
     private readonly options: OmpExecutionSessionOptions,
   ) {
@@ -490,7 +478,11 @@ implements ProviderExecutionSession, SteerableExecutionSession {
   }
 
   async steer(request: ProviderExecutionRequest): Promise<boolean> {
-    try { assertOmpModelAvailable(this.host.settings, request.configuration.model); }
+    try { assertOmpModelAvailable(
+      decodeOmpConfig(this.host.config, this.host.selection),
+      request.configuration.model,
+      this.host.selection.model,
+    ); }
     catch (error) { if (error instanceof ProviderModelUnavailableError) return false; throw error; }
     const active = this.activeRun;
     const kernel = this.kernel;
@@ -586,7 +578,11 @@ implements ProviderExecutionSession, SteerableExecutionSession {
     request: ProviderExecutionRequest,
   ): Promise<void> {
     try {
-      assertOmpModelAvailable(this.host.settings, request.configuration.model);
+      assertOmpModelAvailable(
+      decodeOmpConfig(this.host.config, this.host.selection),
+      request.configuration.model,
+      this.host.selection.model,
+    );
       const encoded = await this.#encodeRequest(active, request);
       if (!this.isActive(active)) return;
       // A stopped background run may still be unwinding; input sent now could be queued behind the abort.
@@ -601,7 +597,11 @@ implements ProviderExecutionSession, SteerableExecutionSession {
       if (!this.isActive(active) || !this.kernel) return;
       await this.#applyModelConfiguration(encoded, active.abortController.signal);
       if (!this.isActive(active)) return;
-      assertOmpModelAvailable(this.host.settings, request.configuration.model);
+      assertOmpModelAvailable(
+      decodeOmpConfig(this.host.config, this.host.selection),
+      request.configuration.model,
+      this.host.selection.model,
+    );
       const previousLeafId = getOmpState(this.state.providerState).leafEntryId ?? null;
       const input = encoded.input;
       let promptHandled = false;
@@ -712,30 +712,30 @@ implements ProviderExecutionSession, SteerableExecutionSession {
     active: ActiveRun,
     request: ProviderExecutionRequest,
   ): Promise<EncodedOmpRequest> {
-    const settings = getOmpProviderSettings(this.host.settings);
+    const settings = decodeOmpConfig(this.host.config, this.host.selection);
     if (!settings.enabled) {
       throw new OmpConfigurationError('OMP is disabled.');
     }
-    const model = resolveSelectedModel(request, settings, this.host.settings);
+    const model = resolveSelectedModel(request, settings, this.host.selection.model);
     const thinkingLevel = resolveThinkingLevel(
       request,
       settings,
       model,
-      this.host.settings,
+      this.host.selection.effortLevel,
     );
     await this.#materializePendingFork(active);
-    const envText = getRuntimeEnvironmentText(this.host.settings, 'omp');
+    const envText = this.host.environmentText;
     const env = buildOmpEnvironment(process.env, parseEnvironmentVariables(envText));
     this.#validateResumeSeed(env);
     const requestedApprovalMode =
-      request.configuration.permissionMode ?? this.host.settings.permissionMode;
+      request.configuration.permissionMode ?? this.host.selection.permissionMode;
     const toolProfile = resolveToolProfile(request.toolPolicy);
     const launchSpec = buildOmpLaunchSpec({
       approvalMode: requestedApprovalMode === 'write' || requestedApprovalMode === 'yolo'
         ? requestedApprovalMode
         : 'always-ask',
       enableTreeBridge: !this.#shouldDisableNativePersistence(),
-      command: await this.host.getResolvedProviderCliPath('omp') ?? 'omp',
+      command: await this.host.resolveCliPath() ?? 'omp',
       cwd: this.config.workingDirectory,
       env,
       envText,
@@ -745,11 +745,7 @@ implements ProviderExecutionSession, SteerableExecutionSession {
       providerState: getOmpState(this.state.providerState),
       readOnlyTools: toolProfile.readOnlyTools,
       settings,
-      systemPrompt: resolveSystemPrompt(
-        request,
-        this.host.settings,
-        this.config.workingDirectory,
-      ),
+      systemPrompt: resolveSystemPrompt(request),
     });
     const state = getOmpState(this.state.providerState);
     const hasNativeSession = Boolean(state.sessionId || state.sessionFile);
@@ -1577,7 +1573,7 @@ implements ProviderExecutionSession, SteerableExecutionSession {
 
   async #fetchUsage(model: string, signal?: AbortSignal) {
     if (!this.kernel) return null;
-    const settings = getOmpProviderSettings(this.host.settings);
+    const settings = decodeOmpConfig(this.host.config, this.host.selection);
     const contextWindow = findOmpModel(settings, model)?.contextWindow;
     const response = await this.kernel.request(
       'get_session_stats',
@@ -1644,7 +1640,7 @@ implements ProviderExecutionSession, SteerableExecutionSession {
     const state = getOmpState(this.state.providerState);
     const forkSource = state.forkSource;
     if (!forkSource) return;
-    const envText = getRuntimeEnvironmentText(this.host.settings, 'omp');
+    const envText = this.host.environmentText;
     const env = parseEnvironmentVariables(envText);
     const sourceFile = state.forkSourceSessionFile
       ?? findOmpSessionFile(
@@ -1972,10 +1968,9 @@ function createDeferred<T>(): Deferred<T> {
 function resolveSelectedModel(
   request: ProviderExecutionRequest,
   settings: OmpProviderSettings,
-  hostSettings: Record<string, unknown>,
+  fallbackModel: string | undefined,
 ): string {
-  const model = request.configuration.model
-    ?? getString(hostSettings.model);
+  const model = request.configuration.model ?? fallbackModel;
   if (
     !model
     || !decodeOmpModelId(model)
@@ -1992,11 +1987,11 @@ function resolveThinkingLevel(
   request: ProviderExecutionRequest,
   settings: OmpProviderSettings,
   model: string,
-  hostSettings: Record<string, unknown>,
+  defaultEffort: string | undefined,
 ): string | null {
   if (request.configuration.reasoning === null) return null;
   const requested = request.configuration.reasoning
-    ?? getString(hostSettings.effortLevel)
+    ?? defaultEffort
     ?? settings.preferredThinkingByModel[model];
   const discovered = findOmpModel(settings, model);
   const resolved = discovered
@@ -2026,20 +2021,10 @@ function resolveToolProfile(policy: ProviderToolPolicy): {
   return { noTools: false };
 }
 
-function resolveSystemPrompt(
-  request: ProviderExecutionRequest,
-  settings: Record<string, unknown>,
-  vaultPath: string,
-): string {
-  if (request.configuration.systemInstructions.kind === 'explicit') {
-    return request.configuration.systemInstructions.instructions;
-  }
-  return buildSystemPrompt({
-    customPrompt: getString(settings.systemPrompt) ?? undefined,
-    mediaFolder: getString(settings.mediaFolder) ?? undefined,
-    userName: getString(settings.userName) ?? undefined,
-    vaultPath,
-  } satisfies SystemPromptSettings);
+function resolveSystemPrompt(request: ProviderExecutionRequest): string {
+  return request.configuration.systemInstructions.kind === 'explicit'
+    ? request.configuration.systemInstructions.instructions
+    : '';
 }
 
 function encodePrompt(

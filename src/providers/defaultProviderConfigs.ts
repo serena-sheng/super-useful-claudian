@@ -3,7 +3,7 @@ import { DEFAULT_CLAUDE_PROVIDER_SETTINGS } from './claude/config';
 import { DEFAULT_CODEX_PROVIDER_CONFIG } from './codex/config';
 import { DEFAULT_DEEPSEEK_PROVIDER_SETTINGS } from './deepseek/config';
 import { DEFAULT_GROK_PROVIDER_SETTINGS } from './grok/config';
-import { DEFAULT_OMP_PROVIDER_SETTINGS } from './omp/settings';
+import { DEFAULT_OMP_PROVIDER_SETTINGS } from './omp/config';
 import { DEFAULT_OPENCODE_PROVIDER_SETTINGS } from './opencode/config';
 import { DEFAULT_PI_PROVIDER_SETTINGS } from './pi/config';
 
