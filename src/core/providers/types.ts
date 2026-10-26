@@ -1,12 +1,9 @@
-import type { CursorContext } from '@/core/prompt/editorContext';
-
 import type {
   ProviderExecutionBackend,
   ProviderExecutionTransitionScope,
 } from '../execution';
 import type {
   AskUserAnswers,
-  AuxiliaryContinuityReset,
   Conversation,
   SessionMetadata,
   SlashCommand,
@@ -37,6 +34,8 @@ export interface ProviderCapabilities {
   supportsEphemeralFork?: boolean;
   /** Omitted means checkpoint forking; full-session providers can fork only the latest reply. */
   forkMode?: 'checkpoint' | 'full-session';
+  /** Whether a checkpoint fork may start while the source runs a turn; defaults to true. Full-session forks never may. */
+  supportsForkDuringTurn?: boolean;
   supportsProviderCommands: boolean;
   supportsImageAttachments: boolean;
   supportsTurnSteer?: boolean;
@@ -106,18 +105,29 @@ export interface ProviderSettingsStorageAdapter {
 
 export type ProviderEnvironmentSessionPolicy = 'invalidate' | 'reload';
 
-export interface ProviderSettingsReconciler {
-  /** Defaults to `invalidate` for backward compatibility. */
-  environmentSessionPolicy?: ProviderEnvironmentSessionPolicy;
+export interface ProviderEnvironmentReconciliation {
+  changed: boolean;
+  /** How this change treats conversation bindings; `invalidate` when omitted. */
+  sessionPolicy?: ProviderEnvironmentSessionPolicy;
+}
 
+export interface ProviderSettingsReconciler {
   handleEnvironmentChange?(settings: Record<string, unknown>): boolean;
 
+  /**
+   * Clears resumable native bindings only. History locators must survive as
+   * recovery-only state, readable while their native store remains trusted.
+   */
   invalidateConversationSessions(conversations: Conversation[]): Conversation[];
 
-  reconcileModelWithEnvironment(
-    settings: Record<string, unknown>,
-    conversations: Conversation[],
-  ): { changed: boolean; invalidatedConversations: Conversation[] };
+  /**
+   * Whether invalidation deliberately keeps this conversation's binding live (its native
+   * store is unaffected), so a session still running for it keeps its execution authority.
+   * `invalidateConversationSessions` must leave exactly these conversations untouched.
+   */
+  preservesConversationSession?(conversation: Conversation): boolean;
+
+  reconcileModelWithEnvironment(settings: Record<string, unknown>): ProviderEnvironmentReconciliation;
 
   normalizeModelVariantSettings?(settings: Record<string, unknown>): boolean;
 }
@@ -142,25 +152,6 @@ export interface SessionMetadataScanResult {
 }
 
 // ---------------------------------------------------------------------------
-// Provider-owned workspace sub-interfaces
-//
-// These remain here as standalone types so app-level settings/chat code can
-// depend on stable provider workspace contracts without importing concrete
-// provider implementations. They are NOT part of the provider-facing host
-// storage contract (`ProviderHostStorage`).
-// ---------------------------------------------------------------------------
-
-export interface AppCommandStorage {
-  save(command: SlashCommand): Promise<void>;
-  delete(name: string): Promise<void>;
-}
-
-export interface AppSkillStorage {
-  save(skill: SlashCommand): Promise<void>;
-  delete(name: string): Promise<void>;
-}
-
-// ---------------------------------------------------------------------------
 // Provider-owned chat UI configuration
 // ---------------------------------------------------------------------------
 
@@ -175,6 +166,8 @@ export interface ProviderUIOption {
   providerIcon?: ProviderIconSvg;
   /** Owning provider when several providers share one dropdown, so the option can carry its brand. */
   providerId?: ProviderId;
+  /** The owning provider's display name when several providers share one dropdown. */
+  providerLabel?: string;
 }
 
 export interface ProviderPathIconSvg {
@@ -316,6 +309,8 @@ export interface ProviderModelPolicy {
 
 /** UI composition may reuse policy, but application code consumes ProviderModelPolicy. */
 export interface ProviderChatUIConfig extends Omit<ProviderModelPolicy, 'permissionModes' | 'getServiceTierPolicy'> {
+  /** Presentation-only formatting of assistant Markdown; native history remains unchanged. */
+  prepareAssistantMarkdown?(markdown: string): string;
   getPermissionModeOptions?(settings?: Record<string, unknown>): readonly ProviderPermissionModeOption[] | null;
   getServiceTierToggle?(settings: Record<string, unknown>): ProviderServiceTierToggleConfig | null;
   getModeSelector?(settings: Record<string, unknown>): ProviderModeSelectorConfig | null;
@@ -507,9 +502,19 @@ export interface ProviderConversationHistoryService {
   /** Projects provider state for storage without changing live state or native history. */
   buildPersistedProviderState?(
     conversation: ProviderHistoryInput,
-    /** Preserve existing history state instead of rebuilding it from unloaded messages. */
-    options?: { preserveProviderState?: boolean },
+    options?: {
+      /** Preserve existing history state instead of rebuilding it from unloaded messages. */
+      preserveProviderState?: boolean;
+      /** Locates native history so the projection can omit what it already holds; resolve only when needed. */
+      getNativeHistory?: () => { vaultPath: string | null; pathContext?: ProviderHistoryPathContext };
+    },
   ): Record<string, unknown> | undefined;
+  /** Whether stored state duplicates native history, so rewriting its projection would shrink it. */
+  hasRedundantPersistedState?(
+    conversation: ProviderHistoryInput,
+    vaultPath: string | null,
+    pathContext?: ProviderHistoryPathContext,
+  ): boolean;
 }
 
 export interface ProviderSubagentHistoryRequest {
@@ -524,13 +529,20 @@ export interface ProviderSubagentHistoryService {
   loadFinalResult(request: ProviderSubagentHistoryRequest): Promise<string | null>;
 }
 
-export interface ProviderHistoryPathContext {
-  /** Initialize provider-owned resources lazily when native history needs them. */
-  ensureWorkspace?: () => Promise<void>;
+/** The process environment a provider resolves native history paths from. */
+export interface ProviderHistoryEnvironment {
   environment: NodeJS.ProcessEnv;
   hostPlatform?: NodeJS.Platform;
-  settings?: Record<string, unknown>;
   vaultPath?: string | null;
+}
+
+export interface ProviderHistoryPathContext extends ProviderHistoryEnvironment {
+  /** Initialize provider-owned resources lazily when native history needs them. */
+  ensureWorkspace?: () => Promise<void>;
+  /** The provider's own stored configuration. */
+  config: Readonly<Record<string, unknown>>;
+  /** Shared plus provider-scoped environment variable text, as `environment` applies it. */
+  environmentText: string;
 }
 
 export type ProviderConversationSessionAvailability =
@@ -667,6 +679,13 @@ export interface TitleGenerationService {
 
 // -- Instruction refinement --
 
+/** A provider-environment change that forces the auxiliary conversation to restart. */
+export interface AuxiliaryContinuityReset {
+  success: false;
+  resetRequired: true;
+  error: string;
+}
+
 export interface InstructionRefineOutcome {
   success: boolean;
   resetRequired?: false;
@@ -685,45 +704,3 @@ export interface InstructionRefineService {
   cancel(): void;
 }
 
-// -- Inline edit --
-
-export type InlineEditMode = 'selection' | 'cursor';
-
-export interface InlineEditSelectionRequest {
-  mode: 'selection';
-  instruction: string;
-  notePath: string;
-  selectedText: string;
-  startLine?: number;
-  lineCount?: number;
-  contextFiles?: string[];
-}
-
-export interface InlineEditCursorRequest {
-  mode: 'cursor';
-  instruction: string;
-  notePath: string;
-  cursorContext: CursorContext;
-  contextFiles?: string[];
-}
-
-export type InlineEditRequest = InlineEditSelectionRequest | InlineEditCursorRequest;
-
-export interface InlineEditOutcome {
-  success: boolean;
-  resetRequired?: false;
-  editedText?: string;
-  insertedText?: string;
-  clarification?: string;
-  error?: string;
-}
-
-export type InlineEditResult = InlineEditOutcome | AuxiliaryContinuityReset;
-
-export interface InlineEditService {
-  setModelOverride?(model?: string): void;
-  resetConversation(): void;
-  editText(request: InlineEditRequest): Promise<InlineEditResult>;
-  continueConversation(message: string, contextFiles?: string[]): Promise<InlineEditResult>;
-  cancel(): void;
-}

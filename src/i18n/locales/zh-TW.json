@@ -1,5 +1,6 @@
 {
   "common": {
+    "inputSuggestions": "輸入建議",
     "save": "保存",
     "cancel": "取消",
     "delete": "刪除",
@@ -8,7 +9,9 @@
     "clearAll": "清除全部",
     "error": "錯誤",
     "confirm": "確認",
-    "refresh": "重新整理"
+    "refresh": "重新整理",
+    "retry": "重試",
+    "none": "無"
   },
   "chat": {
     "promptSuggestionHint": "按 Tab 接受",
@@ -51,9 +54,14 @@
     "quote": {
       "buttonLabel": "引用"
     },
+    "codeBlock": {
+      "copyAriaLabel": "複製 {language} 程式碼",
+      "copied": "已複製！"
+    },
     "sideChat": {
       "title": "側邊對話",
       "collapse": "收合",
+      "fullHeight": "全高顯示",
       "discard": "捨棄",
       "statusPreparing": "準備中",
       "statusQueued": "{count} 則排隊中",
@@ -89,6 +97,343 @@
       "toolCompleted": "{tool} · 已完成",
       "toolFailed": "{tool} · 失敗",
       "toolBlocked": "{tool} · 已封鎖"
+    },
+    "composer": {
+      "placeholder": "請求修改、@提及檔案、執行 /命令",
+      "message": "訊息",
+      "dropImage": "將圖片拖到這裡",
+      "moreContext": "顯示另外 {count} 項上下文",
+      "showLess": "收合",
+      "moreItems": "+{count} 項"
+    },
+    "worked": "已完成工作",
+    "taskNotification": "任務通知",
+    "copyMessage": "複製訊息",
+    "showEarlierMessages": "顯示較早的訊息",
+    "renderFailed": "訊息內容呈現失敗。",
+    "interruptedHint": "· 你希望 Claudian 改做什麼？",
+    "sessions": {
+      "empty": "尚無對話",
+      "noMatch": "沒有符合的工作階段",
+      "resume": "繼續對話",
+      "loading": "正在載入對話…",
+      "current": "目前的工作階段",
+      "loadFailed": "載入對話失敗"
+    },
+    "linkedContent": {
+      "label": "關聯內容：",
+      "choices": "關聯內容選項",
+      "noMatch": "沒有符合的檔案或資料夾",
+      "missing": "內容遺失",
+      "path": "關聯內容：{path}",
+      "missingPath": "關聯內容：{path}。內容遺失",
+      "noContent": "無關聯內容",
+      "missingNotice": "關聯內容遺失：{path}",
+      "openFailed": "開啟關聯內容失敗：{error}"
+    },
+    "questions": {
+      "title": "問題",
+      "submit": "提交",
+      "review": "檢查你的回答",
+      "ready": "準備提交回答了嗎？",
+      "sending": "正在傳送…",
+      "submitAnswers": "提交回答",
+      "notAnswered": "未回答",
+      "customAnswer": "輸入你的回答…",
+      "secret": "輸入私密內容…",
+      "editAnswer": "修改「{question}」的回答",
+      "waiting": "等待回答…",
+      "noOptions": "未記錄選項",
+      "sendFailed": "無法傳送回答，請重試。",
+      "answerBelow": "請在下方的問題面板中回答。",
+      "expired": "問題已過期。",
+      "notSent": "回答未傳送，請重試。",
+      "unsupportedReply": "此問題無法接受該回答。",
+      "uncertainDelivery": "無法確認回答是否送達。為避免重複傳送，未將其重新加入佇列。",
+      "differentConversation": "此問題屬於另一段對話。",
+      "sideUnavailable": "此側邊對話已無法使用。"
+    },
+    "tools": {
+      "calls": "工具呼叫",
+      "output": "輸出",
+      "noResult": "無結果",
+      "noMatches": "找不到符合項目",
+      "tasksUpdated": "任務已更新",
+      "noChanges": "無變更",
+      "moreLines": "…還有 {count} 行",
+      "moreCharacters": "…還有 {count} 個字元",
+      "running": "執行中…",
+      "noOutput": "無輸出",
+      "status": {
+        "running": "狀態：執行中",
+        "completed": "狀態：已完成",
+        "error": "狀態：錯誤",
+        "cancelled": "狀態：已取消",
+        "blocked": "狀態：已阻擋"
+      },
+      "inProgress": "狀態：進行中",
+      "writing": "正在寫入…",
+      "done": "已完成",
+      "errorResult": "錯誤",
+      "tasks": "任務",
+      "taskProgress": "任務 {completed}/{total}",
+      "taskProgressLabel": "任務（{completed}/{total}）",
+      "changes": "變更：+{added} -{removed}",
+      "fileDeleted": "檔案已刪除",
+      "noTextDiff": "沒有可用的文字差異",
+      "patch": "修補檔",
+      "files": "{count} 個檔案",
+      "file": "檔案",
+      "enteringPlan": "正在進入規劃模式",
+      "planComplete": "規劃完成",
+      "messageAgent": "向代理傳送訊息",
+      "listDestinations": "列出目標",
+      "messageSession": "向工作階段傳送訊息",
+      "stopSession": "停止工作階段",
+      "readSession": "讀取工作階段",
+      "continueAgent": "繼續代理任務",
+      "listAgents": "列出代理",
+      "interruptAgent": "中斷代理",
+      "allAgents": "所有代理",
+      "commandPlaceholder": "命令",
+      "filesPlaceholder": "檔案",
+      "patternPlaceholder": "比對模式",
+      "toolsPlaceholder": "工具",
+      "agentCount": "{count} 個代理",
+      "agentCountPlural": "{count} 個代理"
+    },
+    "citations": {
+      "memoryUsed": "引用的記憶",
+      "source": "{count} 個來源",
+      "sources": "{count} 個來源"
+    },
+    "web": {
+      "findInPage": "在頁面中尋找",
+      "openPage": "開啟頁面",
+      "urlUnavailable": "網址無法使用",
+      "clickLink": "點擊連結 {id}",
+      "pattern": "比對模式：{pattern}",
+      "query": "搜尋詞：{query}",
+      "altQuery": "備選搜尋詞：{query}",
+      "search": "搜尋網頁",
+      "moreQueries": "…還有 {count} 個搜尋詞",
+      "clickInPage": "在 {url} 中點擊連結 {id}",
+      "open": "開啟 {url}",
+      "find": "尋找「{pattern}」",
+      "inPage": "在 {url} 中{action}",
+      "operations": "{count} 個網頁操作",
+      "searchTerm": "搜尋"
+    },
+    "permissionMode": {
+      "label": "權限模式",
+      "current": "權限模式：{mode}",
+      "changeFailed": "切換權限模式失敗",
+      "claude": {
+        "auto": "自動",
+        "manual": "手動",
+        "acceptEdits": "接受編輯",
+        "yolo": "YOLO",
+        "autoDesc": "由 Claude 決定是否授權",
+        "manualDesc": "修改前一律詢問",
+        "acceptEditsDesc": "自動接受所有檔案編輯",
+        "yoloDesc": "無須詢問，允許所有操作"
+      },
+      "codex": {
+        "autoReview": "代我審批",
+        "normal": "請求審批",
+        "yolo": "完整存取",
+        "autoReviewDesc": "自動審核額外存取權限。",
+        "readOnlyDesc": "編輯或連網前詢問。",
+        "normalDesc": "額外存取前詢問。",
+        "yoloDesc": "不限制檔案和網路存取。"
+      }
+    },
+    "thinking": {
+      "active": "思考中，已用時 {seconds} 秒…",
+      "completed": "思考了 {seconds} 秒",
+      "label": "思考過程"
+    },
+    "suggestions": {
+      "loading": "正在載入…",
+      "noMatches": "無符合項目",
+      "loadFailed": "無法載入建議",
+      "retryHint": "再次輸入以重試",
+      "providerLoading": "正在載入供應商命令…",
+      "providerRetry": "重新尋找供應商命令"
+    },
+    "approval": {
+      "title": "需要授權",
+      "question": "允許此操作嗎？",
+      "deny": "拒絕",
+      "allowOnce": "允許一次",
+      "alwaysAllow": "一律允許",
+      "mcpRequest": "MCP 請求",
+      "mcpServer": "MCP 伺服器： {server}",
+      "decline": "拒絕",
+      "allow": "允許",
+      "cancelRequest": "取消此請求。",
+      "declineRequest": "拒絕此請求。",
+      "acceptRequest": "接受此請求。",
+      "fileChange": "檔案修改",
+      "fileChangeReason": "檔案修改：{reason}",
+      "permissionRequest": "權限請求",
+      "permissionReason": "權限請求：{reason}",
+      "networkAccess": "允許透過 {protocol} 存取 {host}",
+      "execute": "執行：{command}",
+      "executeCommand": "執行命令",
+      "allowSimilar": "允許類似命令",
+      "execPolicy": "核准並儲存執行策略變更。",
+      "host": "主機",
+      "allowHost": "在此工作階段中允許 {host}",
+      "denyHost": "在此工作階段中拒絕 {host}",
+      "allowRule": "對 {host} 套用允許規則。",
+      "denyRule": "對 {host} 套用拒絕規則。",
+      "details": "{tool} 授權詳情",
+      "unexpectedSelection": "非預期的授權選項：「{value}」",
+      "runCommand": "執行命令：{pattern}",
+      "readFile": "讀取檔案：{pattern}",
+      "writeFile": "寫入檔案：{pattern}",
+      "editFile": "編輯檔案：{pattern}",
+      "searchFiles": "搜尋符合的檔案：{pattern}",
+      "searchContent": "搜尋符合的內容：{pattern}",
+      "unknownPattern": "（未知）",
+      "deepseekRequest": "DeepSeek 請求授權。"
+    },
+    "disclosure": {
+      "expand": "{label} - 點擊展開",
+      "collapse": "{label} - 點擊收合"
+    },
+    "removeItem": "移除{item}",
+    "agent": "代理：{agent}",
+    "images": {
+      "unsupportedProvider": "此供應商不支援圖片附件。",
+      "tooLarge": "圖片超過 {size} 的大小限制。",
+      "unsupportedType": "不支援的圖片格式。",
+      "attachFailed": "新增圖片附件失敗。",
+      "label": "圖片",
+      "numbered": "圖片 {number}",
+      "attachment": "圖片附件：{name} · {size}",
+      "fileNotFound": "{message}（檔案不存在）",
+      "permissionDenied": "{message}（無存取權限）",
+      "preview": "圖片預覽：{name}",
+      "closePreview": "關閉圖片預覽"
+    },
+    "pi": {
+      "extension": "Pi 擴充功能",
+      "notification": "Pi 擴充功能通知。"
+    },
+    "sessionMessage": {
+      "undelivered": "無法傳遞來自 {senders} 的訊息。",
+      "fromLabel": "來自工作階段："
+    },
+    "sessionTools": {
+      "noSessions": "沒有工作階段",
+      "thisSession": "此工作階段",
+      "truncated": "還有更多工作階段未顯示",
+      "recipient": "接收者",
+      "model": "模型",
+      "reasoning": "推理",
+      "message": "訊息",
+      "openSession": "開啟工作階段 {sessionId}",
+      "openProviderSession": "開啟 {provider} 工作階段 {sessionId}",
+      "sessionMissing": "該工作階段已不存在。",
+      "openFailed": "無法開啟工作階段：{message}",
+      "openUnavailable": "無法從這裡開啟工作階段。",
+      "providersIncluded": "已包含可用的提供者和模型",
+      "newSession": "新工作階段",
+      "session": "工作階段",
+      "turns": "輪次",
+      "turnRange": "{from}–{to}，共 {total}",
+      "noTurns": "尚無",
+      "mode": "傳遞方式",
+      "modeSteer": "插入進行中的輪次",
+      "modeInterrupt": "中斷目前工作"
+    },
+    "navigation": {
+      "scrollToTop": "捲動至頂端",
+      "previousMessage": "上一則訊息",
+      "directory": "對話目錄",
+      "nextMessage": "下一則訊息",
+      "scrollToBottom": "捲動至底端",
+      "emptyDirectory": "此對話中尚無使用者提示詞"
+    },
+    "projects": {
+      "header": "專案",
+      "options": "專案選項",
+      "sortBy": "專案排序方式",
+      "sort": {
+        "lastActivity": "最近活動",
+        "created": "建立時間"
+      },
+      "noSessions": "沒有工作階段",
+      "newSessionIn": "在 {name} 中新增工作階段",
+      "actionsFor": "{name} 的操作",
+      "newProjectAction": "新增專案",
+      "chipLabel": "專案：{name}",
+      "noProject": "無專案",
+      "menu": {
+        "edit": "編輯專案",
+        "openMemory": "開啟專案記憶",
+        "archive": "封存專案",
+        "restore": "還原專案",
+        "pin": "釘選專案",
+        "unpin": "取消釘選專案",
+        "delete": "刪除專案",
+        "moveTo": "移動到專案…",
+        "moveSelectionTo": "將 {count} 個工作階段移動到專案…",
+        "removeFrom": "從專案中移除",
+        "removeSelectionFrom": "從專案中移除 {count} 個工作階段",
+        "newProject": "新增專案…"
+      },
+      "deleteConfirm": "刪除專案「{name}」並將其記憶檔案移到垃圾桶？工作階段會保留，但不再屬於任何專案。",
+      "errors": {
+        "create": "建立專案失敗",
+        "update": "更新專案失敗",
+        "delete": "刪除專案失敗",
+        "archive": "無法封存專案",
+        "restore": "無法還原專案",
+        "pin": "更新專案釘選狀態失敗",
+        "move": "將工作階段移動到專案失敗",
+        "remove": "從專案中移除工作階段失敗",
+        "start": "在此專案中新增工作階段失敗",
+        "sort": "無法更新專案排序"
+      },
+      "editor": {
+        "titleNew": "新增專案",
+        "titleEdit": "編輯專案",
+        "name": "名稱",
+        "nameDesc": "顯示在工作階段管理器和成員工作階段中。",
+        "namePlaceholder": "專案名稱",
+        "instructions": "指示",
+        "instructionsDesc": "從下一輪起加入每個成員工作階段的系統提示詞。",
+        "memoryPath": "記憶檔案",
+        "memoryPathDesc": "專案記憶檔案在儲存庫中的路徑。缺少 .md 副檔名時會自動加上。變更後會移動該檔案。",
+        "memoryPathPlaceholder": "資料夾/MEMORY.md",
+        "memoryPathInvalid": "請輸入儲存庫內的檔案路徑，例如 Projects/MEMORY.md。",
+        "memoryPathTaken": "{path} 已被某個檔案或其他專案使用。",
+        "openMemory": "開啟",
+        "nameRequired": "請輸入專案名稱。"
+      },
+      "memory": {
+        "title": "專案記憶：{name}",
+        "reload": "重新載入",
+        "overwrite": "覆寫",
+        "recreate": "從範本重新建立",
+        "edit": "編輯",
+        "preview": "預覽",
+        "missing": "專案記憶檔案不存在。",
+        "conflict": "記憶檔案在載入後已被修改。重新載入會捨棄你的編輯，覆寫則保留你的編輯。",
+        "loadFailed": "載入專案記憶失敗",
+        "saveFailed": "儲存專案記憶失敗",
+        "saved": "專案記憶已儲存",
+        "loading": "載入中…",
+        "updated": "{time}更新",
+        "changedOutside": "記憶檔案已在此視窗之外被更新，可能是代理所為。",
+        "keepMine": "保留我的編輯",
+        "discardConfirm": "放棄對專案記憶的未儲存變更？",
+        "discard": "放棄",
+        "emptyHint": "代理會隨著專案推進填寫這裡。"
+      }
     },
     "instructionMode": {
       "placeholder": "# 輸入要改寫的指令",
@@ -126,110 +471,13 @@
       "noDetails": "本次工具呼叫沒有附上計畫詳情。",
       "approveMessage": "核准，請依計畫開始實作。",
       "rejectMessage": "請先修改計畫再實作。"
+    },
+    "transcriptRestored": {
+      "banner": "此工作階段是從本機存檔還原的：agent CLI 無法提供原生歷史記錄。下方顯示已儲存的每一輪對話。",
+      "label": "從本機存檔還原"
     }
   },
   "settings": {
-      "capabilityMatrix": {
-          "title": "各 provider 能力对照",
-          "desc": "每个 agent harness 实际能做什么——数据直接读自 provider 自身的能力声明，不是写死的表。",
-          "providerColumn": "Provider",
-          "unsupported": "不支持",
-          "reasoningEffort": "effort",
-          "reasoningNone": "无",
-          "columns": {
-              "imageAttachments": "图片",
-              "fork": "分支",
-              "rewind": "回退",
-              "turnSteer": "插入",
-              "planMode": "计划",
-              "instructionMode": "指令",
-              "providerCommands": "命令",
-              "reasoningControl": "推理控制"
-          }
-      },
-      "gettingStarted": {
-          "title": "快速上手",
-          "install": {
-              "name": "1. 装一个 agent CLI",
-              "desc": "至少装一个 harness（例如用 OMP 的安装脚本，或 npm install -g @deepseek-ai/dsh）。插件不会替你安装任何东西。"
-          },
-          "provider": {
-              "name": "2. 在这里选中它",
-              "desc": "在 Providers 里启用该 provider 并选一个模型；它的体检面板会告诉你还缺什么。"
-          },
-          "chat": {
-              "name": "3. 开始对话",
-              "desc": "从侧栏图标或命令面板打开对话视图，发一条消息即可。"
-          }
-      },
-      "hotkeys": {
-          "title": "快捷键",
-          "desc": "本插件不预置任何快捷键。请到 Obsidian 的「设置 → 快捷键」里自行绑定——搜索「Super Useful Claudian」即可看到它注册的全部命令。"
-      },
-      "usage": {
-          "title": "Token usage",
-          "today": "Today",
-          "total": "Total",
-          "input": "Input",
-          "output": "Output",
-          "cache": "Cache",
-          "date": "Date",
-          "sessions": "Top sessions",
-          "empty": "No usage recorded yet.",
-          "note": "Figures are best-effort, as reported by each provider.",
-          "last7days": "Last 7 days"
-      },
-    "readiness": {
-      "heading": "執行狀態",
-      "refresh": "重新檢查",
-      "checking": "正在檢查…",
-      "checkFailed": "無法檢查執行狀態",
-      "status": {
-        "ready": "就緒",
-        "attention": "需要留意",
-        "blocked": "無法使用",
-        "disabled": "已停用"
-      },
-      "check": {
-        "enabled": "已啟用",
-        "cli": "CLI 可用",
-        "models": "模型目錄",
-        "selection": "已選模型"
-      },
-      "detail": {
-        "enabled": "已啟用",
-        "disabled": "已停用",
-        "cliFound": "v{version} · {path}",
-        "cliNoVersion": "{path} · 無法讀取版本",
-        "cliMissing": "在 PATH 中找不到",
-        "models": "已發現 {count} 個模型",
-        "modelsNone": "尚未發現任何模型",
-        "selection": "已啟用 {count} 個模型",
-        "selectionNone": "尚未啟用任何模型"
-      },
-      "remedy": {
-        "enable": "開啟 {provider} 即可使用。",
-        "cliMissing": "找不到 {name}。請先安裝再重新檢查——Claudian 不會代為安裝：",
-        "cliUnreadable": "已找到 CLI，但無法讀取版本。請檢查下方的路徑。",
-        "refreshModels": "展開下方「模型」並重新整理模型目錄。",
-        "selectModel": "請在下方「模型」中至少啟用一個模型。"
-      },
-      "action": {
-        "copy": "複製",
-        "copied": "已複製",
-        "checkUpdate": "檢查更新"
-      },
-      "update": {
-        "checking": "正在查詢 npm…",
-        "available": "有新版本 {version}，可用以下指令更新：",
-        "latest": "已是最新（最新版本 {version}）。",
-        "unavailable": "無法連線 npm registry。"
-      }
-    },
-    "cliUpdates": {
-      "name": "Check CLI updates",
-      "desc": "Show a \"Check for update\" button in each provider's readiness panel. Pressing it queries registry.npmjs.org for the latest published version of that provider's CLI package. Off by default: Claudian makes no registry request unless you enable this."
-    },
     "tabs": {
       "general": "一般",
       "providers": "提供者",
@@ -277,14 +525,6 @@
       "select": "選擇模型",
       "unavailableWarning": "自動標題已暫停。請選擇一個可用的標題模型。"
     },
-    "instructionMode": {
-      "name": "指令模式",
-      "desc": "在空白輸入框中輸入 # 進入指令模式，將口語化的指令改寫為規範的 prompt 後再送出。"
-    },
-    "bangBash": {
-      "name": "Bash 模式",
-      "desc": "在空白輸入框中輸入 ! 進入 Bash 模式，用你自己的 shell 在 vault 目錄執行一條指令，指令輸出會加入目前對話。"
-    },
     "navMappings": {
       "name": "Vim 風格導航映射",
       "desc": "每行一個映射。格式：\"map <鍵> <動作>\"（動作：scrollUp, scrollDown, focusInput）。"
@@ -300,7 +540,7 @@
     },
     "codexSandbox": {
       "name": "沙盒",
-      "desc": "Approve for me 和 Ask for approval 模式下的檔案存取權限。唯讀模式會在每次編輯前請求確認；Full access 會忽略此設定。"
+      "desc": "代我審批 和 請求審批 模式下的檔案存取權限。唯讀模式會在每次編輯前請求確認；完整存取 會忽略此設定。"
     },
     "environment": "環境",
     "sharedEnvironment": {
@@ -384,6 +624,10 @@
     "deferMathRenderingDuringStreaming": {
       "name": "串流傳輸時延遲渲染數學公式",
       "desc": "回應串流傳輸時顯示原始 LaTeX，並在每個文字區塊完成後只渲染一次數學公式。"
+    },
+    "pluginRenderedFenceLanguages": {
+      "name": "由外掛渲染的程式碼區塊語言",
+      "desc": "每行一個程式碼區塊語言，交給在筆記中渲染它的外掛（例如 vega-lite）。在回覆完成後渲染。其他程式碼區塊一律以程式碼顯示。"
     },
     "expandFileEditsByDefault": {
       "name": "預設展開檔案編輯",
@@ -477,7 +721,7 @@
     "codex": {
       "installationMethod": {
         "name": "安裝方式",
-        "desc": "Claudian 在 Windows 上啟動 Codex CLI 的方式。原生 Windows 使用 Windows 可執行檔路徑；WSL 會在所選發行版內啟動 Linux CLI。",
+        "desc": "Claudian 在 Windows 上啟動 Codex 的方式。原生 Windows 使用 Windows 可執行檔路徑；WSL 會在所選發行版內啟動 Linux CLI。",
         "nativeWindows": "原生 Windows",
         "wsl": "WSL"
       },
@@ -497,7 +741,7 @@
       },
       "responseStyle": {
         "name": "回覆風格",
-        "desc": "選擇支援此功能的模型中 Codex CLI 的溝通風格。",
+        "desc": "選擇支援此功能的模型中 Codex 的溝通風格。",
         "pragmatic": "務實",
         "friendly": "友善",
         "neutral": "中性"
@@ -523,8 +767,8 @@
         "desc": "在支援 Ultra 的 Codex 模型的推理強度選擇器中顯示此選項。Ultra 使用最高推理強度並自動委派工作。"
       },
       "environment": {
-        "name": "Codex CLI 環境",
-        "desc": "僅限 Codex CLI 擁有的執行階段變數。用於 OPENAI_* 和 CODEX_* 設定。如果 Codex CLI 自動偵測需要協助，請把安裝目錄新增到共享 PATH，而不是此提供者環境。"
+        "name": "Codex 環境",
+        "desc": "僅限 Codex 擁有的執行階段變數。用於 OPENAI_* 和 CODEX_* 設定。如果 Codex 自動偵測需要協助，請把安裝目錄新增到共享 PATH，而不是此提供者環境。"
       }
     },
     "agentSkills": {
@@ -565,6 +809,7 @@
       }
     },
     "opencode": {
+      "emptyModels": "OpenCode 伺服器未為此儲存庫傳回已啟用的模型。請檢查儲存庫的 .opencode/opencode.json 與 OpenCode 日誌（執行 opencode debug paths 查看位置）。使用 OpenCode v2 時，設定的 V1 外掛可能不相容。請在儲存庫中執行 opencode models --standalone 比較，然後按「探索」。",
       "environment": {
         "name": "OpenCode 環境變數",
         "desc": "傳遞給 OpenCode 的額外環境變數。"
@@ -574,29 +819,40 @@
         "link": "遷移至 OpenCode v2"
       }
     },
-    "omp": {
-      "environment": {
-        "name": "OMP 環境變數",
-        "desc": "僅傳遞給 OMP 的環境變數。"
-      }
-    },
     "pi": {
       "environment": {
         "name": "Pi 環境變數",
         "desc": "僅傳遞給 Pi 的環境變數。"
-      }
-    },
-    "dsh": {
-      "environment": {
-        "name": "DeepSeek Harness 環境變數",
-        "desc": "僅傳遞給 DeepSeek Harness 的環境變數。在此設定 DEEPSEEK_API_KEY 以完成驗證。"
       },
-      "cliNote": "需要 Node.js。安裝 CLI：npm install -g @deepseek-ai/dsh。"
+      "models": {
+        "desc": "Claudian 維護獨立於 Pi enabledModels 的模型清單。Discover 會列出 Pi 在目前環境中可驗證的所有模型，並依 Pi 實際呼叫的供應商路由分組。路由決定憑證與計費。"
+      }
     },
     "grok": {
       "environment": {
         "name": "Grok Build 環境變數",
         "desc": "僅傳遞給 Grok Build 的環境變數。自訂模型的密鑰保留在此提供者範圍內，並在原生設定中透過 env_key 參照。"
+      }
+    },
+    "deepseek": {
+      "installation": {
+        "desc": "自動模式優先使用 dsh，其次偵測 macOS 或 Windows 上的 Desktop。兩者都已安裝時，輸入 Desktop 的 .app 路徑或 Windows 安裝資料夾即可選擇它。請先開啟 Desktop 完成初始設定。",
+        "desktop": "使用你的原生 Desktop 設定檔。",
+        "web": "使用你的原生 Web 設定檔。"
+      },
+      "preset": "預設集",
+      "codeMode": {
+        "name": "啟用程式碼模式",
+        "desc": "從每個對話的下一輪開始生效，包括既有對話。在直接工具之外加入原生 run_code。"
+      },
+      "presetPlugins": {
+        "name": "附加預設外掛",
+        "desc": "進階。附加到 Claudian 聊天預設的原生 dsh 外掛列 YAML 清單（dsh 格式），每列需有自己的 \"id\" 與 \"name\"。這些列不能取代 Claudian 自己的列。儲存會重新啟動 DeepSeek Harness，並停止進行中的回合。Claudian 沒有介面支援的外掛（例如計畫模式）可能無法正常運作。"
+      },
+      "presetPreview": "預設預覽",
+      "environment": {
+        "name": "DeepSeek Harness 環境變數",
+        "desc": "僅傳遞給 DeepSeek Harness 的環境變數。使用所選的原生 Web 或 Desktop 設定檔、憑證、模型與 MCP 伺服器。"
       }
     },
     "skills": {
@@ -605,7 +861,7 @@
         "shared": "其他供應商"
       },
       "claudeHelp": ".claude/skills/ 中的 Claude Code 技能與 .claude/commands/ 中的指令。",
-      "sharedHelp": ".agents/skills/ 中供 Codex CLI、OpenCode、Pi 與 Grok Build 使用的共用技能。",
+      "sharedHelp": ".agents/skills/ 中供 Codex、OpenCode、Pi、Grok Build 與 DeepSeek Harness 使用的共用技能。",
       "status": {
         "error": "無法讀取技能資料夾:{message}"
       },
@@ -681,6 +937,128 @@
         "failed": "同步失敗:{message}",
         "summary": "已移動 {moved},已轉換 {converted},已移至垃圾桶 {trashed},已移除 {unlinked} 個連結。"
       }
+    },
+    "capabilityMatrix": {
+      "title": "各 provider 能力对照",
+      "desc": "每个 agent harness 实际能做什么——数据直接读自 provider 自身的能力声明，不是写死的表。",
+      "providerColumn": "Provider",
+      "unsupported": "不支持",
+      "reasoningEffort": "effort",
+      "reasoningNone": "无",
+      "columns": {
+        "imageAttachments": "图片",
+        "fork": "分支",
+        "rewind": "回退",
+        "turnSteer": "插入",
+        "planMode": "计划",
+        "instructionMode": "指令",
+        "providerCommands": "命令",
+        "reasoningControl": "推理控制"
+      }
+    },
+    "gettingStarted": {
+      "title": "快速上手",
+      "install": {
+        "name": "1. 装一个 agent CLI",
+        "desc": "至少装一个 harness（例如用 OMP 的安装脚本，或 npm install -g @deepseek-ai/dsh）。插件不会替你安装任何东西。"
+      },
+      "provider": {
+        "name": "2. 在这里选中它",
+        "desc": "在 Providers 里启用该 provider 并选一个模型；它的体检面板会告诉你还缺什么。"
+      },
+      "chat": {
+        "name": "3. 开始对话",
+        "desc": "从侧栏图标或命令面板打开对话视图，发一条消息即可。"
+      }
+    },
+    "hotkeys": {
+      "title": "快捷键",
+      "desc": "本插件不预置任何快捷键。请到 Obsidian 的「设置 → 快捷键」里自行绑定——搜索「Super Useful Claudian」即可看到它注册的全部命令。"
+    },
+    "usage": {
+      "title": "Token usage",
+      "today": "Today",
+      "total": "Total",
+      "input": "Input",
+      "output": "Output",
+      "cache": "Cache",
+      "date": "Date",
+      "sessions": "Top sessions",
+      "empty": "No usage recorded yet.",
+      "note": "Figures are best-effort, as reported by each provider.",
+      "last7days": "Last 7 days"
+    },
+    "readiness": {
+      "heading": "執行狀態",
+      "refresh": "重新檢查",
+      "checking": "正在檢查…",
+      "checkFailed": "無法檢查執行狀態",
+      "status": {
+        "ready": "就緒",
+        "attention": "需要留意",
+        "blocked": "無法使用",
+        "disabled": "已停用"
+      },
+      "check": {
+        "enabled": "已啟用",
+        "cli": "CLI 可用",
+        "models": "模型目錄",
+        "selection": "已選模型"
+      },
+      "detail": {
+        "enabled": "已啟用",
+        "disabled": "已停用",
+        "cliFound": "v{version} · {path}",
+        "cliNoVersion": "{path} · 無法讀取版本",
+        "cliMissing": "在 PATH 中找不到",
+        "models": "已發現 {count} 個模型",
+        "modelsNone": "尚未發現任何模型",
+        "selection": "已啟用 {count} 個模型",
+        "selectionNone": "尚未啟用任何模型"
+      },
+      "remedy": {
+        "enable": "開啟 {provider} 即可使用。",
+        "cliMissing": "找不到 {name}。請先安裝再重新檢查——Claudian 不會代為安裝：",
+        "cliUnreadable": "已找到 CLI，但無法讀取版本。請檢查下方的路徑。",
+        "refreshModels": "展開下方「模型」並重新整理模型目錄。",
+        "selectModel": "請在下方「模型」中至少啟用一個模型。"
+      },
+      "action": {
+        "copy": "複製",
+        "copied": "已複製",
+        "checkUpdate": "檢查更新"
+      },
+      "update": {
+        "checking": "正在查詢 npm…",
+        "available": "有新版本 {version}，可用以下指令更新：",
+        "latest": "已是最新（最新版本 {version}）。",
+        "unavailable": "無法連線 npm registry。"
+      }
+    },
+    "cliUpdates": {
+      "name": "Check CLI updates",
+      "desc": "Show a \"Check for update\" button in each provider's readiness panel. Pressing it queries registry.npmjs.org for the latest published version of that provider's CLI package. Off by default: Claudian makes no registry request unless you enable this."
+    },
+    "instructionMode": {
+      "name": "指令模式",
+      "desc": "在空白輸入框中輸入 # 進入指令模式，將口語化的指令改寫為規範的 prompt 後再送出。"
+    },
+    "bangBash": {
+      "name": "Bash 模式",
+      "desc": "在空白輸入框中輸入 ! 進入 Bash 模式，用你自己的 shell 在 vault 目錄執行一條指令，指令輸出會加入目前對話。"
+    },
+    "omp": {
+      "environment": {
+        "name": "OMP 環境變數",
+        "desc": "僅傳遞給 OMP 的環境變數。"
+      }
+    },
+    "dsh": {
+      "environment": {
+        "name": "DeepSeek Harness 環境變數",
+        "desc": "僅傳遞給 DeepSeek Harness 的環境變數。在此設定 DEEPSEEK_API_KEY 以完成驗證。"
+      },
+      "cliNote": "需要 Node.js。安裝 CLI：npm install -g @deepseek-ai/dsh。"
     }
   }
 }

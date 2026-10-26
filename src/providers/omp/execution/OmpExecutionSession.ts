@@ -9,11 +9,7 @@ import {
   buildPromptWithHistoryContext,
   getHistoryImages,
 } from '@/core/prompt/historyContext';
-import {
-  appendLinkedContent,
-  appendSelectionContexts,
-  appendSessionReferences,
-} from '@/core/prompt/promptContext';
+import { appendExecutionContext } from '@/core/prompt/promptContext';
 
 import {
   type ConversationBranchRecoveryRequest,
@@ -47,6 +43,7 @@ import { getRuntimeEnvironmentText } from '../../../core/providers/providerEnvir
 import type { ProviderHost } from '../../../core/providers/ProviderHost';
 import type {
   ChatMessage,
+  SlashCommand,
   StreamChunk,
   TurnStats,
 } from '../../../core/types';
@@ -421,7 +418,7 @@ implements ProviderExecutionSession, SteerableExecutionSession {
   async #readBranchHistory(model: string, signal: AbortSignal): Promise<Extract<ConversationBranchResult, { status: 'committed' }>> {
     const history = await new OmpConversationHistoryService().hydrateConversationHistory({
       sessionId: this.providerSessionId, providerState: this.state.providerState, messages: [],
-    }, this.config.vaultWorkingDirectory);
+    }, this.config.workingDirectory);
     // OMP computes context usage from the selected native branch, including compaction.
     const usage = await this.#fetchUsage(model, signal).catch(() => null);
     return { status: 'committed', messages: history.messages ?? [], usage };
@@ -739,7 +736,7 @@ implements ProviderExecutionSession, SteerableExecutionSession {
         : 'always-ask',
       enableTreeBridge: !this.#shouldDisableNativePersistence(),
       command: await this.host.getResolvedProviderCliPath('omp') ?? 'omp',
-      cwd: this.config.vaultWorkingDirectory,
+      cwd: this.config.workingDirectory,
       env,
       envText,
       noSession: this.#shouldDisableNativePersistence(),
@@ -751,7 +748,7 @@ implements ProviderExecutionSession, SteerableExecutionSession {
       systemPrompt: resolveSystemPrompt(
         request,
         this.host.settings,
-        this.config.vaultWorkingDirectory,
+        this.config.workingDirectory,
       ),
     });
     const state = getOmpState(this.state.providerState);
@@ -789,7 +786,7 @@ implements ProviderExecutionSession, SteerableExecutionSession {
     const resolvedSessionFile = resolveOmpSessionFileHint(
       state.sessionFile,
       state.sessionId,
-      this.config.vaultWorkingDirectory,
+      this.config.workingDirectory,
       { environment },
     );
     if (resolvedSessionFile) {
@@ -1568,6 +1565,13 @@ implements ProviderExecutionSession, SteerableExecutionSession {
   /** True when this session adopted an existing native session with prior counters. */
   private readonly resumedNativeSession: boolean;
 
+  /** Latest native command list; undefined until the session reports one. */
+  private commandSnapshot: SlashCommand[] | undefined;
+
+  getCommandSnapshot(): readonly SlashCommand[] | undefined {
+    return this.commandSnapshot?.map(command => ({ ...command }));
+  }
+
   /** Session-cumulative totals from the last `get_session_stats` read; usage events carry the delta. */
   private lastSessionTokens: OmpSessionTokenTotals | null = null;
 
@@ -1598,9 +1602,9 @@ implements ProviderExecutionSession, SteerableExecutionSession {
     try {
       const response = await kernel.request<unknown>('get_available_commands', {}, 10_000);
       if (!this.#isCurrentKernel(kernel, generation) || this.disposed) return;
-      this.services.commandCatalog.setCommandSnapshot(
-        normalizeOmpRuntimeCommands(response).filter(command => command.name !== OMP_TREE_COMMAND),
-      );
+      this.commandSnapshot = normalizeOmpRuntimeCommands(response)
+        .filter(command => command.name !== OMP_TREE_COMMAND);
+      this.#emitSession({ type: 'commands_changed' });
     } catch {
       // Command metadata is non-blocking; the provider-owned probe can retry.
     }
@@ -1645,7 +1649,7 @@ implements ProviderExecutionSession, SteerableExecutionSession {
     const sourceFile = state.forkSourceSessionFile
       ?? findOmpSessionFile(
         forkSource.sessionId,
-        this.config.vaultWorkingDirectory,
+        this.config.workingDirectory,
         getString(env.PI_CODING_AGENT_SESSION_DIR),
       );
     if (!sourceFile) {
@@ -1654,7 +1658,7 @@ implements ProviderExecutionSession, SteerableExecutionSession {
     const fork = await this.options.createForkSessionFile(
       sourceFile,
       forkSource.resumeAt,
-      { targetCwd: this.config.vaultWorkingDirectory },
+      { targetCwd: this.config.workingDirectory },
     );
     if (isSamePath(fork.sessionFile, sourceFile)) {
       throw new Error('OMP fork materialization returned the source session as its target.');
@@ -2048,12 +2052,7 @@ function encodePrompt(
 } {
   const inputText = getInputText(request);
   let text = inputText;
-  const context = request.context;
-  if (context?.linkedContent?.path) {
-    text = appendLinkedContent(text, context.linkedContent.path);
-  }
-  text = appendSelectionContexts(text, context);
-  text = appendSessionReferences(text, context?.sessionReferences);
+  text = appendExecutionContext(text, request.context);
   // OMP splits a leading skill name at a literal space, not the context's newline separator.
   if (text !== inputText && /^\/skill:\S+$/.test(inputText)) {
     text = `${inputText} ${text.slice(inputText.length)}`;

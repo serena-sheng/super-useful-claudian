@@ -60,7 +60,8 @@ function isKnownToolName(value: unknown): value is OpencodeKnownToolName {
     return false;
   }
 
-  return value.trim().toLowerCase() in TOOL_NAME_MAP;
+  // Own entries only: prototype keys (e.g. constructor) are not known tool names.
+  return Object.hasOwn(TOOL_NAME_MAP, value.trim().toLowerCase());
 }
 
 function toKnownToolName(value: string | undefined): OpencodeKnownToolName | null {
@@ -239,9 +240,19 @@ function normalizeQuestionAnswers(
     }
 
     const normalizedValue = values.length === 1 ? values[0] : values;
-    answers[question.question] = normalizedValue;
+    Object.defineProperty(answers, question.question, {
+      value: normalizedValue,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
     if (question.id) {
-      answers[question.id] = normalizedValue;
+      Object.defineProperty(answers, question.id, {
+        value: normalizedValue,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
     }
   }
 

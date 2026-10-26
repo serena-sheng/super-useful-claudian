@@ -43,8 +43,6 @@ export interface PendingToolCall {
   parentEl: HTMLElement | null;
 }
 
-export type TabAttentionKind = 'review' | 'action-required';
-
 export type TabReviewOutcome = 'completed' | 'error';
 
 export type TabAttention =
@@ -58,6 +56,12 @@ export type TabAttention =
       since: number;
     }
   | null;
+
+/** Open thinking content survives the absence of its rendered block. */
+export interface StreamingThinkingBlock {
+  content: string;
+  readonly startTime: number;
+}
 
 /** Stored selection state from editor polling. */
 export interface StoredSelection {
@@ -76,10 +80,6 @@ export interface ChatStateData {
   // Message state
   messages: ChatMessage[];
 
-  /** Guards against concurrent operations while the tab resets to a new chat. */
-  isResettingToNewChat: boolean;
-  /** Guards against concurrent operations during conversation switching. */
-  isSwitchingConversation: boolean;
   /** Guards the destructive rewind transaction from overlapping tab actions. */
   isRewinding: boolean;
   /** Local tab state is ahead of persisted conversation metadata. */
@@ -94,7 +94,6 @@ export interface ChatStateData {
   // Active streaming DOM state
   currentContentEl: HTMLElement | null;
   currentTextEl: HTMLElement | null;
-  currentTextContent: string;
   currentThinkingState: ThinkingBlockState | null;
   thinkingEl: HTMLElement | null;
   queueIndicatorEl: HTMLElement | null;
@@ -111,13 +110,11 @@ export interface ChatStateData {
   usage: UsageInfo | null;
 
   // Runtime-only attention state
-  attention: TabAttention;
 
   // Auto-scroll control during streaming
   autoScrollEnabled: boolean;
 
   // Response timer state
-  responseStartTime: number | null;
   flavorTimerInterval: number | null;
 }
 

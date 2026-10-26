@@ -10,9 +10,8 @@ describe('getBuiltInCommandsForDropdown - provider filtering', () => {
   it('excludes Codex-only commands for the Claude provider', () => {
     const commands = getBuiltInCommandsForDropdown('claude');
     expect(commands.length).toBe(BUILT_IN_COMMANDS.length - 1);
-    expect(commands.map(c => c.name)).toContain('clear');
-    expect(commands.map(c => c.name)).toContain('resume');
-    expect(commands.map(c => c.name)).toContain('fork');
+    expect(commands.map(c => c.name)).toContain('new');
+    expect(commands.map(c => c.name)).toContain('sessions');
     expect(commands.map(c => c.name)).not.toContain('fast');
   });
 
@@ -20,9 +19,9 @@ describe('getBuiltInCommandsForDropdown - provider filtering', () => {
     const commands = getBuiltInCommandsForDropdown('codex');
     expect(commands.length).toBe(5);
     expect(commands.map(c => c.name)).toEqual([
-      'clear',
-      'resume',
-      'fork',
+      'new',
+      'compact',
+      'sessions',
       'fast',
       'side',
     ]);

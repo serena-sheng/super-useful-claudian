@@ -4,7 +4,7 @@ import { ConversationRepository } from '@/app/conversations/ConversationReposito
 import type { ConversationPersistence } from '@/app/storage/ConversationPersistenceStore';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
-import type { Conversation } from '@/core/types';
+import type { Conversation, ProjectRecord } from '@/core/types';
 
 function createConversation(id = 'conversation-1'): Conversation {
   return {
@@ -18,7 +18,10 @@ function createConversation(id = 'conversation-1'): Conversation {
   };
 }
 
-function createRepository(conversation = createConversation()) {
+function createRepository(
+  conversation = createConversation(),
+  liveProjectIds: ReadonlySet<string> = new Set(),
+) {
   const persistence: jest.Mocked<ConversationPersistence> = {
     metadataReader: {
       revalidate: jest.fn().mockResolvedValue([]),
@@ -36,20 +39,29 @@ function createRepository(conversation = createConversation()) {
       }),
       listMetadata: jest.fn().mockResolvedValue([]),
     },
+    transcripts: {
+      save: jest.fn().mockResolvedValue(undefined),
+      load: jest.fn().mockResolvedValue(null),
+      delete: jest.fn().mockResolvedValue(undefined),
+    },
     saveMetadata: jest.fn().mockResolvedValue(undefined),
     deleteCurrentMetadata: jest.fn().mockResolvedValue(undefined),
     assignMetadataToDevice: jest.fn().mockResolvedValue(undefined),
   };
+  const onConversationDeleted = jest.fn<Promise<void>, [string]>().mockResolvedValue(undefined);
   const repository = new ConversationRepository({
     providers: ProviderRegistry,
     providerSettings: ProviderSettingsCoordinator,
     getSettings: () => ({}),
     getVaultPath: () => '/vault',
     persistence,
-    onConversationDeleted: jest.fn().mockResolvedValue(undefined),
+    onConversationDeleted,
+    projects: {
+      get: id => (id !== undefined && liveProjectIds.has(id) ? { id } as ProjectRecord : null),
+    },
   });
   repository.replaceAll([conversation]);
-  return { repository, persistence };
+  return { repository, persistence, onConversationDeleted };
 }
 
 describe('ConversationRepository hydration', () => {
@@ -587,7 +599,7 @@ describe('ConversationRepository hydration', () => {
     conversation.lastActivityAt = 42;
     const { repository, persistence } = createRepository(conversation);
 
-    await repository.setPinned(conversation.id, true);
+    await repository.setPlacement(conversation.id, { isPinned: true });
 
     expect(repository.list()[0].isPinned).toBe(true);
     expect(repository.getSync(conversation.id)!.lastActivityAt).toBe(42);
@@ -638,7 +650,7 @@ describe('ConversationRepository hydration', () => {
       isPinned: false,
     }));
 
-    await repository.setPinned(conversation.id, true);
+    await repository.setPlacement(conversation.id, { isPinned: true });
     expect(repository.getSync(conversation.id)!.isPinned).toBe(false);
 
     await repository.setArchived(conversation.id, false);
@@ -707,21 +719,27 @@ describe('ConversationRepository hydration', () => {
     await expect(untypedUpdate(conversation.id, {
       linkedContentPath: undefined,
     })).rejects.toThrow('immutable');
+    await expect(untypedUpdate(conversation.id, {
+      projectId: 'project-a',
+    })).rejects.toThrow('immutable');
+    await expect(untypedUpdate(conversation.id, {
+      projectId: undefined,
+    })).rejects.toThrow('immutable');
 
     expect(repository.getSync(conversation.id)!.linkedContentPath).toBe('Notes/Current.md');
     expect(repository.getSync(conversation.id)!.lastActivityAt).toBe(42);
     expect(persistence.saveMetadata).not.toHaveBeenCalled();
   });
 
-  it('repairs leaked Linked content mutations at read and persistence boundaries', async () => {
+  it('isolates Linked content from input and snapshot mutations', async () => {
     const conversation: Conversation = {
       ...createConversation(),
       linkedContentPath: 'Projects/Authoritative',
     };
     const { repository, persistence } = createRepository(conversation);
-    const leaked = repository.getSync(conversation.id)! as { linkedContentPath?: string };
+    const snapshot = repository.getSync(conversation.id)! as { linkedContentPath?: string };
 
-    leaked.linkedContentPath = 'Projects/Leaked';
+    snapshot.linkedContentPath = 'Projects/Leaked';
     await repository.persistConversations(repository.getAll());
 
     expect(repository.getSync(conversation.id)!.linkedContentPath).toBe('Projects/Authoritative');
@@ -731,14 +749,14 @@ describe('ConversationRepository hydration', () => {
       }),
     );
 
-    leaked.linkedContentPath = undefined;
+    snapshot.linkedContentPath = undefined;
     expect(repository.list().find(({ id }) => id === conversation.id)).toMatchObject({
       linkedContentPath: 'Projects/Authoritative',
     });
     expect(repository.getSync(conversation.id)!.linkedContentPath).toBe('Projects/Authoritative');
   });
 
-  it('repairs a leaked Linked content mutation before a queued save serializes', async () => {
+  it('isolates a queued save from Linked content input mutations', async () => {
     const conversation: Conversation = {
       ...createConversation(),
       linkedContentPath: 'Projects/Authoritative',
@@ -756,7 +774,7 @@ describe('ConversationRepository hydration', () => {
 
     const firstSave = repository.rename(conversation.id, 'First');
     await firstSaveStarted;
-    const secondSave = repository.setPinned(conversation.id, true);
+    const secondSave = repository.setPlacement(conversation.id, { isPinned: true });
     (conversation as { linkedContentPath?: string }).linkedContentPath = 'Projects/Leaked';
     releaseFirstSave();
 
@@ -886,6 +904,34 @@ describe('ConversationRepository hydration', () => {
     await expect(deletion).resolves.toBeUndefined();
     expect(repository.getCachedConversation(conversation.id)).toBeNull();
     expect(persistence.deleteCurrentMetadata).toHaveBeenCalledWith(conversation.id);
+  });
+
+  it('joins a repeated delete instead of cleaning up before the record is durably removed', async () => {
+    const conversation = createConversation();
+    const { repository, persistence, onConversationDeleted } = createRepository(conversation);
+    let releaseRemoval!: () => void;
+    persistence.deleteCurrentMetadata.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      releaseRemoval = resolve;
+    }));
+
+    const first = repository.delete(conversation.id);
+    const repeated = repository.delete(conversation.id);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(onConversationDeleted).not.toHaveBeenCalled();
+
+    releaseRemoval();
+    await expect(Promise.all([first, repeated])).resolves.toEqual([undefined, undefined]);
+    expect(onConversationDeleted).toHaveBeenCalledTimes(1);
+    expect(persistence.deleteCurrentMetadata).toHaveBeenCalledTimes(1);
+    expect(repository.getCachedConversation(conversation.id)).toBeNull();
+  });
+
+  it('lets a deleted conversation\'s session release its history', async () => {
+    const conversation = createConversation();
+    const { repository } = createRepository(conversation);
+    await repository.delete(conversation.id);
+
+    await expect(repository.releaseHistory(conversation.id, () => true)).resolves.toBe(true);
   });
 
   it('does not return an already hydrated conversation deleted while model reconciliation is in flight', async () => {
@@ -1121,4 +1167,82 @@ it('adopts already-published shells without repeated linear record lookup', asyn
   expect(find).not.toHaveBeenCalled();
   expect(repository.getSync('indexed-511')?.id).toBe('indexed-511');
   expect(repository.list()).toHaveLength(512);
+});
+
+describe('ConversationRepository project membership', () => {
+  const live = new Set(['project-a', 'project-b']);
+
+  it('creates a member of a live project and omits an unknown project', async () => {
+    const { repository, persistence } = createRepository(createConversation(), live);
+
+    const member = await repository.create({ projectId: 'project-a' });
+    const stray = await repository.create({ projectId: 'project-deleted' });
+
+    expect(repository.getSync(member.id)!.projectId).toBe('project-a');
+    expect(persistence.saveMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({ id: member.id, projectId: 'project-a' }),
+    );
+    expect(repository.getSync(stray.id)).not.toHaveProperty('projectId');
+    expect(persistence.saveMetadata.mock.calls.at(-1)?.[0].projectId).toBeUndefined();
+  });
+
+  it('joins, moves, and leaves a project through persisted metadata and the list projection', async () => {
+    const conversation = createConversation();
+    const { repository, persistence } = createRepository(conversation, live);
+
+    await repository.setPlacement(conversation.id, { projectId: 'project-a' });
+    expect(persistence.saveMetadata.mock.calls.at(-1)?.[0].projectId).toBe('project-a');
+    expect(repository.list()[0].projectId).toBe('project-a');
+
+    await repository.setPlacement(conversation.id, { projectId: 'project-b' });
+    expect(persistence.saveMetadata.mock.calls.at(-1)?.[0].projectId).toBe('project-b');
+    expect(repository.getSync(conversation.id)!.projectId).toBe('project-b');
+
+    await repository.setPlacement(conversation.id, { projectId: null });
+    expect(persistence.saveMetadata.mock.calls.at(-1)?.[0].projectId).toBeUndefined();
+    expect(repository.list()[0].projectId).toBeUndefined();
+  });
+
+  it('rejects joining a project that is not live and keeps the current placement', async () => {
+    const conversation = { ...createConversation(), projectId: 'project-a', isPinned: true };
+    const { repository, persistence } = createRepository(conversation, live);
+
+    await expect(repository.setPlacement(conversation.id, { projectId: 'project-deleted', isPinned: false }))
+      .rejects.toThrow('Unknown project: project-deleted');
+
+    expect(repository.getSync(conversation.id)).toMatchObject({ projectId: 'project-a', isPinned: true });
+    expect(persistence.saveMetadata).not.toHaveBeenCalled();
+  });
+
+  it('writes nothing when the conversation is already in place', async () => {
+    const conversation = { ...createConversation(), projectId: 'project-a', isPinned: false };
+    const { repository, persistence } = createRepository(conversation, live);
+
+    await repository.setPlacement(conversation.id, { projectId: 'project-a', isPinned: false });
+    await repository.setPlacement(conversation.id, {});
+
+    expect(persistence.saveMetadata).not.toHaveBeenCalled();
+  });
+
+  it('moves into a project and unpins in one metadata write', async () => {
+    const conversation = { ...createConversation(), isPinned: true };
+    const { repository, persistence } = createRepository(conversation, live);
+
+    await repository.setPlacement(conversation.id, { projectId: 'project-a', isPinned: false });
+
+    expect(persistence.saveMetadata).toHaveBeenCalledTimes(1);
+    expect(persistence.saveMetadata.mock.calls[0][0]).toMatchObject({ projectId: 'project-a', isPinned: false });
+    expect(repository.list()[0]).toMatchObject({ projectId: 'project-a', isPinned: false });
+  });
+
+  it('leaves the other placement field unchanged when it is omitted', async () => {
+    const conversation = { ...createConversation(), projectId: 'project-a', isPinned: true };
+    const { repository } = createRepository(conversation, live);
+
+    await repository.setPlacement(conversation.id, { projectId: 'project-b' });
+    expect(repository.getSync(conversation.id)).toMatchObject({ projectId: 'project-b', isPinned: true });
+
+    await repository.setPlacement(conversation.id, { isPinned: false });
+    expect(repository.getSync(conversation.id)).toMatchObject({ projectId: 'project-b', isPinned: false });
+  });
 });

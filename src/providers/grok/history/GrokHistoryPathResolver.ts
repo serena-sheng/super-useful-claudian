@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import type { ProviderHistoryPathContext } from '../../../core/providers/types';
+import type { ProviderHistoryEnvironment } from '../../../core/providers/types';
 import { isPathWithinRoot } from '../../../core/storage/pathContainment';
 
 const MAX_CWD_DIRECTORIES_TO_SCAN = 1_024;
@@ -38,7 +38,7 @@ export function resolveGrokSessionDirectory(
   persistedHint: string | null | undefined,
   sessionId: string | null | undefined,
   vaultPath: string | null,
-  context: ProviderHistoryPathContext,
+  context: ProviderHistoryEnvironment,
 ): string | null {
   const normalizedSessionId = normalizeSessionId(sessionId);
   if (!normalizedSessionId) {
@@ -58,7 +58,7 @@ export function resolveGrokSessionDirectory(
   if (vaultPath && path.isAbsolute(vaultPath)) {
     for (const root of roots) {
       const direct = path.join(root, encodeGrokSessionCwd(vaultPath), normalizedSessionId);
-      if (isPathWithinRoot(direct, root) && isDirectory(direct)) {
+      if (isDirectory(direct)) {
         return direct;
       }
     }
@@ -73,7 +73,7 @@ export function resolveGrokSessionDirectory(
   return null;
 }
 
-function getTrustedSessionRoots(context: ProviderHistoryPathContext): string[] {
+function getTrustedSessionRoots(context: ProviderHistoryEnvironment): string[] {
   const configuredHome = context.environment.GROK_HOME?.trim();
   if (configuredHome) {
     return path.isAbsolute(configuredHome)
@@ -127,7 +127,7 @@ function findExactSessionDirectory(root: string, sessionId: string): string | nu
       break;
     }
     const candidate = path.join(root, entry.name, sessionId);
-    if (isPathWithinRoot(candidate, root) && isDirectory(candidate)) {
+    if (isDirectory(candidate)) {
       return candidate;
     }
   }

@@ -13,6 +13,7 @@ import { filterMarkdownTextTokens } from '@/utils/markdownTextTokens';
 
 const refreshLinks = StateEffect.define<null>();
 const programmatic = Annotation.define<boolean>();
+const INPUT_RELATIONSHIP_ATTRIBUTES = ['aria-autocomplete', 'aria-activedescendant', 'aria-controls', 'aria-haspopup'];
 
 class WikilinkWidget extends WidgetType {
   constructor(
@@ -120,10 +121,11 @@ export class ComposerEditor {
   private view: EditorView | null = null;
   private readonly historyConfig = new Compartment();
   private readonly placeholderConfig = new Compartment();
-  private placeholderText = 'Ask to make changes, @mention files, run /commands';
+  private placeholderText = t('chat.composer.placeholder');
   private ghostText: string | null = null;
   private destroyed = false;
-  private ariaObserver: MutationObserver | null = null;
+  /** The host until the editor mounts, then CodeMirror's content element, which outlives editor teardown. */
+  private textbox: HTMLElement;
   private inputPending = false;
   private linkRevision = 0;
   private commandResolver: ComposerCommandResolver | null = null;
@@ -132,9 +134,10 @@ export class ComposerEditor {
   constructor(parent: HTMLElement, private readonly app: App, private readonly component: Component) {
     const host = parent.createDiv({
       cls: 'claudian-input claudian-composer-editor',
-      attr: { role: 'textbox', 'aria-label': 'Message', 'aria-multiline': 'true', tabindex: '0', dir: 'auto' },
+      attr: { role: 'textbox', 'aria-label': t('chat.composer.message'), 'aria-multiline': 'true', tabindex: '0', dir: 'auto' },
     });
     this.element = host as unknown as ComposerInputElement;
+    this.textbox = host;
     this.removeFileLinkHandler = registerFileLinkHandler(app, host);
     const decorations = StateField.define<DecorationSet>({
       create: state => this.decorate(state, Decoration.none),
@@ -167,7 +170,7 @@ export class ComposerEditor {
         this.placeholderConfig.of(placeholder(this.placeholderText)),
         // CodeMirror turns off native spellcheck and autocorrect, which also disables macOS text replacements.
         EditorView.contentAttributes.of({
-          'aria-label': 'Message', 'aria-multiline': 'true', role: 'textbox', spellcheck: 'true', autocorrect: 'on',
+          'aria-label': t('chat.composer.message'), 'aria-multiline': 'true', role: 'textbox', spellcheck: 'true', autocorrect: 'on',
         }),
         EditorView.contentAttributes.of(view => {
           const description = this.ghostDescription(view.state.doc.length);
@@ -231,6 +234,16 @@ export class ComposerEditor {
       this.refreshLinks();
     };
     this.element.isChipRange = (from, to) => isChipRange(this.state.field(decorations), from, to);
+    this.element.getAccessibleTextbox = () => this.textbox;
+    this.element.isCaretOnEdgeRow = direction => {
+      const view = this.view;
+      if (!view) return null;
+      const caret = view.state.selection.main;
+      const caretRect = view.coordsAtPos(caret.head, caret.assoc < 0 ? -1 : 1);
+      const edgeRect = direction === 'up' ? view.coordsAtPos(0, 1) : view.coordsAtPos(view.state.doc.length, -1);
+      if (!caretRect || !edgeRect || caretRect.bottom <= caretRect.top || edgeRect.bottom <= edgeRect.top) return null;
+      return direction === 'up' ? caretRect.top < edgeRect.bottom : caretRect.bottom > edgeRect.top;
+    };
     host.setAttribute('data-placeholder', this.placeholderText);
     host.addEventListener('focusin', this.onFocusIn);
   }
@@ -272,7 +285,6 @@ export class ComposerEditor {
   destroy(): void {
     this.destroyed = true;
     this.element.removeEventListener('focusin', this.onFocusIn);
-    this.ariaObserver?.disconnect();
     this.removeFileLinkHandler();
     this.view?.destroy();
     this.view = null;
@@ -290,17 +302,13 @@ export class ComposerEditor {
       this.element.setAttribute('tabindex', '-1');
       this.view = new EditorView({ state: this.state, parent: this.element });
       this.syncHostDescription();
-      const attributes = ['aria-autocomplete', 'aria-expanded', 'aria-activedescendant', 'aria-controls', 'aria-haspopup'];
-      const syncAria = () => {
-        for (const attribute of attributes) {
-          const value = this.element.getAttribute(attribute);
-          if (value === null) this.view?.contentDOM.removeAttribute(attribute);
-          else this.view?.contentDOM.setAttribute(attribute, value);
-        }
-      };
-      syncAria();
-      this.ariaObserver = new this.element.ownerDocument.defaultView!.MutationObserver(syncAria);
-      this.ariaObserver.observe(this.element, { attributes: true, attributeFilter: attributes });
+      // Popups opened before mount keep their relationships on the new textbox.
+      for (const attribute of INPUT_RELATIONSHIP_ATTRIBUTES) {
+        const value = this.element.getAttribute(attribute);
+        this.element.removeAttribute(attribute);
+        if (value !== null) this.view.contentDOM.setAttribute(attribute, value);
+      }
+      this.textbox = this.view.contentDOM;
     }
     this.view.focus();
   };

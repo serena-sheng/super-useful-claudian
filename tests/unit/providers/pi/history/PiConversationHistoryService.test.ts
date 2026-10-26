@@ -18,6 +18,8 @@ function createConversation(sessionFile: string): Conversation {
   };
 }
 
+const describePosix = process.platform === 'win32' ? describe.skip : describe;
+
 describe('PiConversationHistoryService', () => {
   it('hydrates from providerState sessionFile', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-history-'));
@@ -239,6 +241,74 @@ describe('PiConversationHistoryService', () => {
     ));
 
     expect(conversation.messages.map(message => message.content)).toEqual(['Previous', 'Active']);
+  });
+
+  // Permission bits do not deny reads on Windows or to root.
+  const describeWithFilePermissions = process.platform === 'win32' || process.getuid?.() === 0
+    ? describe.skip : describe;
+
+  describeWithFilePermissions('unreadable segments', () => {
+    it('skips an unreadable previous segment while hydrating the current one', async () => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-history-unreadable-previous-'));
+      const previousFile = path.join(dir, 'previous.jsonl');
+      const activeFile = path.join(dir, 'active.jsonl');
+      await fs.writeFile(previousFile, JSON.stringify({
+        id: 'previous-user',
+        message: { content: 'Previous', role: 'user', timestamp: 1 },
+        type: 'message',
+      }));
+      await fs.writeFile(activeFile, JSON.stringify({
+        id: 'active-user',
+        message: { content: 'Active', role: 'user', timestamp: 2 },
+        type: 'message',
+      }));
+      await fs.chmod(previousFile, 0o000);
+      const conversation = createConversation(activeFile);
+      conversation.providerState = {
+        previousSessions: [{ sessionFile: previousFile, sessionId: 'previous-session' }],
+        sessionFile: activeFile,
+        sessionId: 's1',
+      };
+
+      try {
+        const result = await new PiConversationHistoryService().hydrateConversationHistory(conversation, null);
+        expect(result.messages?.map(message => message.content)).toEqual(['Active']);
+      } finally {
+        await fs.chmod(previousFile, 0o600);
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects hydration when the current segment exists but cannot be read', async () => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-history-unreadable-current-'));
+      const previousFile = path.join(dir, 'previous.jsonl');
+      const activeFile = path.join(dir, 'active.jsonl');
+      await fs.writeFile(previousFile, JSON.stringify({
+        id: 'previous-user',
+        message: { content: 'Previous', role: 'user', timestamp: 1 },
+        type: 'message',
+      }));
+      await fs.writeFile(activeFile, JSON.stringify({
+        id: 'active-user',
+        message: { content: 'Active', role: 'user', timestamp: 2 },
+        type: 'message',
+      }));
+      await fs.chmod(activeFile, 0o000);
+      const conversation = createConversation(activeFile);
+      conversation.providerState = {
+        previousSessions: [{ sessionFile: previousFile, sessionId: 'previous-session' }],
+        sessionFile: activeFile,
+        sessionId: 's1',
+      };
+
+      try {
+        await expect(new PiConversationHistoryService().hydrateConversationHistory(conversation, null))
+          .rejects.toMatchObject({ code: 'EACCES' });
+      } finally {
+        await fs.chmod(activeFile, 0o600);
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   it('preserves unrelated id-less messages from different session segments', async () => {
@@ -482,6 +552,44 @@ describe('PiConversationHistoryService', () => {
     ));
 
     expect(conversation.messages.map(message => message.content)).toEqual(['Configured']);
+  });
+
+  describePosix('literal POSIX filenames', () => {
+    it.each(['sessions', 'sessions\\literal'])('hydrates a literal backslash filename under configured %s', async rootName => {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-history-posix-'));
+      try {
+        const configuredDir = path.join(tempDir, rootName);
+        const safeHome = path.join(tempDir, 'home');
+        await fs.mkdir(configuredDir);
+        await fs.mkdir(safeHome);
+        const sessionFile = path.join(configuredDir, 'turn\\notes.jsonl');
+        const nativeContent = JSON.stringify({
+          id: 'literal-backslash-user',
+          message: { content: 'History from a literal backslash filename', role: 'user' },
+          type: 'message',
+        });
+        await fs.writeFile(sessionFile, nativeContent);
+        const conversation = createConversation(sessionFile);
+        conversation.providerState = { sessionFile };
+        conversation.sessionId = null;
+
+        expect((await fs.stat(sessionFile)).isFile()).toBe(true);
+        const result = await new PiConversationHistoryService().hydrateConversationHistory(
+          conversation,
+          null,
+          { environment: { HOME: safeHome, PI_CODING_AGENT_SESSION_DIR: configuredDir } },
+        );
+
+        expect(result.messages).toHaveLength(1);
+        expect(result.messages?.[0]).toMatchObject({
+          content: 'History from a literal backslash filename', role: 'user',
+        });
+        expect(result.providerState).toEqual({ sessionFile });
+        expect(await fs.readFile(sessionFile)).toEqual(Buffer.from(nativeContent));
+      } finally {
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    });
   });
 
   it('does not trust a vault-local session root that is a symlink outside the vault', async () => {
@@ -782,6 +890,7 @@ describe('PiConversationHistoryService', () => {
       };
       expect(recreatedConversation.sessionId).toBeNull();
       expect(recreatedConversation.providerState).toEqual({
+        bindingRetired: true,
         futureResumeCursor: { token: 'keep-me' },
         previousSessions: [{
           leafEntryId: 'assistant-1',
@@ -820,6 +929,7 @@ describe('PiConversationHistoryService', () => {
 
       expect(conversation.sessionId).toBeNull();
       expect(conversation.providerState).toEqual({
+        bindingRetired: true,
         futureResumeCursor: { token: 'keep-me' },
         previousSessions: [{
           leafEntryId: 'assistant-1',

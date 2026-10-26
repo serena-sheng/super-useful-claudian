@@ -1,8 +1,9 @@
-import { existsSync } from 'fs';
-import * as fs from 'fs/promises';
+import { existsSync, readdirSync, readFileSync } from 'fs';
 import * as path from 'path';
 
-import type { ProviderHistoryPathContext } from '../../../core/providers/types';
+import { forEachJSONLLine } from '@/utils/jsonlFile';
+
+import type { ProviderHistoryEnvironment } from '../../../core/providers/types';
 import { extractToolResultContent } from '../../../core/tools/toolResultContent';
 import type { ToolCallInfo } from '../../../core/types';
 import {
@@ -12,7 +13,8 @@ import {
   isValidSessionId,
 } from './ClaudeHistoryPathResolver';
 import type { SDKNativeMessage } from './sdkHistoryTypes';
-import { extractFinalResultFromSubagentJSONL } from './subagentJSONL';
+import { hydrateStructuredToolResult } from './sdkMessageParsing';
+import { createSubagentFinalResultCollector } from './subagentJSONL';
 
 export function isValidAgentId(agentId: string): boolean {
   return isPathSafeId(agentId);
@@ -31,8 +33,15 @@ type SubagentToolEvent =
       toolUseId: string;
       content: string;
       isError: boolean;
+      toolUseResult: unknown;
       timestamp: number;
     };
+
+function isWithinRun(entry: unknown, runWindow: SubagentRunWindow): boolean {
+  const raw = (entry as { timestamp?: unknown } | null)?.timestamp;
+  const timestamp = typeof raw === 'string' ? Date.parse(raw) : Number.NaN;
+  return timestamp >= runWindow.startedAt && timestamp <= runWindow.endedAt;
+}
 
 function parseTimestampMs(raw: unknown): number {
   if (typeof raw !== 'string') {
@@ -99,6 +108,7 @@ function parseSubagentEvents(entry: unknown): SubagentToolEvent[] {
         toolUseId: block.tool_use_id,
         content: extractToolResultContent(block.content),
         isError: block.is_error === true,
+        toolUseResult: record.toolUseResult,
         timestamp,
       });
     }
@@ -112,6 +122,7 @@ function buildToolCallsFromSubagentEvents(events: SubagentToolEvent[]): ToolCall
     string,
     {
       toolCall: ToolCallInfo;
+      toolUseResult?: unknown;
       hasToolUse: boolean;
       hasToolResult: boolean;
       timestamp: number;
@@ -154,6 +165,7 @@ function buildToolCallsFromSubagentEvents(events: SubagentToolEvent[]): ToolCall
           result: event.content,
           isExpanded: false,
         },
+        toolUseResult: event.toolUseResult,
         hasToolUse: false,
         hasToolResult: true,
         timestamp: event.timestamp,
@@ -163,13 +175,33 @@ function buildToolCallsFromSubagentEvents(events: SubagentToolEvent[]): ToolCall
 
     existing.toolCall.status = event.isError ? 'error' : 'completed';
     existing.toolCall.result = event.content;
+    existing.toolUseResult = event.toolUseResult;
     existing.hasToolResult = true;
   }
 
   return Array.from(toolsById.values())
     .filter(entry => entry.hasToolUse)
     .sort((a, b) => a.timestamp - b.timestamp)
-    .map(entry => entry.toolCall);
+    .map(entry => {
+      hydrateStructuredToolResult(entry.toolCall, entry.toolUseResult);
+      return entry.toolCall;
+    });
+}
+
+function getSubagentsDirectory(
+  vaultPath: string,
+  sessionId: string,
+  sessionPath?: string,
+  pathContext?: ProviderHistoryEnvironment,
+): string | null {
+  if (!isValidSessionId(sessionId)) {
+    return null;
+  }
+
+  const projectPath = sessionPath
+    ? path.dirname(sessionPath)
+    : path.join(getSDKProjectsPath(pathContext), encodeVaultPathForSDK(vaultPath));
+  return path.join(projectPath, sessionId, 'subagents');
 }
 
 function getSubagentSidecarPath(
@@ -177,21 +209,60 @@ function getSubagentSidecarPath(
   sessionId: string,
   agentId: string,
   sessionPath?: string,
-  pathContext?: ProviderHistoryPathContext,
+  pathContext?: ProviderHistoryEnvironment,
 ): string | null {
-  if (!isValidSessionId(sessionId) || !isValidAgentId(agentId)) {
+  if (!isValidAgentId(agentId)) {
     return null;
   }
+  const directory = getSubagentsDirectory(vaultPath, sessionId, sessionPath, pathContext);
+  return directory ? path.join(directory, `agent-${agentId}.jsonl`) : null;
+}
 
-  const projectPath = sessionPath
-    ? path.dirname(sessionPath)
-    : path.join(getSDKProjectsPath(pathContext), encodeVaultPathForSDK(vaultPath));
-  return path.join(
-    projectPath,
-    sessionId,
-    'subagents',
-    `agent-${agentId}.jsonl`,
-  );
+/** Whether Claude's native sidecar holds this subagent's transcript. */
+export function hasSubagentSidecar(
+  vaultPath: string,
+  sessionId: string,
+  agentId: string,
+  pathContext?: ProviderHistoryEnvironment,
+): boolean {
+  try {
+    const subagentFilePath = getSubagentSidecarPath(vaultPath, sessionId, agentId, undefined, pathContext);
+    return subagentFilePath !== null && existsSync(subagentFilePath);
+  } catch {
+    return false;
+  }
+}
+
+/** Maps spawning tool call ids to agent ids from the `agent-<id>.meta.json` files beside sidecars. */
+export function readSubagentToolUseIndex(
+  vaultPath: string,
+  sessionId: string,
+  pathContext?: ProviderHistoryEnvironment,
+): Map<string, string> {
+  const index = new Map<string, string>();
+  try {
+    const directory = getSubagentsDirectory(vaultPath, sessionId, undefined, pathContext);
+    if (!directory || !existsSync(directory)) return index;
+    for (const name of readdirSync(directory)) {
+      const agentId = /^agent-(.+)\.meta\.json$/.exec(name)?.[1];
+      if (!agentId || !isValidAgentId(agentId) || !existsSync(path.join(directory, `agent-${agentId}.jsonl`))) continue;
+      try {
+        const toolUseId = (JSON.parse(readFileSync(path.join(directory, name), 'utf8')) as { toolUseId?: unknown }).toolUseId;
+        if (typeof toolUseId === 'string') index.set(toolUseId, agentId);
+      } catch {
+        // An unreadable entry leaves that subagent's stored copy in place.
+      }
+    }
+  } catch {
+    // Unavailable history keeps every stored copy.
+  }
+  return index;
+}
+
+/** Bounds of one invocation; a reused agent appends later runs to the same sidecar. */
+export interface SubagentRunWindow {
+  startedAt: number;
+  endedAt: number;
 }
 
 export async function loadSubagentToolCalls(
@@ -199,7 +270,8 @@ export async function loadSubagentToolCalls(
   sessionId: string,
   agentId: string,
   sessionPath?: string,
-  pathContext?: ProviderHistoryPathContext,
+  pathContext?: ProviderHistoryEnvironment,
+  runWindow?: SubagentRunWindow,
 ): Promise<ToolCallInfo[]> {
   const subagentFilePath = getSubagentSidecarPath(
     vaultPath,
@@ -217,19 +289,20 @@ export async function loadSubagentToolCalls(
       return [];
     }
 
-    const content = await fs.readFile(subagentFilePath, 'utf-8');
-    const lines = content.split('\n').filter(line => line.trim());
     const events: SubagentToolEvent[] = [];
     const seen = new Set<string>();
 
-    for (const line of lines) {
+    await forEachJSONLLine(subagentFilePath, line => {
+      if (!line.trim()) return;
       let raw: unknown;
       try {
         raw = JSON.parse(line);
       } catch {
-        continue;
+        return;
       }
 
+      // Untimed rows cannot be placed in a run, so a bounded replay omits them.
+      if (runWindow && !isWithinRun(raw, runWindow)) return;
       for (const event of parseSubagentEvents(raw)) {
         const key = `${event.type}:${event.toolUseId}`;
         if (seen.has(key)) {
@@ -238,7 +311,7 @@ export async function loadSubagentToolCalls(
         seen.add(key);
         events.push(event);
       }
-    }
+    });
 
     if (events.length === 0) {
       return [];
@@ -255,7 +328,7 @@ export async function loadSubagentFinalResult(
   sessionId: string,
   agentId: string,
   sessionPath?: string,
-  pathContext?: ProviderHistoryPathContext,
+  pathContext?: ProviderHistoryEnvironment,
 ): Promise<string | null> {
   const subagentFilePath = getSubagentSidecarPath(
     vaultPath,
@@ -273,8 +346,9 @@ export async function loadSubagentFinalResult(
       return null;
     }
 
-    const content = await fs.readFile(subagentFilePath, 'utf-8');
-    return extractFinalResultFromSubagentJSONL(content);
+    const collector = createSubagentFinalResultCollector();
+    await forEachJSONLLine(subagentFilePath, collector.addLine);
+    return collector.result();
   } catch {
     return null;
   }

@@ -129,6 +129,18 @@ it.each([false, true])('delivers opaque arguments, cwd, environment and stdin wi
   expect(managed.isAlive()).toBe(false);
 });
 
+it('keeps a bounded stderr diagnostic well-formed when its tail cuts an emoji', async () => {
+  const retained = 'x'.repeat(7_999);
+  const diagnostic = 'discarded prefix 🚀' + retained;
+  const { managed, closed } = await launch(`process.stderr.write(${JSON.stringify(diagnostic)});`);
+  managed.stdin.end();
+  expect(await withinDeadline(closed, managed)).toMatchObject({ closed: true, code: 0 });
+  const snapshot = managed.getStderrSnapshot();
+  expect(snapshot.codePointAt(0)).toBe('x'.codePointAt(0));
+  expect(snapshot).toHaveLength(retained.length);
+  expect(snapshot.endsWith(retained)).toBe(true);
+});
+
 it('reports a missing executable through the direct spawn error path', async () => {
   const managed = new ManagedStdioProcess({
     command: path.join(directory, 'missing-node.exe'),
@@ -162,6 +174,44 @@ it('terminates a running child when shutdown is requested repeatedly', async () 
 
 const describeOnPOSIX = process.platform === 'win32' ? describe.skip : describe;
 describeOnPOSIX('POSIX signals', () => {
+  it('reaps owned descendants even when they ignore SIGTERM and the parent exits first', async () => {
+    const { managed, readRecord } = await launch(`
+      const child = require('node:child_process').spawn(process.execPath, ['-e',
+        "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); process.stdout.write('ready');"
+      ], { stdio: ['ignore', 'pipe', 'ignore'] });
+      child.stdout.once('data', () => process.stdout.write(JSON.stringify({
+        pid: process.pid, childPid: child.pid,
+      }) + '\\n'));
+      setInterval(() => {}, 1000);
+    `, [], { killProcessTree: true, sigkillTimeoutMs: 200 });
+    const record = await readRecord();
+    await managed.shutdown();
+    await Promise.all([expectProcessGone(record.pid), expectProcessGone(record.childPid)]);
+    expect(managed.isAlive()).toBe(false);
+  });
+
+  it('kills descendants left in the owned process group after the root has already exited', async () => {
+    const { managed, closed, readRecord } = await launch(`
+      const child = require('node:child_process').spawn(process.execPath, ['-e',
+        "setInterval(() => {}, 1000); setTimeout(() => process.exit(99), 60000).unref(); process.stdout.write('ready');"
+      ], { stdio: ['ignore', 'pipe', 'ignore'] });
+      child.stdout.once('data', () => process.stdout.write(JSON.stringify({
+        pid: process.pid, childPid: child.pid,
+      }) + '\\n', () => process.exit(0)));
+      setInterval(() => {}, 1000);
+    `, [], { killProcessTree: true });
+    const record = await readRecord();
+    expect(await withinDeadline(closed, managed)).toMatchObject({ closed: true, code: 0 });
+    expect(managed.isAlive()).toBe(false);
+    await expectProcessGone(record.pid);
+    // The grandchild outlives its root inside the group the manager created.
+    expect(process.kill(record.childPid, 0)).toBe(true);
+
+    await managed.shutdown();
+
+    await expectProcessGone(record.childPid);
+  });
+
   it.each([
     { behavior: 'exits gracefully', exit: 'process.exit(0);', code: 0, signal: null },
     { behavior: 'ignores SIGTERM', exit: '', code: null, signal: 'SIGKILL' },

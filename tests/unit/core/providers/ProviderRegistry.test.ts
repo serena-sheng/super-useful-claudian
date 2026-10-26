@@ -8,10 +8,6 @@ import {
 
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
-import type {
-  ProviderId,
-  TitleGenerationService,
-} from '@/core/providers/types';
 
 describe('ProviderRegistry', () => {
   beforeEach(() => {
@@ -76,7 +72,9 @@ describe('ProviderRegistry', () => {
     expect(ProviderRegistry.getSubagentAdapter('codex')).toMatchObject({
       protocol: 'lifecycle',
     });
-    expect(ProviderRegistry.getSubagentAdapter('pi')).toBeNull();
+    expect(ProviderRegistry.getSubagentAdapter('pi')).toMatchObject({
+      protocol: 'lifecycle',
+    });
 
     expect(claudeAdapter?.isSpawnTool('Agent')).toBe(true);
     expect(claudeAdapter?.isSpawnTool('Task')).toBe(false);
@@ -140,7 +138,7 @@ describe('ProviderRegistry', () => {
     })).toEqual(['opencode', 'pi', 'grok', 'codex', 'claude']);
   });
 
-  it('exposes the blank-tab provider order from top to bottom', () => {
+  it('exposes the blank-tab default-provider priority', () => {
     expect(ProviderRegistry.getBlankTabProviderIds({
       providerConfigs: {
         codex: { enabled: true },
@@ -201,33 +199,31 @@ describe('ProviderRegistry', () => {
           discoveredModels: TEST_CODEX_CATALOG,
           enabled: true,
         },
+        opencode: {
+          enabled: true,
+          discoveredModels: [{ label: 'zai-coding-plan/GLM-5.3', rawId: 'zai-coding-plan/glm-5.3' }],
+          visibleModels: ['zai-coding-plan/glm-5.3'],
+        },
       },
     });
 
+    // An upstream group stays in the label, since the flat list has no headings.
+    expect(options.find(option => option.value === 'opencode:zai-coding-plan/glm-5.3')?.label)
+      .toBe('OpenCode: zai-coding-plan/GLM-5.3');
+
     expect(options.find(option => option.value === `openai-codex/${TEST_CODEX_MODEL}`)?.label)
-      .toBe(`Codex CLI: ${TEST_CODEX_MODEL_LABEL}`);
+      .toBe(`Codex: ${TEST_CODEX_MODEL_LABEL}`);
     expect(options.find(option => option.value === 'sonnet')?.label)
       .toBe('Claude Code: Sonnet');
   });
 
   it('returns the display name from provider registration metadata', () => {
     expect(ProviderRegistry.getProviderDisplayName('claude')).toBe('Claude Code');
-    expect(ProviderRegistry.getProviderDisplayName('codex')).toBe('Codex CLI');
+    expect(ProviderRegistry.getProviderDisplayName('codex')).toBe('Codex');
     expect(ProviderRegistry.getProviderDisplayName('grok')).toBe('Grok Build');
   });
 
   it('requires an explicit title model instead of selecting Claude automatically', async () => {
-    const providerCalls: ProviderId[] = [];
-    const originalCreate = ProviderRegistry.createTitleGenerationService.bind(ProviderRegistry);
-    jest.spyOn(ProviderRegistry, 'createTitleGenerationService')
-      .mockImplementation((plugin: any, providerId?: ProviderId) => {
-        if (!providerId) {
-          return originalCreate(plugin);
-        }
-        providerCalls.push(providerId);
-        return createMockTitleService(providerId);
-      });
-
     const service = ProviderRegistry.createTitleGenerationService({
       settings: {
         titleGenerationModel: '',
@@ -240,7 +236,6 @@ describe('ProviderRegistry', () => {
 
     await service.generateTitle('conv-1', 'hello', callback);
 
-    expect(providerCalls).toEqual([]);
     expect(ProviderWorkspaceRegistry.ensureInitialized).not.toHaveBeenCalled();
     expect(callback).toHaveBeenCalledWith('conv-1', {
       success: false,
@@ -249,17 +244,6 @@ describe('ProviderRegistry', () => {
   });
 
   it('does not select another provider when the title model is empty', async () => {
-    const providerCalls: ProviderId[] = [];
-    const originalCreate = ProviderRegistry.createTitleGenerationService.bind(ProviderRegistry);
-    jest.spyOn(ProviderRegistry, 'createTitleGenerationService')
-      .mockImplementation((plugin: any, providerId?: ProviderId) => {
-        if (!providerId) {
-          return originalCreate(plugin);
-        }
-        providerCalls.push(providerId);
-        return createMockTitleService(providerId);
-      });
-
     const service = ProviderRegistry.createTitleGenerationService({
       settings: {
         settingsProvider: 'codex',
@@ -274,7 +258,6 @@ describe('ProviderRegistry', () => {
     const callback = jest.fn();
     await service.generateTitle('conv-1', 'hello', callback);
 
-    expect(providerCalls).toEqual([]);
     expect(ProviderWorkspaceRegistry.ensureInitialized).not.toHaveBeenCalled();
     expect(callback).toHaveBeenCalledWith('conv-1', {
       success: false,
@@ -282,49 +265,7 @@ describe('ProviderRegistry', () => {
     });
   });
 
-  it('routes explicit title model selections to the owning provider', async () => {
-    const providerCalls: ProviderId[] = [];
-    const originalCreate = ProviderRegistry.createTitleGenerationService.bind(ProviderRegistry);
-    jest.spyOn(ProviderRegistry, 'createTitleGenerationService')
-      .mockImplementation((plugin: any, providerId?: ProviderId) => {
-        if (!providerId) {
-          return originalCreate(plugin);
-        }
-        providerCalls.push(providerId);
-        return createMockTitleService(providerId);
-      });
-
-    const service = ProviderRegistry.createTitleGenerationService({
-      settings: {
-        titleGenerationModel: TEST_CODEX_MODEL,
-        providerConfigs: {
-          codex: { enabled: true, visibleModels: [TEST_CODEX_MODEL], discoveredModels: TEST_CODEX_CATALOG },
-        },
-      },
-    } as any);
-    const callback = jest.fn();
-
-    await service.generateTitle('conv-1', 'hello', callback);
-
-    expect(providerCalls).toEqual(['codex']);
-    expect(callback).toHaveBeenCalledWith('conv-1', {
-      success: true,
-      title: 'codex title',
-    });
-  });
-
   it('rejects a disabled title selection before initializing its provider', async () => {
-    const providerCalls: ProviderId[] = [];
-    const originalCreate = ProviderRegistry.createTitleGenerationService.bind(ProviderRegistry);
-    jest.spyOn(ProviderRegistry, 'createTitleGenerationService')
-      .mockImplementation((plugin: any, providerId?: ProviderId) => {
-        if (!providerId) {
-          return originalCreate(plugin);
-        }
-        providerCalls.push(providerId);
-        return createMockTitleService(providerId);
-      });
-
     const service = ProviderRegistry.createTitleGenerationService({
       settings: {
         titleGenerationModel: TEST_CODEX_MODEL,
@@ -340,7 +281,6 @@ describe('ProviderRegistry', () => {
     const callback = jest.fn();
     await service.generateTitle('conv-1', 'hello', callback);
 
-    expect(providerCalls).toEqual([]);
     expect(ProviderWorkspaceRegistry.ensureInitialized).not.toHaveBeenCalled();
     expect(callback).toHaveBeenCalledWith('conv-1', {
       success: false,
@@ -379,11 +319,11 @@ describe('ProviderRegistry', () => {
     jest.mocked(ProviderWorkspaceRegistry.ensureInitialized).mockImplementation(async () => {
       settings.providerConfigs.codex.enabled = false;
     });
-    const createService = jest.spyOn(ProviderRegistry, 'createTitleGenerationService');
+    const createBackend = jest.spyOn(ProviderRegistry, 'createExecutionBackend');
     const service = ProviderRegistry.createTitleGenerationService({ settings } as any);
     const callback = jest.fn();
     await service.generateTitle('conversation', 'hello', callback);
-    expect(createService).toHaveBeenCalledTimes(1);
+    expect(createBackend).not.toHaveBeenCalled();
     expect(callback).toHaveBeenCalledWith('conversation', {
       success: false,
       error: expect.stringContaining('became unavailable'),
@@ -391,15 +331,3 @@ describe('ProviderRegistry', () => {
   });
 
 });
-
-function createMockTitleService(providerId: ProviderId): TitleGenerationService {
-  return {
-    cancel: jest.fn(),
-    generateTitle: jest.fn(async (conversationId, _userMessage, callback) => {
-      await callback(conversationId, {
-        success: true,
-        title: `${providerId} title`,
-      });
-    }),
-  };
-}

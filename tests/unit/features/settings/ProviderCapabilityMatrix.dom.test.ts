@@ -28,11 +28,18 @@ it('lists every registered provider, so a new one appears without editing the ma
 
 it('reads each value from the provider capabilities, not from a table of its own', () => {
   const container = document.createElement('div');
+  const actual = ProviderRegistry.getCapabilities.bind(ProviderRegistry);
+  const spy = jest.spyOn(ProviderRegistry, 'getCapabilities').mockImplementation((providerId, state) => {
+    const capabilities = actual(providerId, state);
+    return providerId === 'deepseek' ? { ...capabilities, supportsImageAttachments: false } : capabilities;
+  });
+  try {
+    renderProviderCapabilityMatrix(container);
+  } finally {
+    spy.mockRestore();
+  }
 
-  renderProviderCapabilityMatrix(container);
-
-  // Column 0 is image attachments. These two providers declare opposite values,
-  // so whichever way the matrix is fed the cells must disagree.
+  // Column 0 is image attachments; the patched provider declares the opposite value.
   const withImages = cellFor(container, 'Claude Code', 0);
   const withoutImages = cellFor(container, 'DeepSeek Harness', 0);
 

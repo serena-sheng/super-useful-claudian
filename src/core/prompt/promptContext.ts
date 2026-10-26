@@ -4,12 +4,13 @@
  * Note and context file formatting for prompts.
  */
 
-import type { ProviderExecutionContext, ProviderSelectionSnapshot, ProviderSessionReference } from '@/core/execution/ProviderExecutionRequest';
+import type { ProviderExecutionContext, ProviderSessionReference } from '@/core/execution/ProviderExecutionRequest';
+import { decodeSessionMessage } from '@/core/session-tools/sessionMessageEnvelope';
 
 import { appendBrowserContext } from './browserContext';
 import { appendCanvasContext } from './canvasContext';
 import { appendEditorContext } from './editorContext';
-import { escapePromptXMLAttribute, formatPromptXMLCdata } from './promptXML';
+import { escapePromptXMLAttribute } from './promptXML';
 
 const LINKED_CONTENT_TAG = 'linked_content';
 
@@ -26,22 +27,10 @@ export function formatLinkedContent(contentPath: string): string {
   return `<${LINKED_CONTENT_TAG} path="${escapePromptXMLAttribute(contentPath)}" />`;
 }
 
-export function appendLinkedContent(prompt: string, contentPath: string): string {
-  return `${prompt}\n\n${formatLinkedContent(contentPath)}`;
-}
-
-export function formatLinkedContentBody(contentPath: string, content: string): string {
-  return `<${LINKED_CONTENT_TAG} path="${escapePromptXMLAttribute(contentPath)}">\n${formatPromptXMLCdata(
-    content,
-  )}\n</${LINKED_CONTENT_TAG}>`;
-}
-
-export function appendLinkedContentBody(
-  prompt: string,
-  contentPath: string,
-  content: string,
-): string {
-  return `${prompt}\n\n${formatLinkedContentBody(contentPath, content)}`;
+/** Captured context suffix of a native prompt, using the same boundary as its user text. */
+export function extractUserPromptContext(text: string): string {
+  const boundary = text.search(XML_CONTEXT_PATTERN);
+  return boundary < 0 ? '' : text.slice(boundary).trim();
 }
 
 /**
@@ -61,8 +50,16 @@ function extractContentBeforeXMLContext(text: string): string | undefined {
   return undefined;
 }
 
+/** The text a user message shows: its display text, else its content without injected context. */
+export function getUserDisplayText(message: { content: string; displayContent?: string }): string {
+  return message.displayContent ?? extractUserDisplayContent(message.content) ?? message.content;
+}
+
 export function extractUserDisplayContent(text: string): string | undefined {
   if (!text) return undefined;
+
+  const sessionMessage = decodeSessionMessage(text);
+  if (sessionMessage) return sessionMessage.text;
 
   const xmlDisplayContent = extractContentBeforeXMLContext(text);
   if (xmlDisplayContent !== undefined) {
@@ -86,6 +83,10 @@ export function extractUserDisplayContent(text: string): string | undefined {
  */
 export function extractUserQuery(prompt: string): string {
   if (!prompt) return '';
+
+  // Match the live display body, which is compared against this native form.
+  const sessionMessage = decodeSessionMessage(prompt);
+  if (sessionMessage) return extractUserQuery(sessionMessage.text);
 
   // Try to extract content before XML context
   const extracted = extractContentBeforeXMLContext(prompt);
@@ -117,17 +118,15 @@ export function appendContextFiles(prompt: string, files: string[]): string {
   return `${prompt}\n\n${formatContextFilesLine(files)}`;
 }
 
-
-export function appendSessionReferences(
+function appendSessionReferences(
   prompt: string,
   references?: readonly ProviderSessionReference[],
-  mapPath: (path: string) => string = path => path,
 ): string {
   if (!references?.length) return prompt;
   const entries = references.map(reference => {
     const attributes = {
       title: reference.title, id: reference.id, provider: reference.providerId,
-      updated: reference.updatedAt, path: mapPath(reference.snapshotPath),
+      updated: reference.updatedAt,
     };
     return `<context_session ${Object.entries(attributes)
       .map(([name, value]) => `${name}="${escapePromptXMLAttribute(value)}"`).join(' ')} />`;
@@ -135,34 +134,8 @@ export function appendSessionReferences(
   return `${prompt}\n\n<context_sessions>\n${entries.join('\n')}\n</context_sessions>`;
 }
 
-/** Normalize legacy single selections only when an ordered capture is absent. */
-function getSelectionSnapshots(context?: ProviderExecutionContext): readonly ProviderSelectionSnapshot[] {
-  if (context?.selections !== undefined) return context.selections;
-  const selections: ProviderSelectionSnapshot[] = [];
-  if (context?.editorSelection) selections.push({ kind: 'editor', selection: context.editorSelection });
-  if (context?.browserSelection) selections.push({ kind: 'browser', selection: context.browserSelection });
-  if (context?.canvasSelection) selections.push({ kind: 'canvas', selection: context.canvasSelection });
-  return selections;
-}
-
-export function captureSelectionSnapshots(context?: ProviderExecutionContext): ProviderSelectionSnapshot[] {
-  return getSelectionSnapshots(context).map(snapshot => {
-    switch (snapshot.kind) {
-      case 'editor':
-        return { kind: 'editor', selection: {
-          ...snapshot.selection,
-          ...(snapshot.selection.cursorContext ? { cursorContext: { ...snapshot.selection.cursorContext } } : {}),
-        } };
-      case 'browser':
-        return { kind: 'browser', selection: { ...snapshot.selection } };
-      case 'canvas':
-        return { kind: 'canvas', selection: { ...snapshot.selection, nodeIds: [...snapshot.selection.nodeIds] } };
-    }
-  });
-}
-
-export function appendSelectionContexts(prompt: string, context?: ProviderExecutionContext): string {
-  for (const snapshot of getSelectionSnapshots(context)) {
+function appendSelectionContexts(prompt: string, context?: ProviderExecutionContext): string {
+  for (const snapshot of context?.selections ?? []) {
     switch (snapshot.kind) {
       case 'editor':
         prompt = appendEditorContext(prompt, snapshot.selection);
@@ -176,4 +149,15 @@ export function appendSelectionContexts(prompt: string, context?: ProviderExecut
     }
   }
   return prompt;
+}
+
+/**
+ * Appends a request's captured context in the order every provider sends it:
+ * Linked content, selections, then session references.
+ */
+export function appendExecutionContext(prompt: string, context?: ProviderExecutionContext): string {
+  if (context?.linkedContent) {
+    prompt = `${prompt}\n\n${formatLinkedContent(context.linkedContent.path)}`;
+  }
+  return appendSessionReferences(appendSelectionContexts(prompt, context), context?.sessionReferences);
 }

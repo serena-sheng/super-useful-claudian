@@ -25,6 +25,7 @@ export interface PersistedOmpProviderSettings {
   discoveredModels: OmpDiscoveredModel[];
   enabled: boolean;
   environmentHash: string;
+  sessionEnvironmentHash: string;
   environmentVariables: string;
   modelAliases: Record<string, string>;
   preferredThinkingByModel: Record<string, OmpThinkingLevel>;
@@ -39,6 +40,7 @@ export const DEFAULT_OMP_PROVIDER_SETTINGS: Readonly<PersistedOmpProviderSetting
   discoveredModels: [],
   enabled: false,
   environmentHash: '',
+  sessionEnvironmentHash: '',
   environmentVariables: '',
   modelAliases: {},
   preferredThinkingByModel: {},
@@ -90,6 +92,10 @@ export function getOmpProviderSettings(settings: Record<string, unknown>): OmpPr
     environmentHash: readStoredString(
       config.environmentHash,
       DEFAULT_OMP_PROVIDER_SETTINGS.environmentHash,
+    ),
+    sessionEnvironmentHash: readStoredString(
+      config.sessionEnvironmentHash,
+      DEFAULT_OMP_PROVIDER_SETTINGS.sessionEnvironmentHash,
     ),
     environmentVariables: readStoredString(
       config.environmentVariables,
@@ -187,6 +193,7 @@ export function updateOmpProviderSettings(
     discoveredModels: next.discoveredModels,
     enabled: next.enabled,
     environmentHash: next.environmentHash,
+    sessionEnvironmentHash: next.sessionEnvironmentHash,
     environmentVariables: next.environmentVariables,
     modelAliases: next.modelAliases,
     preferredThinkingByModel: next.preferredThinkingByModel,

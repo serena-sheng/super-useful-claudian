@@ -5,11 +5,14 @@ import {
   parseImageDataUri,
 } from '@/core/execution/imageAttachment';
 import { extractUserQuery } from '@/core/prompt/promptContext';
+import { decodeRecoveryPrompt } from '@/core/prompt/recoveryPrompt';
+import { decodeSessionMessage } from '@/core/session-tools/sessionMessageEnvelope';
 import { resolveToolDiffData } from '@/core/tools/toolDiff';
 
 import { extractResolvedAnswersFromResultText } from '../../../core/tools/toolInput';
 import { isWriteEditTool, TOOL_ASK_USER_QUESTION } from '../../../core/tools/toolNames';
 import type { ChatMessage, ContentBlock, ImageAttachment, ToolCallInfo } from '../../../core/types';
+import { settleInterruptedTurn } from '../../../core/types';
 import { encodeOpencodeModelId } from '../models';
 import {
   normalizeOpencodeToolInput,
@@ -215,11 +218,18 @@ function mapStoredMessage(
 
   if (role === 'user') {
     if (message.parts.some(part => part.type === 'compaction')) return null;
-    const promptText = extractUserQuery(getJoinedTextParts(message.parts));
+    const nativePrompt = getJoinedTextParts(message.parts);
+    // Replayed Claudian history is already shown from the sessions it came from.
+    const recovery = decodeRecoveryPrompt(nativePrompt);
     const images = buildUserImages(message.parts, id);
+    if (recovery?.currentInput === null && images.length === 0) return null;
+    const rawPrompt = recovery ? recovery.currentInput ?? '' : nativePrompt;
+    const sessionMessage = decodeSessionMessage(rawPrompt);
+    const promptText = extractUserQuery(rawPrompt);
     return {
       assistantMessageId: undefined,
       content: promptText,
+      ...(sessionMessage ? { sessionMessage: { from: sessionMessage.from, sessionId: sessionMessage.sessionId } } : {}),
       id,
       ...(images.length > 0 ? { images } : {}),
       role: 'user',
@@ -595,6 +605,21 @@ function getNestedNumber(
   return getNumber(current);
 }
 
+/**
+ * A stopped turn has no completion: its replies after the last prompt, across
+ * compaction, lose their timing and the last carries the interrupt; or the marker
+ * stands in for a reply that never started.
+ */
+function markInterruptedTurn(messages: ChatMessage[], turnStart: number, marker: ChatMessage): void {
+  const turn = messages.slice(turnStart);
+  const replies = turn.slice(turn.findLastIndex(message => message.role === 'user') + 1)
+    .filter(message => message.role === 'assistant' && !isOpencodeHydrationDiagnosticMessage(message));
+  settleInterruptedTurn(replies);
+  const last = replies.at(-1);
+  if (last) last.isInterrupt = true;
+  else if (turn.some(message => message.role === 'user')) messages.push(marker);
+}
+
 /** v2 control entries delimit turns even when they have no chat presentation. */
 export function mapOpencodeV2Messages(
   rows: StoredRow[],
@@ -618,6 +643,8 @@ function mapV2Messages(
   let segment: ChatMessage[] = [];
   const stats = new OpencodeTurnStats();
   let previousAssistant: ChatMessage | undefined;
+  // Compaction flushes segments mid-turn; only an idle entry ends the turn.
+  let turnStart = 0;
   const flush = () => {
     result.push(...mergeAdjacentAssistantMessages(segment));
     segment = [];
@@ -635,6 +662,19 @@ function mapV2Messages(
     }
     if (row.type !== 'user' && row.type !== 'assistant') {
       flush();
+      if (row.type === 'idle') {
+        // V2 rows carry no turn ID: an idle entry ends the turn, so the rows since the last one share it.
+        for (const message of result.slice(turnStart)) if (message.role === 'assistant') message.turnId = `opencode-turn-${turnStart}`;
+        // The idle entry's outcome is the turn's authority: a step can abort and still resume.
+        if (data.outcome === 'interrupted') {
+          markInterruptedTurn(result, turnStart, {
+            id: getString(row.id) ?? `opencode-interrupt-${result.length}`, role: 'assistant', content: '',
+            timestamp: getMessageCreatedAt({ ...data, time_created: row.time_created }) ?? Date.now(), isInterrupt: true,
+            turnId: `opencode-turn-${turnStart}`,
+          });
+        }
+        turnStart = result.length;
+      }
       if (row.type === 'compaction' && data.status === 'completed' && typeof row.id === 'string') {
         result.push({
           id: row.id, role: 'assistant', content: '',

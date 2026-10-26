@@ -1,3 +1,5 @@
+import { runtimeHostFor } from '@test/helpers/providerRuntimeHost';
+
 import type { CodexAppServerRuntime } from '@/providers/codex/runtime/CodexAppServerRuntime';
 import { CodexModelDiscoveryService } from '@/providers/codex/runtime/CodexModelDiscoveryService';
 
@@ -27,13 +29,7 @@ function makeWireModel(model: string, isDefault = false) {
 }
 
 function createPlugin(enabled = true) {
-  return {
-    settings: {
-      providerConfigs: {
-        codex: { enabled },
-      },
-    },
-  } as any;
+  return runtimeHostFor({ settings: { providerConfigs: { codex: { enabled } } } }, 'codex');
 }
 
 describe('CodexModelDiscoveryService', () => {
@@ -124,7 +120,7 @@ describe('CodexModelDiscoveryService', () => {
       throw new Error('Request aborted');
     });
     await expect(new CodexModelDiscoveryService(createPlugin(), runtime).discoverModels(controller.signal))
-      .resolves.toEqual({ kind: 'completed', diagnostics: 'Codex CLI model discovery was cancelled', models: [] });
+      .resolves.toEqual({ kind: 'completed', diagnostics: 'Codex model discovery was cancelled', models: [] });
     expect(mockRelease).toHaveBeenCalledTimes(1);
   });
 
@@ -145,7 +141,7 @@ describe('CodexModelDiscoveryService', () => {
   it('rejects repeated pagination cursors without publishing a partial catalog', async () => {
     mockTransportRequest.mockResolvedValue({ data: [makeWireModel('model')], nextCursor: 'same' });
     await expect(new CodexModelDiscoveryService(createPlugin(), runtime).discoverModels())
-      .resolves.toEqual({ kind: 'completed', diagnostics: 'Codex CLI model/list returned a repeated cursor', models: [] });
+      .resolves.toEqual({ kind: 'completed', diagnostics: 'Codex model/list returned a repeated cursor', models: [] });
     expect(mockTransportRequest).toHaveBeenCalledTimes(2);
     expect(mockRelease).toHaveBeenCalledTimes(1);
   });

@@ -3,19 +3,21 @@
 import '@/providers';
 
 import { createConversationPorts } from '@test/helpers/ConversationPorts';
+import { createProjectsFake } from '@test/helpers/features/chat/ProjectsFake';
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, within } from '@testing-library/dom';
 import { axe } from 'jest-axe';
 import { Component, MarkdownRenderer } from 'obsidian';
 
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
-import type { ChatMessage } from '@/core/types';
+import type { ChatMessage, ToolCallInfo } from '@/core/types';
 import { ConversationController } from '@/features/chat/conversation/ConversationController';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
 import { createResponseTextBlock } from '@/features/chat/rendering/ResponseLayout';
 import { createThinkingBlock, finalizeThinkingBlock } from '@/features/chat/rendering/ThinkingBlockRenderer';
 import { ChatState } from '@/features/chat/state/ChatState';
 import { buildTabRuntimeInputBindings } from '@/features/chat/tabs/runtime/TabRuntimeInputBindings';
+import { setLocale } from '@/i18n/i18n';
 
 HTMLElement.prototype.appendText = function (text) { this.append(document.createTextNode(text)); };
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
@@ -45,6 +47,15 @@ const messages: ChatMessage[] = [
       { type: 'text', content: 'Fixed the bug.' },
     ] },
 ];
+
+const INTERRUPTED = 'Interrupted · What should Claudian do instead?';
+
+/** The interrupted disclosure's header is the interrupt indicator itself, never repeated in its body. */
+function expectInterruptHeader(header: HTMLElement, history: HTMLElement): void {
+  expect([header.querySelector('.claudian-interrupted')?.textContent, header.querySelector('.claudian-interrupted-hint')?.textContent])
+    .toEqual(['Interrupted', '· What should Claudian do instead?']);
+  expect(history.querySelector('.claudian-interrupted, .claudian-interrupted-hint')).toBeNull();
+}
 
 beforeEach(() => {
   document.body.replaceChildren();
@@ -108,13 +119,13 @@ it.each([false, true])('collapses completed history above the answer and puts co
 
 it('keeps live and finalized thinking accessible without hover tooltip attributes', async () => {
   const host = document.body.createDiv();
-  const state = createThinkingBlock(host);
+  const state = createThinkingBlock(host, { startTime: Date.now() });
   const header = within(host).getByRole('button', { name: 'Thinking 0s...' });
   expect(header.hasAttribute('aria-label')).toBe(false);
   expect(header.hasAttribute('title')).toBe(false);
   fireEvent.keyDown(header, { key: ' ' });
   expect(header.getAttribute('aria-expanded')).toBe('true');
-  finalizeThinkingBlock(state);
+  finalizeThinkingBlock(state, 0);
   expect(within(host).getByRole('button', { name: /^Thought for \d+s$/ })).toBe(header);
   expect(header.getAttribute('aria-expanded')).toBe('false');
   expect((await axe(host)).violations).toEqual([]);
@@ -142,18 +153,39 @@ it('keeps live output in place until completion, then preserves the same content
   renderer.dispose();
 });
 
-it('leaves interrupted and unsuccessful output expanded', () => {
-  for (const interrupted of [true, false]) {
-    const { renderer } = setup();
-    const msg: ChatMessage = { id: `failed-${interrupted}`, role: 'assistant', content: 'Partial', timestamp: 4,
-      isInterrupt: interrupted, contentBlocks: [{ type: 'text', content: 'Partial' }] };
-    const el = renderer.addMessage(msg);
-    el.querySelector('.claudian-message-content')!.createDiv({ cls: 'claudian-text-block', text: 'Partial' });
-    renderer.finalizeResponse(msg, [msg], interrupted);
-    expect(within(el).queryByRole('button', { name: /Worked/ })).toBeNull();
-    expect(within(el).getByRole('button', { name: 'Copy message' })).toBeDefined();
-    renderer.dispose();
-  }
+it('leaves unsuccessful output expanded', () => {
+  const { renderer } = setup();
+  const msg: ChatMessage = { id: 'failed', role: 'assistant', content: 'Partial', timestamp: 4,
+    contentBlocks: [{ type: 'text', content: 'Partial' }] };
+  const el = renderer.addMessage(msg);
+  el.querySelector('.claudian-message-content')!.createDiv({ cls: 'claudian-text-block', text: 'Partial' });
+  renderer.finalizeResponse(msg, [msg], false);
+  expect(within(el).queryByRole('button', { name: /^(Worked|Interrupted)/ })).toBeNull();
+  expect(within(el).getByText('Partial').closest('[hidden]')).toBeNull();
+  expect(within(el).getByRole('button', { name: 'Copy message' })).toBeDefined();
+  renderer.dispose();
+});
+
+it('folds a partial-text interruption under a disclosure headed by the interrupt indicator', async () => {
+  const { renderer, messagesEl } = setup('codex');
+  renderer.renderMessages([
+    messages[0],
+    { id: 'partial', role: 'assistant', content: 'Partial answer', timestamp: 4, isInterrupt: true,
+      durationSeconds: 12, contentBlocks: [{ type: 'text', content: 'Partial answer' }] },
+  ], () => 'Hello');
+  await Promise.resolve();
+  const header = within(messagesEl).getByRole('button', { name: INTERRUPTED });
+  expect(within(messagesEl).queryByRole('button', { name: /^Worked/ })).toBeNull();
+  const history = document.getElementById(header.getAttribute('aria-controls')!)!;
+  const answer = within(messagesEl).getByText('Partial answer');
+  expectInterruptHeader(header, history);
+  expect(answer.closest('[hidden]')).toBe(history);
+  expect(within(messagesEl.querySelector<HTMLElement>('[data-message-id="partial"]')!)
+    .queryByRole('button', { name: 'Copy message' })).toBeNull();
+  fireEvent.click(header);
+  expect(answer.closest('[hidden]')).toBeNull();
+  expect((await axe(messagesEl)).violations).toEqual([]);
+  renderer.dispose();
 });
 
 it('copies retired interruption markup as ordinary message text', async () => {
@@ -208,17 +240,73 @@ it.each([true, false])('keeps the final answer visible with fallback tools (cont
   renderer.dispose();
 });
 
-it('keeps Claude replay output expanded when a user-role interrupt follows it', () => {
+it.each(['claude', 'codex'])('folds a replayed %s interruption under one disclosure headed by its marker', async provider => {
+  const { renderer, messagesEl } = setup(provider);
+  const read: ToolCallInfo = { id: 'read', name: 'Read', input: { file_path: 'note.md' }, status: 'completed', result: 'Note' };
+  const interrupted: ChatMessage = { id: 'interrupted', role: 'assistant', content: 'Partial answer', timestamp: 3,
+    assistantMessageId: 'native-interrupted', toolCalls: [read], contentBlocks: [
+      { type: 'thinking', content: 'Still working' },
+      { type: 'tool_use', toolId: 'read' },
+      { type: 'text', content: 'Partial answer' },
+    ] };
+  // Claude JSONL records a user-role bracket marker; Codex records an aborted turn as an empty assistant bubble.
+  const marker: ChatMessage = provider === 'claude'
+    ? { id: 'marker', role: 'user', content: '[Request interrupted by user]', timestamp: 4, isInterrupt: true }
+    : { id: 'marker', role: 'assistant', content: '', timestamp: 4, isInterrupt: true };
+  renderer.renderMessages([
+    messages[0],
+    provider === 'codex' ? { ...interrupted, durationSeconds: 9 } : interrupted,
+    marker,
+    { id: 'u2', role: 'user', content: 'Next prompt', timestamp: 5 },
+    { id: 'a3', role: 'assistant', content: 'Next answer', timestamp: 6, durationSeconds: 3, completedAt: 7,
+      assistantMessageId: 'native-a3',
+      contentBlocks: [{ type: 'thinking', content: 'Next work' }, { type: 'text', content: 'Next answer' }] },
+  ], () => 'Hello');
+  await Promise.resolve();
+
+  // An interrupted turn has no answer to copy or fork from; the completed turn keeps both.
+  const actions = (id: string) => within(messagesEl.querySelector<HTMLElement>(`[data-message-id="${id}"]`)!)
+    .queryAllByRole('button', { name: /^(Copy message|Fork conversation)$/ }).map(button => button.getAttribute('aria-label'));
+  expect(actions('interrupted')).toEqual([]);
+  expect(actions('a3')).toEqual(['Copy message', 'Fork conversation']);
+
+  expect(Array.from(messagesEl.querySelectorAll<HTMLElement>('.claudian-message'), el => el.dataset.messageId))
+    .toEqual(['u1', 'interrupted', 'u2', 'a3']);
+  const header = within(messagesEl).getByRole('button', { name: INTERRUPTED });
+  expect(header.getAttribute('type')).toBe('button');
+  expect(header.getAttribute('aria-expanded')).toBe('false');
+  const history = document.getElementById(header.getAttribute('aria-controls')!)!;
+  const turn = messagesEl.querySelector<HTMLElement>('[data-message-id="interrupted"] .claudian-message-content')!;
+  expect(Array.from(turn.querySelectorAll<HTMLElement>(':scope > * > :not([hidden])'))).toEqual([header]);
+  expect(messagesEl.querySelectorAll('.claudian-interrupted')).toHaveLength(1);
+  expectInterruptHeader(header, history);
+  expect(within(messagesEl).getByText('Partial answer').closest('[hidden]')).toBe(history);
+  expect(history.lastElementChild!.contains(within(messagesEl).getByText('Partial answer'))).toBe(true);
+  expect(within(messagesEl).getByRole('button', { name: 'Worked for 00:03' })).toBeDefined();
+  expect(within(messagesEl).getByText('Next answer').closest('[hidden]')).toBeNull();
+
+  header.focus();
+  expect(document.activeElement).toBe(header);
+  fireEvent.click(header);
+  expect(header.getAttribute('aria-expanded')).toBe('true');
+  expect(history.hidden).toBe(false);
+  const tool = within(history).getByRole('button', { name: /Read.*note\.md/ });
+  const thinking = within(history).getByRole('button', { name: 'Thought' });
+  expect(thinking.compareDocumentPosition(tool) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect((await axe(messagesEl)).violations).toEqual([]);
+  fireEvent.click(header);
+  expect(history.hidden).toBe(true);
+  renderer.dispose();
+});
+
+it('keeps a bare interrupt marker visible when its turn produced no output', () => {
   const { renderer, messagesEl } = setup();
   renderer.renderMessages([
     messages[0],
-    { ...messages[2], durationSeconds: undefined, content: 'Partial answer',
-      contentBlocks: [{ type: 'thinking', content: 'Still working' }, { type: 'text', content: 'Partial answer' }] },
-    { id: 'interrupt', role: 'user', content: '[Request interrupted by user]', timestamp: 4, isInterrupt: true },
+    { id: 'marker', role: 'user', content: '[Request interrupted by user]', timestamp: 4, isInterrupt: true },
   ], () => 'Hello');
-  expect(within(messagesEl).queryByRole('button', { name: /^Worked/ })).toBeNull();
-  expect(within(messagesEl).getByText('Partial answer').closest('[hidden]')).toBeNull();
-  expect(within(messagesEl).getByText('Interrupted')).toBeDefined();
+  expect(within(messagesEl).queryByRole('button', { name: /^Interrupted/ })).toBeNull();
+  expect(within(messagesEl).getByText('Interrupted').closest('[hidden]')).toBeNull();
   renderer.dispose();
 });
 
@@ -539,7 +627,8 @@ it.each([true, false])('enables branches after switching and native history corr
   const second: ChatMessage = { id: 'u2', role: 'user', content: 'Second prompt', timestamp: 2,
     treeBranches: ['native-u2'], ...(hasNativeId ? { userMessageId: 'native-u2' } : {}) };
   const plugin = { app: {}, settings: { mediaFolder: '' }, updateConversation: jest.fn(),
-    switchConversation: jest.fn().mockResolvedValue({ id: 'pi-chat', messages: [first, second] }) };
+    getConversationById: jest.fn().mockResolvedValue({ id: 'pi-chat', messages: [first, second] }),
+    getConversationSummary: jest.fn().mockReturnValue(null), projects: createProjectsFake(), providerHost: { workingDirectory: '/vault' } };
   const navigateConversationBranch = jest.fn().mockResolvedValue({ status: 'committed', messages: [first] });
   const coordinator = { navigateConversationBranch, supportsConversationBranches: true,
     getConversationBranches: jest.fn().mockResolvedValue({ branches: { 'native-u1': ['native-u1'], 'native-u2': ['native-u2'] },
@@ -549,19 +638,20 @@ it.each([true, false])('enables branches after switching and native history corr
     new Component() as any,
     messagesEl, undefined, undefined, () => ProviderRegistry.getCapabilities('pi'), {
       navigate: (id, target) => controller.navigateBranch(id, target),
-      isBusy: () => state.isSwitchingConversation || state.isRewinding,
+      isBusy: () => state.isRewinding,
     });
   let welcomeEl: HTMLElement | null = null;
   const controller = new ConversationController({ plugin, state, renderer,
     ...createConversationPorts({ state, getInputEl: () => inputEl, getImageContextManager: () => null }),
-    subagentManager: { orphanAllActive: jest.fn(), clear: jest.fn() },
+    subagentManager: { clear: jest.fn() },
     getInputEl: () => inputEl, getMessagesEl: () => messagesEl,
     getWelcomeEl: () => welcomeEl, setWelcomeEl: (el: HTMLElement) => { welcomeEl = el; },
     getLinkedContentController: () => ({ lock: jest.fn() }),
     getImageContextManager: () => null, clearQueuedMessage: jest.fn(),
     getExecutionCoordinator: () => coordinator,
   } as any);
-  await controller.switchTo('pi-chat');
+  state.currentConversationId = 'pi-chat';
+  await controller.loadActive();
   expect((within(messagesEl).getByRole('button', { name: 'Branch from this prompt' }) as HTMLButtonElement).disabled).toBe(!hasNativeId);
   await controller.save();
   const edit = within(messagesEl).getByRole('button', { name: 'Branch from this prompt' }) as HTMLButtonElement;
@@ -715,10 +805,102 @@ it('reuses created message elements instead of searching the growing history for
   const history: ChatMessage[] = Array.from({ length: 100 }, (_, index) => ({
     id: `indexed-${index}`, role: index % 2 ? 'assistant' : 'user', content: `Message ${index}`, timestamp: testDate().getTime(),
   }));
-  const positionLookup = jest.spyOn(history, 'indexOf');
+  // The renderer may search copies of the history too, so watch every array of its length.
+  const positionLookup = jest.spyOn(Array.prototype, 'indexOf');
   renderer.renderMessages(history, () => 'Hello');
-  expect(positionLookup).not.toHaveBeenCalled();
+  renderer.revealEarlierMessages(true);
+  const historyLookups = positionLookup.mock.contexts.filter(context => Array.isArray(context) && context.length === history.length);
+  positionLookup.mockRestore();
+  expect(historyLookups).toHaveLength(0);
   expect(query.mock.calls.filter(([selector]) => selector.includes('data-message-id') || selector.includes('data-work-message-id'))).toHaveLength(0);
   expect(messagesEl.querySelectorAll('.claudian-message')).toHaveLength(100);
   renderer.dispose();
+});
+
+
+it.each([65, undefined])('localizes completed work disclosures (duration: %s)', async durationSeconds => {
+  setLocale('zh-CN');
+  const { renderer, messagesEl } = setup();
+  try {
+    renderer.renderMessages([...messages.slice(0, 2), { ...messages[2], durationSeconds }], () => 'Hello');
+    await Promise.resolve();
+    const header = within(messagesEl).getByRole('button', { name: durationSeconds === undefined ? '已完成工作' : '工作了 01:05' });
+    expect(header.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(header);
+    expect(header.getAttribute('aria-expanded')).toBe('true');
+    expect(within(messagesEl).getByText('Fixed the bug.')).toBeDefined();
+  } finally {
+    renderer.dispose();
+    setLocale('en');
+  }
+});
+
+
+it('localizes task notifications and thinking while preserving message content', async () => {
+  setLocale('zh-CN');
+  const { renderer, messagesEl } = setup();
+  try {
+    renderer.renderMessages([{
+      id: 'notification', role: 'assistant', isAutomaticResponse: true,
+      content: 'Task completed.', timestamp: testDate().getTime(),
+      contentBlocks: [
+        { type: 'task_notification', content: 'Background command completed.' },
+        { type: 'thinking', content: 'Check the result.' },
+        { type: 'text', content: 'Task completed.' },
+      ],
+    }], () => 'Hello');
+    await Promise.resolve();
+    fireEvent.click(within(messagesEl).getByRole('button', { name: '任务通知' }));
+    expect(within(messagesEl).getByText('Background command completed.')).toBeDefined();
+    expect(within(messagesEl).getByRole('button', { name: '思考过程' })).toBeDefined();
+    expect(within(messagesEl).getByText('Task completed.')).toBeDefined();
+  } finally {
+    renderer.dispose();
+    setLocale('en');
+  }
+});
+
+
+it.each(['pending', 'expired'] as const)('localizes async question card chrome (%s)', async questionStatus => {
+  setLocale('zh-CN');
+  const { renderer, messagesEl } = setup('codex');
+  try {
+    const tool: ToolCallInfo = {
+      id: 'async-question', name: 'AskUserQuestion', status: 'completed', questionStatus,
+      input: { replyMode: 'user-message', questions: [{ question: 'Which check?', options: [{ label: 'Lint' }] }] },
+    };
+    renderer.renderStoredMessage({
+      id: 'question-message', role: 'assistant', content: '', timestamp: testDate().getTime(), toolCalls: [tool],
+    });
+    await Promise.resolve();
+    expect(within(messagesEl).getByText(questionStatus === 'pending' ? '请在下方的问题面板中回答。' : '问题已过期。')).toBeDefined();
+    expect(within(messagesEl).getByText('Which check?')).toBeDefined();
+    expect(within(messagesEl).getByText('Lint')).toBeDefined();
+  } finally {
+    renderer.dispose();
+    setLocale('en');
+  }
+});
+
+
+it('localizes citation disclosure names through expansion and collapse', async () => {
+  setLocale('zh-CN');
+  const { renderer, messagesEl } = setup('codex');
+  try {
+    renderer.renderStoredMessage({
+      id: 'cited', role: 'assistant', content: '', timestamp: testDate().getTime(),
+      contentBlocks: [{ type: 'citations', citations: { kind: 'memory', entries: [{ path: 'MEMORY.md', lineStart: 1, lineEnd: 1, note: 'Provider note' }] } }],
+    });
+    await Promise.resolve();
+    const header = within(messagesEl).getByRole('button', { name: '引用的记忆, 1 个来源 - 点击展开' });
+    fireEvent.click(header);
+    expect(within(messagesEl).getByRole('button', { name: '引用的记忆, 1 个来源 - 点击折叠' })).toBe(header);
+    expect(within(messagesEl).getByText('MEMORY.md:1')).toBeDefined();
+    fireEvent.click(header);
+    expect(within(messagesEl).getByRole('button', { name: '引用的记忆, 1 个来源 - 点击展开' })).toBe(header);
+    expect(await axe(messagesEl)).toHaveNoViolations();
+  } finally {
+    renderer.dispose();
+    setLocale('en');
+  }
 });

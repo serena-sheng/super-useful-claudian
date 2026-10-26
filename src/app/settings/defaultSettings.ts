@@ -45,6 +45,7 @@ export const DEFAULT_CLAUDIAN_SETTINGS: ClaudianSettings = {
 
   settingsProvider: 'claude',
   lastSelectedChatModel: null,
+  inlineEditModel: null,
   savedProviderModel: {},
   savedProviderEffort: {},
   savedProviderServiceTier: {},
@@ -54,6 +55,7 @@ export const DEFAULT_CLAUDIAN_SETTINGS: ClaudianSettings = {
   enableAutoScroll: true,
   showMessageTimestamps: false,
   deferMathRenderingDuringStreaming: true,
+  pluginRenderedFenceLanguages: [],
   expandFileEditsByDefault: false,
   chatViewPlacement: 'right-sidebar',
   enableZenMode: true,
@@ -64,6 +66,7 @@ export const DEFAULT_CLAUDIAN_SETTINGS: ClaudianSettings = {
   skillsSynced: false,
   sessionManagerOrganization: 'list',
   sessionManagerSort: 'last-updated',
+  projectSort: 'last-updated',
   sessionAutoArchiveAfter: 'off',
   pinnedLinkedContentPaths: [],
 

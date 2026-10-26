@@ -41,6 +41,11 @@ function createPersistence(): MockPersistence {
   };
   return {
     metadataReader,
+    transcripts: {
+      save: jest.fn().mockResolvedValue(undefined),
+      load: jest.fn().mockResolvedValue(null),
+      delete: jest.fn().mockResolvedValue(undefined),
+    },
     saveMetadata: jest.fn().mockResolvedValue(undefined),
     deleteCurrentMetadata: jest.fn().mockResolvedValue(undefined),
     assignMetadataToDevice: jest.fn().mockResolvedValue(undefined),

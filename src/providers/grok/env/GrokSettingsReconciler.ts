@@ -1,52 +1,38 @@
-import { getInstallationKey } from '@/core/device/InstallationKey';
-import { parseEnvironmentVariables } from '@/core/process/env';
-
-import { createCLIPathFingerprintInputs } from '../../../core/providers/cli/CLIPathFingerprintInputs';
 import { getRuntimeEnvironmentText } from '../../../core/providers/providerEnvironment';
-import { createRuntimeInputFingerprint } from '../../../core/providers/settings/RuntimeInputFingerprint';
 import type { ProviderSettingsReconciler } from '../../../core/providers/types';
 import {
   decodeGrokModelId,
   encodeGrokModelId,
 } from '../models';
+import { computeGrokRuntimeInputHash } from '../runtime/GrokRuntimeEnvironment';
 import {
   getGrokProviderSettings,
   updateGrokProviderSettings
 } from '../settings';
 
-export function computeGrokEnvironmentHash(settings: Record<string, unknown>): string {
-  const providerSettings = getGrokProviderSettings(settings);
-  const cliPathInputs = createCLIPathFingerprintInputs(
-    providerSettings.cliPathsByHost[getInstallationKey()],
-    providerSettings.cliPath,
-  );
-  const environment = Object.entries(parseEnvironmentVariables(
+function computeGrokEnvironmentHash(settings: Record<string, unknown>): string {
+  return computeGrokRuntimeInputHash(
+    getGrokProviderSettings(settings),
     getRuntimeEnvironmentText(settings, 'grok'),
-  )).sort(([left], [right]) => left.localeCompare(right));
-  return createRuntimeInputFingerprint({
-    additionalInputs: cliPathInputs,
-    environmentKeys: environment.map(([key]) => key),
-    environmentText: getRuntimeEnvironmentText(settings, 'grok'),
-  });
+  );
 }
 
 export const grokSettingsReconciler: ProviderSettingsReconciler = {
-  environmentSessionPolicy: 'reload',
-
   invalidateConversationSessions: () => [],
 
   reconcileModelWithEnvironment(settings) {
     if (!getGrokProviderSettings(settings).enabled) {
-      return { changed: false, invalidatedConversations: [] };
+      return { changed: false };
     }
 
     const environmentHash = computeGrokEnvironmentHash(settings);
     if (getGrokProviderSettings(settings).environmentHash === environmentHash) {
-      return { changed: false, invalidatedConversations: [] };
+      return { changed: false };
     }
 
     updateGrokProviderSettings(settings, { environmentHash });
-    return { changed: true, invalidatedConversations: [] };
+    // Grok sessions resume across environment changes.
+    return { changed: true, sessionPolicy: 'reload' };
   },
 
   normalizeModelVariantSettings(settings): boolean {

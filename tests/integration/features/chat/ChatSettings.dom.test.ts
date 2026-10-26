@@ -3,9 +3,11 @@ import '@/providers';
 
 import { deserialize, serialize } from 'node:v8';
 
+import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
 import { createHarness, releaseSideChatHarnesses } from '@test/helpers/features/chat/SideChatDOMHarness';
 import { FakeSideSession } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { modelCatalogCases } from '@test/helpers/providerModelCatalogs';
+import { writeGrokCatalog } from '@test/helpers/providers/grokSettings';
 import { fireEvent, waitFor, within } from '@testing-library/dom';
 import { axe } from 'jest-axe';
 import { App, Component, Notice } from 'obsidian';
@@ -20,13 +22,13 @@ import type { ProviderId } from '@/core/providers/types';
 import type { ClaudianSettings, Conversation } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { getChatSettingsSnapshot } from '@/features/chat/ChatSettings';
+import { updateSessionProviderSettings, updateSessionReasoning } from '@/features/chat/sessions/sessionSettings';
 import { destroyTab } from '@/features/chat/tabs/TabLifecycle';
-import { updateTabProviderSettings } from '@/features/chat/tabs/tabProviderSettings';
 import { refreshTabProviderUI } from '@/features/chat/tabs/tabProviderUI';
 import { createTabRuntime } from '@/features/chat/tabs/TabRuntimeFactory';
 import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
+import { setLocale } from '@/i18n/i18n';
 import { getCodexProviderSettings, updateCodexProviderSettings } from '@/providers/codex/settings';
-import { updateCurrentGrokCatalog } from '@/providers/grok/settings';
 import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
 
 const originalResizeObserver = globalThis.ResizeObserver;
@@ -52,11 +54,12 @@ function createSettings({ id, populate }: typeof modelCatalogCases[number], adve
   if (id === 'codex' && !advertisesHigh) Object.assign((config.discoveredModels as Array<Record<string, unknown>>)[0], {
     supportedReasoningEfforts: levels.map(value => ({ value, description: value })), defaultReasoningEffort: 'medium',
   });
+  if (id === 'deepseek') (config.discoveredModels as Array<Record<string, unknown>>)[0].reasoning = levels.map(id => ({ id, name: formatReasoningValueLabel(id) }));
   if (id === 'pi') (config.discoveredModels as Array<Record<string, unknown>>)[0].thinkingLevels = ['off', ...levels];
   if (id === 'opencode') config.thinkingOptionsByModel = {
     'anthropic/selected': [{ value: 'default', label: 'Default' }, ...levels.map(value => ({ value, label: formatReasoningValueLabel(value) }))],
   };
-  if (id === 'grok') updateCurrentGrokCatalog(settings, {
+  if (id === 'grok') writeGrokCatalog(settings, {
     defaultModelId: 'selected', fingerprint: 'test', refreshedAt: 10,
     models: [{ rawId: 'selected', displayName: 'Selected label', reasoningMetadataResolved: true,
       defaultReasoningEffort: 'medium', supportsReasoning: true,
@@ -74,6 +77,7 @@ function createChatHarness(settings: ClaudianSettings, id: ProviderId, selected:
   const app = new App();
   Object.assign(app.vault.adapter, { basePath: '/vault' });
   Object.assign(app.vault, { on: () => ({}), offref: () => undefined });
+  Object.assign(app.workspace, { getActiveFile: () => null });
   const conversations: Conversation[] = [];
   const tabs: AssembledTabRuntime[] = [];
   const sessions: FakeSideSession[] = [];
@@ -108,52 +112,54 @@ function createChatHarness(settings: ClaudianSettings, id: ProviderId, selected:
     mutateSettings: settingsCoordinator.mutate.bind(settingsCoordinator),
     getCommittedSettings: settingsCoordinator.getCommittedSettings.bind(settingsCoordinator),
   } as unknown as ChatFeatureHost;
-  const createTab = async () => {
-    const conversation = {
+  const createTab = async (blank = false, existingId?: string) => {
+    const conversation = conversations.find(entry => entry.id === existingId) ?? {
       id: `conversation-${conversations.length}`, providerId: id, selectedModel: selected,
       messages: [...harness.tab.state.messages], sessionId: `session-${conversations.length}`,
     } as unknown as Conversation;
-    conversations.push(conversation);
+    if (!blank && !existingId) conversations.push(conversation);
+    if (!plugin.sessionRuntimes) installSessionRuntimePool(plugin);
     const tab = await createTabRuntime({
       plugin,
       component: Object.assign(new Component(), { registerDomEvent: () => undefined, registerEvent: () => undefined }) as never,
       containerEl: document.body.appendChild(document.createElement('div')),
       mentionDataProvider: new VaultMentionDataProvider(plugin.app),
-      conversation, getProviderCatalogConfig: () => null, isRuntimeLive: () => true,
+      conversation: blank ? undefined : conversation, providerId: id, draftModel: selected, getProviderCatalogConfig: () => null, isRuntimeLive: () => true,
+    openConversation: async () => {}, startNewConversation: async () => {},
     });
-    tab.state.currentConversationId = conversation.id;
-    tab.state.messages = conversation.messages;
+    if (!blank) {
+      tab.state.currentConversationId = conversation.id;
+      tab.state.messages = conversation.messages;
+    }
     tabs.push(tab);
     return tab;
   };
   return { createTab, tabs, sessions, persist, plugin };
 }
 
-function reasoningSlider(tab: AssembledTabRuntime): HTMLInputElement {
-  // The slider lives in the model popover, which stays closed in these tests.
-  return within(tab.dom.inputComposerEl).getByRole('slider', { hidden: true }) as HTMLInputElement;
+function reasoningList(tab: AssembledTabRuntime): HTMLElement | null {
+  // The levels live in the model popover, which stays closed in these tests.
+  return within(tab.dom.inputComposerEl).queryByRole('listbox', { name: 'Thinking', hidden: true });
 }
 
-/** The labels the slider announces at each stop, read the way assistive technology hears them. */
+function reasoningLevels(tab: AssembledTabRuntime): HTMLElement[] {
+  return within(reasoningList(tab)!).getAllByRole('option', { hidden: true });
+}
+
+function levelLabel(level: HTMLElement): string {
+  return level.querySelector('.claudian-toolbar-popover-option-label')?.textContent ?? '';
+}
+
+/** The levels as assistive technology hears them, from the fastest to the deepest. */
 function reasoningStops(tab: AssembledTabRuntime): string[] {
-  const slider = reasoningSlider(tab);
-  const original = slider.value;
-  const labels: string[] = [];
-  for (let index = Number(slider.min); index <= Number(slider.max); index++) {
-    fireEvent.input(slider, { target: { value: String(index) } });
-    labels.push(slider.getAttribute('aria-valuetext') ?? '');
-  }
-  fireEvent.input(slider, { target: { value: original } });
-  return labels;
+  return reasoningLevels(tab).map(level => levelLabel(level)).reverse();
 }
 
-/** Moves the slider to the stop announcing `label` and releases it, which commits that level. */
+/** Picks the level named `label`, which commits it. */
 function chooseReasoning(tab: AssembledTabRuntime, label: string): void {
-  const index = reasoningStops(tab).indexOf(label);
-  expect(index).toBeGreaterThanOrEqual(0);
-  const slider = reasoningSlider(tab);
-  fireEvent.input(slider, { target: { value: String(index) } });
-  fireEvent.change(slider);
+  const level = reasoningLevels(tab).find(item => levelLabel(item) === label);
+  expect(level).toBeDefined();
+  fireEvent.click(level!);
 }
 
 async function selectReasoning(tab: AssembledTabRuntime, reasoning: string) {
@@ -163,7 +169,7 @@ async function selectReasoning(tab: AssembledTabRuntime, reasoning: string) {
   await waitFor(() => expect(ui.getByText(label, { selector: '.claudian-thinking-current' })).toBeDefined());
   // Let the commit settle even when the level was already selected.
   await new Promise<void>(resolve => setTimeout(resolve, 0));
-  expect(reasoningSlider(tab).getAttribute('aria-valuetext')).toBe(label);
+  expect(reasoningLevels(tab).filter(level => level.getAttribute('aria-selected') === 'true').map(levelLabel)).toEqual([label]);
 }
 
 async function expectSubmission(
@@ -217,7 +223,10 @@ it.each(modelCatalogCases.flatMap(entry => [true, false].map(advertisesHigh => (
   },
 );
 
-it('defaults Codex to automatic review and persists and submits each permission selection', async () => {
+it.each(['en', 'zh-CN'] as const)('defaults Codex to automatic review and persists and submits each permission selection in %s', async locale => {
+  setLocale(locale);
+  const prefix = locale === 'en' ? 'Permission mode:' : '权限模式：';
+  const labels = locale === 'en' ? ['Approve for me', 'Ask for approval', 'Full access'] : ['代我审批', '请求审批', '完全访问'];
   const entry = modelCatalogCases.find(({ id }) => id === 'codex')!;
   const settings = createSettings(entry);
   const initialPermissionMode = settings.permissionMode;
@@ -225,19 +234,55 @@ it('defaults Codex to automatic review and persists and submits each permission 
   try {
     const tab = await createTab();
     const ui = within(tab.dom.inputComposerEl);
-    expect(ui.getByRole('button', { name: 'Permission mode: Approve for me' })).toBeDefined();
+    expect(ui.getByRole('button', { name: `${prefix}${locale === 'en' ? ' ' : ''}${labels[0]}` })).toBeDefined();
     for (const [label, mode] of [
-      ['Ask for approval', 'normal'], ['Full access', 'yolo'], ['Approve for me', 'auto-review'],
+      [labels[1], 'normal'], [labels[2], 'yolo'], [labels[0], 'auto-review'],
     ]) {
-      fireEvent.click(ui.getByRole('button', { name: /^Permission mode:/ }));
+      fireEvent.click(ui.getByRole('button', { name: new RegExp(`^${prefix}`) }));
       fireEvent.click(ui.getByRole('menuitemradio', { name: new RegExp(`^${label}`) }));
       await waitFor(() => expect(settings.savedProviderPermissionMode.codex).toBe(mode));
       await expectSubmission(tab, sessions, getChatSettingsSnapshot(settings, entry.id, entry.selected).model, 'high');
       expect(sessions.at(-1)?.requests.at(-1)?.configuration.permissionMode).toBe(mode);
     }
     const reopened = await createTab();
-    expect(within(reopened.dom.inputComposerEl).getByRole('button', { name: 'Permission mode: Approve for me' })).toBeDefined();
+    expect(within(reopened.dom.inputComposerEl).getByRole('button', { name: `${prefix}${locale === 'en' ? ' ' : ''}${labels[0]}` })).toBeDefined();
     expect(settings.permissionMode).toBe(initialPermissionMode);
+  } finally {
+    setLocale('en');
+    for (const tab of tabs) await destroyTab(tab);
+  }
+});
+
+it('keeps permission and service tier independent across sessions and parent model eviction', async () => {
+  const entry = modelCatalogCases.find(({ id }) => id === 'codex')!;
+  const { createTab, sessions, tabs, plugin } = createChatHarness(createSettings(entry), entry.id, entry.selected);
+  try {
+    const first = await createTab();
+    const second = await createTab();
+    await updateSessionProviderSettings(first.session.runtime, plugin, snapshot => {
+      snapshot.permissionMode = 'yolo';
+      snapshot.serviceTier = 'fast';
+    });
+    const model = getChatSettingsSnapshot(plugin.settings, entry.id, entry.selected).model;
+    await expectSubmission(second, sessions, model, 'high');
+    expect(sessions.at(-1)?.requests.at(-1)?.configuration).toMatchObject({ permissionMode: 'auto-review', serviceTier: 'default' });
+    // An unrelated change commits only itself; the second session's own selections stay local.
+    await updateSessionReasoning(second.session.runtime, plugin, 'low');
+    expect(plugin.settings).toMatchObject({
+      savedProviderEffort: { codex: 'low' }, savedProviderPermissionMode: { codex: 'yolo' }, savedProviderServiceTier: { codex: 'fast' },
+    });
+    refreshTabProviderUI(second);
+    await expectSubmission(second, sessions, model, 'low');
+    expect(sessions.at(-1)?.requests.at(-1)?.configuration).toMatchObject({ permissionMode: 'auto-review', serviceTier: 'default' });
+    const identity = first.conversationId!;
+    const runtime = first.session.runtime;
+    await first.session.runtime.model.hydrate();
+    await destroyTab(first);
+    await waitFor(() => expect(runtime.peekModel).toBeNull());
+    const reopened = await createTab(false, identity);
+    expect(reopened.session.runtime).toBe(runtime);
+    await expectSubmission(reopened, sessions, model, 'high');
+    expect(sessions.at(-1)?.requests.at(-1)?.configuration).toMatchObject({ permissionMode: 'yolo', serviceTier: 'fast' });
   } finally {
     for (const tab of tabs) await destroyTab(tab);
   }
@@ -253,6 +298,41 @@ it('displays and submits High for a saved OpenCode Default preference', async ()
     const tab = await createTab();
     expect(reasoningStops(tab)).not.toContain('Default');
     await expectSubmission(tab, sessions, entry.selected, 'high');
+  } finally {
+    for (const tab of tabs) await destroyTab(tab);
+  }
+});
+
+it.each([
+  { name: 'Off-only without a saved preference', efforts: ['off'], saved: undefined, expected: 'off', stops: null },
+  { name: 'Off-only with a stale saved High', efforts: ['off'], saved: 'high', expected: 'off', stops: null },
+  { name: 'Off and High', efforts: ['off', 'high'], saved: undefined, expected: 'high', stops: ['Off', 'High'] },
+])('DeepSeek displays and submits supported reasoning for $name', async ({ efforts, saved, expected, stops }) => {
+  const entry = modelCatalogCases.find(({ id }) => id === 'deepseek')!;
+  const settings = createSettings(entry);
+  const config = settings.providerConfigs.deepseek!;
+  (config.discoveredModels as Array<Record<string, unknown>>)[0].reasoning = efforts.map(id => ({ id, name: formatReasoningValueLabel(id) }));
+  if (saved) config.preferredReasoningByModel = { [entry.selected]: saved };
+  else delete settings.savedProviderEffort.deepseek;
+  const { createTab, sessions, tabs } = createChatHarness(settings, entry.id, entry.selected);
+  try {
+    const tab = await createTab();
+    const ui = within(tab.dom.inputComposerEl);
+    const modelButton = ui.getByRole('button', { name: /^Model: Selected label/ });
+    expect(reasoningList(tab) && reasoningStops(tab)).toEqual(stops);
+    expect(modelButton.getAttribute('aria-label')).toBe(`Model: Selected label${stops ? `, effort ${formatReasoningValueLabel(expected)}` : ''}`);
+    const text = `Send with ${efforts.join(' and ')}`;
+    (ui.getByRole('textbox') as HTMLTextAreaElement).value = text;
+    const pending = tab.controllers.inputController.sendMessage();
+    const findSession = () => sessions.find(session => session.requests.at(-1)?.input.some(part => part.type === 'text' && part.text === text));
+    await waitFor(() => expect(findSession()).toBeDefined());
+    const session = findSession()!;
+    try {
+      expect(session.requests.at(-1)?.configuration).toMatchObject({ model: entry.selected, reasoning: expected });
+    } finally {
+      session.complete();
+      await pending;
+    }
   } finally {
     for (const tab of tabs) await destroyTab(tab);
   }
@@ -441,18 +521,18 @@ it.each([true, false])('seeds tabs from committed reasoning while a save is pend
   }
 });
 
-test.each(['provider switch', 'switch back', 'closing'] as const)('queued toolbar changes cannot survive %s', async transition => {
+test.each(['provider switch', 'switch back', 'closing'] as const)('queued toolbar changes retain their session only across closing (%s)', async transition => {
   const entry = modelCatalogCases.find(entry => entry.id === 'claude')!;
   const settings = createSettings(entry);
   const { plugin, createTab } = createChatHarness(settings, entry.id, entry.selected);
-  const tab = await createTab();
-  tab.session.startDraft(entry.id, entry.selected);
+  const tab = await createTab(true);
+  tab.session.selectDraft(entry.id, entry.selected);
   try {
     let release!: () => void;
     const blocker = plugin.mutateSettings(() => new Promise<void>(resolve => { release = resolve; }));
     await Promise.resolve();
     const before = structuredClone(settings);
-    const pending = updateTabProviderSettings(tab, plugin, snapshot => { snapshot.permissionMode = 'normal'; });
+    const pending = updateSessionProviderSettings(tab.session.runtime, plugin, snapshot => { snapshot.permissionMode = 'normal'; });
     if (transition === 'closing') tab.session.beginClose();
     else {
       tab.session.selectDraft('codex', 'openai-codex/gpt-5.5');
@@ -460,6 +540,7 @@ test.each(['provider switch', 'switch back', 'closing'] as const)('queued toolba
     }
     release();
     await Promise.all([blocker, pending]);
-    expect(settings).toEqual(before);
+    expect(tab.session.runtime.providerSelections.get(entry.id)?.permissionMode).toBe(transition === 'closing' ? 'normal' : before.permissionMode);
+    expect(transition === 'closing' || JSON.stringify(settings) === JSON.stringify(before)).toBe(true);
   } finally { await destroyTab(tab); }
 });

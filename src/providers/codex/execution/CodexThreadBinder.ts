@@ -1,12 +1,13 @@
-import type { ProviderToolPolicy } from '@/core/execution';
+import { isSessionToolPolicyAllowed, type ProviderToolPolicy } from '@/core/execution';
 import type {
   Thread,
   ThreadForkResult,
   ThreadResumeResult,
-  ThreadRollbackResult,
+  ThreadRevertResult,
   ThreadStartResult,
 } from '@/providers/codex/runtime/codexAppServerTypes';
 import type { CodexRPCTransport } from '@/providers/codex/runtime/CodexRPCTransport';
+import { CODEX_SESSION_TOOL_VERSION, isCodexSessionTool } from '@/providers/codex/runtime/CodexSessionTools';
 import type { CodexThreadScope } from '@/providers/codex/runtime/CodexThreadScope';
 import {
   CODEX_WORKSPACE_DEPENDENCY_TOOL_NAME,
@@ -51,7 +52,7 @@ export interface CodexThreadBinderHost {
   /** An existing thread was resumed into the current process. */
   threadResumed(thread: Thread): void;
   /** thread/start created the session's native thread. */
-  threadStarted(run: CodexActiveRun, identity: CodexThreadIdentity & { threadId: string }): void;
+  threadStarted(run: CodexActiveRun, identity: CodexThreadIdentity & { threadId: string; sessionToolVersion: number | null }): void;
   /** A fork child exists; its identity is durable before the child is resumed. */
   forkTargetAdopted(run: CodexActiveRun, target: CodexPendingForkTarget): void;
   /** The pending fork was materialized at its checkpoint. */
@@ -150,7 +151,7 @@ export class CodexThreadBinder {
       )
     ) {
       if (request.persistExtendedHistory === false) {
-        throw new Error('This non-persistent Codex CLI session cannot be restored after its configuration changes. Start a new side chat.');
+        throw new Error('This non-persistent Codex session cannot be restored after its configuration changes. Start a new side chat.');
       }
       const result = await scope.open<ThreadResumeResult>(
         'thread/resume',
@@ -195,6 +196,8 @@ export class CodexThreadBinder {
     this.host.threadStarted(run, {
       threadId: result.thread.id,
       sessionFilePath,
+      sessionToolVersion: dynamicTools.some(spec => isCodexSessionTool(spec.namespace, spec.name))
+        ? CODEX_SESSION_TOOL_VERSION : null,
       workspaceDependencyToolVersion: dynamicTools.some(spec =>
         spec.namespace === CODEX_WORKSPACE_DEPENDENCY_TOOL_NAMESPACE
         && spec.name === CODEX_WORKSPACE_DEPENDENCY_TOOL_NAME
@@ -238,7 +241,7 @@ export class CodexThreadBinder {
     const transport = this.connection.transport;
     const scope = this.connection.scope;
     if (!transport || !scope || !this.#pendingFork) {
-      return Promise.reject(new Error('Codex CLI fork setup is not available.'));
+      return Promise.reject(new Error('Codex fork setup is not available.'));
     }
 
     const setup = this.#materializeForkThread(run, request, isCurrent, transport, scope);
@@ -258,7 +261,7 @@ export class CodexThreadBinder {
     scope: CodexThreadScope,
   ): Promise<CodexEnsuredThread> {
     const fork = this.#pendingFork;
-    if (!fork) throw new Error('Codex CLI fork source is not available.');
+    if (!fork) throw new Error('Codex fork source is not available.');
 
     let target = this.#pendingForkTarget;
     if (!target) {
@@ -268,11 +271,11 @@ export class CodexThreadBinder {
         lastTurnId: fork.resumeAt,
         ...this.#threadConfig(request, withLegacyToolInstructions(request.baseInstructions)),
         persistExtendedHistory: false,
-      } : {});
+      } : { lastTurnId: fork.resumeAt });
     }
 
     if (!isCurrent()) {
-      throw new Error('Codex CLI fork setup was interrupted after child adoption.');
+      throw new Error('Codex fork setup was interrupted after child adoption.');
     }
 
     if (request.persistExtendedHistory === false) {
@@ -288,10 +291,10 @@ export class CodexThreadBinder {
       this.#resumeParams(target.threadId, request, true),
     );
     if (!isCurrent()) {
-      throw new Error('Codex CLI fork setup was interrupted while resuming the child.');
+      throw new Error('Codex fork setup was interrupted while resuming the child.');
     }
     if (resumeResult.thread.id !== target.threadId) {
-      throw new Error('Codex CLI resumed a different thread than the owned fork target.');
+      throw new Error('Codex resumed a different thread than the owned fork target.');
     }
 
     this.#recordApprovalReviewer(resumeResult, request.policy.approvalsReviewer);
@@ -302,20 +305,21 @@ export class CodexThreadBinder {
     if (checkpointIndex < 0) {
       throw new Error(`Fork checkpoint not found: ${fork.resumeAt}`);
     }
-    const rollbackCount = resumeResult.thread.turns.length - checkpointIndex - 1;
-    if (rollbackCount > 0) {
-      const rollbackResult = await transport.request<ThreadRollbackResult>(
-        'thread/rollback',
+    // Children adopted before thread/fork received lastTurnId still carry later turns.
+    const firstLaterTurn = resumeResult.thread.turns[checkpointIndex + 1];
+    if (firstLaterTurn) {
+      const revertResult = await transport.request<ThreadRevertResult>(
+        'thread/revert',
         {
           threadId: target.threadId,
-          numTurns: rollbackCount,
+          beforeTurnId: firstLaterTurn.id,
         },
       );
       if (!isCurrent()) {
-        throw new Error('Codex CLI fork setup was interrupted while rolling back the child.');
+        throw new Error('Codex fork setup was interrupted while reverting the child.');
       }
-      if (rollbackResult.thread.id !== target.threadId) {
-        throw new Error('Codex CLI rolled back a different thread than the owned fork target.');
+      if (revertResult.thread.id !== target.threadId) {
+        throw new Error('Codex reverted a different thread than the owned fork target.');
       }
     }
 
@@ -344,7 +348,7 @@ export class CodexThreadBinder {
       this.#setLoadedThreadSandbox(sandboxModeOf(forkResult.sandbox));
       const threadId = normalizeString(forkResult.thread.id);
       if (!threadId) {
-        throw new Error('Codex CLI fork did not return a child thread ID.');
+        throw new Error('Codex fork did not return a child thread ID.');
       }
       const sessionFilePath = forkResult.thread.path
         ? pathMapper?.toHostPath(forkResult.thread.path) ?? forkResult.thread.path
@@ -449,6 +453,7 @@ function isThreadStartToolAllowed(
   namespace: string | null | undefined,
   name: string,
 ): boolean {
+  if (isCodexSessionTool(namespace, name)) return isSessionToolPolicyAllowed(policy);
   if (policy.kind === 'provider-default' || policy.kind === 'unrestricted') {
     return true;
   }

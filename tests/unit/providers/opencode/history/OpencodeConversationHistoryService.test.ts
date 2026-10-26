@@ -46,12 +46,14 @@ describe('OpencodeConversationHistoryService', () => {
           '@/providers/opencode/history/OpencodeConversationHistoryService'
         );
         Object.assign(conversation, await new HistoryService().hydrateConversationHistory(conversation, null, {
+          config: {},
           environment: {
             ...process.env,
             OPENCODE_DB: dbPath,
             CLAUDIAN_HISTORY_TEST: 'configured',
             PATH: path.dirname(process.execPath),
           },
+          environmentText: '',
         }));
       });
       expect(conversation.messages.map(message => message.content)).toEqual(['Configured history']);
@@ -185,7 +187,7 @@ describe('OpencodeConversationHistoryService', () => {
     Object.assign(conversation, await new OpencodeConversationHistoryService().hydrateConversationHistory(
       conversation,
       null,
-      { environment: { HOME: tmpRoot, XDG_DATA_HOME: xdgDataHome } },
+      { config: {}, environment: { HOME: tmpRoot, XDG_DATA_HOME: xdgDataHome }, environmentText: '' },
     ));
 
     expect(conversation.messages.map(message => message.content)).toEqual(['Trusted prompt']);
@@ -211,11 +213,13 @@ describe('OpencodeConversationHistoryService', () => {
       conversation,
       null,
       {
+        config: {},
         environment: {
           APPDATA: appData,
           HOME: home,
           LOCALAPPDATA: path.join(home, 'AppData', 'Local'),
         },
+        environmentText: '',
       },
     ));
 
@@ -239,7 +243,7 @@ describe('OpencodeConversationHistoryService', () => {
   });
 
   describe('resolveMissingConversationSession', () => {
-    it('clears a confirmed stale resume ID while preserving provider-owned state', async () => {
+    it('retires a confirmed stale resume ID to history while preserving provider-owned state', async () => {
       const conversation = createConversation('missing-session', '/tmp/opencode.db');
       conversation.providerState!.futureResumeCursor = { token: 'cursor-1' };
       const service = new OpencodeConversationHistoryService();
@@ -257,7 +261,9 @@ describe('OpencodeConversationHistoryService', () => {
         databasePath: '/tmp/opencode.db',
         futureResumeCursor: { token: 'cursor-1' },
         nativeConversationContextEstablished: false,
+        previousSessions: [{ sessionId: 'missing-session', databasePath: '/tmp/opencode.db' }],
       });
+      expect(service.resolveSessionIdForConversation(conversation)).toBeNull();
     });
 
     it('preserves a newer resume ID when the failure identifies another session', async () => {
@@ -312,7 +318,7 @@ describe('OpencodeConversationHistoryService', () => {
     Object.assign(conversation, await new OpencodeConversationHistoryService().hydrateConversationHistory(
       conversation,
       null,
-      { environment: { HOME: tmpRoot, OPENCODE_DB: configuredPath } },
+      { config: {}, environment: { HOME: tmpRoot, OPENCODE_DB: configuredPath }, environmentText: '' },
     ));
 
     expect(conversation.messages.map(message => message.content)).toEqual(['Configured prompt']);
@@ -330,7 +336,7 @@ describe('OpencodeConversationHistoryService', () => {
     Object.assign(conversation, await new OpencodeConversationHistoryService().hydrateConversationHistory(
       conversation,
       null,
-      { environment: { HOME: tmpRoot, XDG_DATA_HOME: xdgDataHome } },
+      { config: {}, environment: { HOME: tmpRoot, XDG_DATA_HOME: xdgDataHome }, environmentText: '' },
     ));
 
     expect(conversation.providerState).toEqual({ databasePath: trustedPath });

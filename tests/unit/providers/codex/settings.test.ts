@@ -1,14 +1,16 @@
 import { CODEX_SPARK_MODEL, TEST_CODEX_CATALOG } from '@test/helpers/codexModels';
 
+import { resolveCodexReasoningSummary } from '@/providers/codex/config';
 import {
-  applyCodexModelDefaults,
   DEFAULT_CODEX_PROVIDER_SETTINGS,
-  getCodexProviderSettings,
-  getEffectiveCodexReasoningSummary,
   getVisibleCodexModelIds,
   normalizeCodexModelAliases,
-  normalizeCodexStoredConfig,
   normalizeCodexVisibleModels,
+} from '@/providers/codex/config';
+import {
+  applyCodexModelDefaults,
+  getCodexProviderSettings,
+  normalizeCodexStoredConfig,
   projectCodexModelSettings,
   updateCodexProviderSettings,
 } from '@/providers/codex/settings';
@@ -129,28 +131,32 @@ describe('codex settings', () => {
     ]);
   });
 
-  it('normalizes an explicit visibility filter against the discovered catalog', () => {
-    const discoveredModels = [
-      { model: 'gpt-5.5' },
-      { model: 'gpt-5.4-mini' },
-    ] as any;
-
+  it('normalizes explicit visible models while retaining unavailable selections', () => {
     expect(normalizeCodexVisibleModels(
-      [' gpt-5.4-mini ', 'missing-model', 'gpt-5.4-mini', 42],
-      discoveredModels,
+      [' gpt-5.4-mini ', 'missing-model', 'gpt-5.4-mini', 42]
     )).toEqual(['gpt-5.4-mini', 'missing-model']);
-    expect(normalizeCodexVisibleModels(undefined, discoveredModels)).toBeNull();
+    expect(normalizeCodexVisibleModels(undefined)).toBeNull();
   });
 
-  it('normalizes model aliases against the discovered catalog', () => {
-    expect(normalizeCodexModelAliases({
-      ' gpt-5.5 ': '  Primary  ',
-      'gpt-5.4-mini': ' ',
-      missing: 'Missing',
-      invalid: 42,
-    }, TEST_CODEX_CATALOG as any)).toEqual({
-      'gpt-5.5': 'Primary', missing: 'Missing',
+  it('normalizes model aliases while retaining unknown model ids', () => {
+    const input = Object.setPrototypeOf(JSON.parse(
+      '{" gpt-5.5 ":"  Primary  ","gpt-5.4-mini":" ","missing":"Missing","invalid":42," ":"Blank key","__proto__":" Custom Proto ","constructor":"Custom Constructor"}',
+    ), { inherited: 'Ignore' });
+    const aliases = normalizeCodexModelAliases(input);
+
+    expect(aliases).toEqual(JSON.parse(
+      '{"gpt-5.5":"Primary","missing":"Missing","__proto__":"Custom Proto","constructor":"Custom Constructor"}',
+    ));
+    expect(Object.keys(aliases)).toEqual(['gpt-5.5', 'missing', '__proto__', 'constructor']);
+    expect(Object.getPrototypeOf(aliases)).toBe(Object.prototype);
+    expect(Object.getOwnPropertyDescriptor(aliases, '__proto__')).toEqual({
+      value: 'Custom Proto', enumerable: true, writable: true, configurable: true,
     });
+    expect(JSON.parse(JSON.stringify(aliases))).toEqual(aliases);
+  });
+
+  it.each([null, undefined, 'alias', 42, []])('ignores non-record aliases: %p', value => {
+    expect(normalizeCodexModelAliases(value)).toEqual({});
   });
 
   it('persists aliases only for visible models', () => {
@@ -533,8 +539,9 @@ describe('codex settings', () => {
       },
     };
 
-    expect(getEffectiveCodexReasoningSummary(settingsBag, CODEX_SPARK_MODEL)).toBe('none');
-    expect(getEffectiveCodexReasoningSummary(settingsBag, 'gpt-5.5')).toBe('detailed');
+    const codexSettings = getCodexProviderSettings(settingsBag);
+    expect(resolveCodexReasoningSummary(codexSettings, CODEX_SPARK_MODEL)).toBe('none');
+    expect(resolveCodexReasoningSummary(codexSettings, 'gpt-5.5')).toBe('detailed');
   });
 
   it('sets reasoning summary off when applying GPT-5.3 Codex Spark model defaults', () => {

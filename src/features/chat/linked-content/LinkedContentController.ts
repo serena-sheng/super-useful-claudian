@@ -13,6 +13,7 @@ import {
   type LinkedContentPresentation,
 } from '@/features/chat/linked-content/LinkedContentPresentation';
 import { LinkedContentSelector } from '@/features/chat/linked-content/LinkedContentSelector';
+import { t } from '@/i18n/i18n';
 import { revealWorkspaceLeaf } from '@/utils/obsidianCompat';
 
 export type LinkedContentMode = 'auto-draft' | 'explicit-draft' | 'submitting' | 'locked';
@@ -40,11 +41,6 @@ export type LinkedContentPathEvent =
     readonly path: string;
     readonly includeDescendants: boolean;
   };
-
-export interface LinkedContentSubmissionSettlement {
-  readonly linkedContentPath?: string;
-  readonly queuedEvents: readonly LinkedContentPathEvent[];
-}
 
 export interface LinkedContentControllerOptions {
   readonly app: App;
@@ -165,7 +161,7 @@ export class LinkedContentController {
     return token;
   }
 
-  commitSubmission(token: LinkedContentSubmissionToken): LinkedContentSubmissionSettlement {
+  commitSubmission(token: LinkedContentSubmissionToken): void {
     this.#assertLive();
     const submission = this.#requireSubmission(token);
     this.mode = 'locked';
@@ -173,10 +169,6 @@ export class LinkedContentController {
     for (const event of submission.queuedEvents) this.#applyPathEvent(event);
     this.activeSubmission = null;
     this.publish();
-    return {
-      ...(this.path === null ? {} : { linkedContentPath: this.path }),
-      queuedEvents: [...submission.queuedEvents],
-    };
   }
 
   rollbackSubmission(token: LinkedContentSubmissionToken): void {
@@ -267,20 +259,22 @@ export class LinkedContentController {
     if (this.destroyed || !this.path) return;
     const content = deriveLinkedContentPresentation(this.app, this.path);
     if (content.missing || !content.target) {
-      new Notice(`Linked content is missing: ${this.path}`);
+      new Notice(t('chat.linkedContent.missingNotice', { path: this.path }));
       return;
     }
-    if (content.target instanceof TFile) {
+    if (content.target instanceof TFile || content.target instanceof TFolder) {
       try {
-        await this.#revealFile(content.target);
+        if (content.target instanceof TFile) {
+          await this.#revealFile(content.target);
+        } else {
+          await this.#revealFolder(content.target);
+        }
       } catch (error) {
         new Notice(
-          `Failed to open Linked content: ${error instanceof Error ? error.message : String(error)}`,
+          t('chat.linkedContent.openFailed', { error: error instanceof Error ? error.message : String(error) }),
         );
       }
-      return;
     }
-    if (content.target instanceof TFolder) await this.#revealFolder(content.target);
   }
 
   destroy(): void {
@@ -351,8 +345,9 @@ export class LinkedContentController {
       fileTags.push(frontmatterTags);
     }
     if (cache.tags) fileTags.push(...cache.tags.map(tag => tag.tag));
-    const normalizedExcluded = new Set(excludedTags.map(tag => tag.replace(/^#/, '')));
-    return fileTags.some(tag => normalizedExcluded.has(tag.replace(/^#/, '')))
+    const normalizeTag = (tag: string): string => tag.replace(/^#/, '').toLowerCase();
+    const normalizedExcluded = new Set(excludedTags.map(normalizeTag));
+    return fileTags.some(tag => normalizedExcluded.has(normalizeTag(tag)))
       ? 'excluded'
       : 'not-excluded';
   }
@@ -372,7 +367,7 @@ export class LinkedContentController {
       mode: snapshot.mode,
       path: snapshot.path,
       label: presentation?.missing
-        ? `${presentation.label} · Missing content`
+        ? `${presentation.label} · ${t('chat.linkedContent.missing')}`
         : presentation?.label ?? null,
     });
   }

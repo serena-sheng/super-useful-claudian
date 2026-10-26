@@ -1,24 +1,32 @@
 /** @jest-environment jsdom */
 
-import { fireEvent, waitFor, within } from '@testing-library/dom';
+import { EditorView } from '@codemirror/view';
+import { testDate } from '@test/helpers/testClock';
+import { createEvent, fireEvent, waitFor, within } from '@testing-library/dom';
 import { axe } from 'jest-axe';
-import { type App, type Component, MarkdownRenderer, Platform, TFile } from 'obsidian';
+import { type App, type Component, MarkdownRenderer, Notice, Platform, TFile } from 'obsidian';
 
 import { createCatalogCommandDiscoveryStore } from '@/core/providers/commands/catalogCommandDiscovery';
 import type { ProviderCommandDiscoveryResult } from '@/core/providers/commands/ProviderCommandDiscoveryResult';
+import type { ProviderCommandDiscoverySnapshot } from '@/core/providers/commands/ProviderCommandDiscoveryStore';
 import type { ProviderCommandEntry } from '@/core/providers/commands/ProviderCommandEntry';
 import { ComposerContextTray } from '@/features/chat/composer/ComposerContextTray';
 import { ComposerEditor } from '@/features/chat/composer/ComposerEditor';
+import { ComposerInfoRow } from '@/features/chat/composer/ComposerInfoRow';
 import { ComposerPromptSuggestion } from '@/features/chat/composer/ComposerPromptSuggestion';
 import { formatComposerSessionMention } from '@/features/chat/composer/composerSessionMentions';
 import { FileContextManager } from '@/features/chat/composer/FileContextManager';
 import { ImageContextManager } from '@/features/chat/composer/ImageContextManager';
 import { MainChatComposerDropdown } from '@/features/chat/composer/MainChatComposerDropdown';
 import { CanvasSelectionController } from '@/features/chat/input/CanvasSelectionController';
+import { LinkedContentChip } from '@/features/chat/linked-content/LinkedContentChip';
 import { sendTabInputMessageFromExplicitEnterShortcut } from '@/features/chat/tabs/TabInputEvents';
+import { setLocale } from '@/i18n/i18n';
+import type { Locale } from '@/i18n/types';
 import { CodexCommandCatalog } from '@/providers/codex/commands/CodexCommandCatalog';
 import type { CodexAppServerRuntime } from '@/providers/codex/runtime/CodexAppServerRuntime';
 import { CodexSkillListingService } from '@/providers/codex/skills/CodexSkillListingService';
+import { ResumeSessionDropdown } from '@/shared/components/ResumeSessionDropdown';
 import { ComposerDropdownController } from '@/shared/composer-dropdown/ComposerDropdownController';
 import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
 
@@ -33,7 +41,7 @@ const nativeLinks: Record<string, { target: string; label: string }> = {
 
 function createApp(): App {
   const file = Object.assign(new TFile(), {
-    path: 'Notes/A note.md', name: 'A note.md', basename: 'A note', stat: { mtime: 0 },
+    path: 'Notes/A note.md', name: 'A note.md', basename: 'A note', stat: { mtime: testDate().getTime() },
   });
   return {
     metadataCache: { getFirstLinkpathDest: () => file },
@@ -92,7 +100,13 @@ it('renders a wikilink through Obsidian and opens it without changing the source
   }
 });
 
-it.each(['click', 'Enter', 'Tab'])('inserts and renders a picker wikilink using %s', async method => {
+it.each<[string, Locale, string]>([
+  ['click', 'en', 'Input suggestions'],
+  ['Enter', 'en', 'Input suggestions'],
+  ['Tab', 'en', 'Input suggestions'],
+  ['click', 'de', 'Eingabevorschl\u00e4ge'],
+])('inserts and renders a picker wikilink using %s in %s', async (method, locale, menuName) => {
+  setLocale(locale);
   const parent = document.body.createDiv();
   const app = createApp();
   const editor = new ComposerEditor(parent, app, {} as Component);
@@ -101,9 +115,24 @@ it.each(['click', 'Enter', 'Tab'])('inserts and renders a picker wikilink using 
   try {
     editor.element.value = 'Read @A today';
     editor.element.selectionStart = editor.element.selectionEnd = 7;
+    dropdown.handleInputChange();
+    await waitFor(() => within(parent).getByRole('option', { name: 'Notes/A note.md' }));
+    expect(within(parent).getAllByRole('textbox', { name: locale === 'de' ? 'Nachricht' : 'Message' })).toEqual([editor.element]);
+    expect(within(parent).getByRole('textbox', { name: locale === 'de' ? 'Nachricht' : 'Message' }).getAttribute('aria-multiline')).toBe('true');
+    expect(await axe(parent, { runOnly: ['aria-allowed-attr'] })).toHaveNoViolations();
     editor.element.focus();
+    expect(within(parent).getAllByRole('textbox', { name: locale === 'de' ? 'Nachricht' : 'Message' })).toHaveLength(1);
+    expect(within(parent).getByRole('textbox', { name: locale === 'de' ? 'Nachricht' : 'Message' }).getAttribute('aria-multiline')).toBe('true');
+    expect(await axe(parent, { runOnly: ['aria-allowed-attr'] })).toHaveNoViolations();
+    dropdown.hide();
     dropdown.handleInputChange();
     const option = await waitFor(() => within(parent).getByRole('option', { name: 'Notes/A note.md' }));
+    const listbox = within(parent).getByRole('listbox');
+    expect(within(parent).getAllByRole('textbox', { name: locale === 'de' ? 'Nachricht' : 'Message' })).toHaveLength(1);
+    expect(within(parent).getByRole('textbox', { name: locale === 'de' ? 'Nachricht' : 'Message' }).getAttribute('aria-multiline')).toBe('true');
+    expect(await axe(listbox)).toHaveNoViolations();
+    expect(await axe(parent, { runOnly: ['aria-allowed-attr'] })).toHaveNoViolations();
+    expect(within(parent).getByRole('listbox', { name: menuName })).toBe(listbox);
     if (method === 'click') fireEvent.click(option);
     else dropdown.handleKeydown(new KeyboardEvent('keydown', { key: method }));
     const link = await waitFor(() => within(parent).getByRole('link', { name: 'A note' }));
@@ -117,6 +146,7 @@ it.each(['click', 'Enter', 'Tab'])('inserts and renders a picker wikilink using 
     files.destroy();
     editor.destroy();
     parent.remove();
+    setLocale('en');
   }
 });
 
@@ -249,7 +279,7 @@ it.each([false, true])('inserts a plain newline without rewriting draft whitespa
   }
 });
 
-it('allows input listeners to update composer modes and forwards dropdown accessibility to the focused textbox', async () => {
+it('allows input listeners to update composer modes', async () => {
   const parent = document.body.createDiv();
   const editor = createEditor(parent);
   const input = editor.element;
@@ -260,11 +290,6 @@ it('allows input listeners to update composer modes and forwards dropdown access
   fireEvent.keyDown(content, { key: 'Backspace', code: 'Backspace' });
   await Promise.resolve();
   expect(within(parent).getByText('Save instructions')).toBeTruthy();
-  input.setAttribute('aria-autocomplete', 'list');
-  input.setAttribute('aria-activedescendant', 'option-1');
-  await Promise.resolve();
-  expect(content.getAttribute('aria-autocomplete')).toBe('list');
-  expect(content.getAttribute('aria-activedescendant')).toBe('option-1');
   editor.destroy();
   parent.remove();
 });
@@ -276,6 +301,31 @@ it('leaves native spellcheck and text replacement enabled in the focused textbox
   const content = within(parent).getByRole('textbox', { name: 'Message' });
   expect(content.getAttribute('spellcheck')).toBe('true');
   expect(content.getAttribute('autocorrect')).toBe('on');
+  editor.destroy();
+  parent.remove();
+});
+
+it('reports whether the caret is on the first or last rendered row, including soft wraps', () => {
+  const parent = document.body.createDiv();
+  const editor = createEditor(parent);
+  editor.element.focus();
+  editor.element.value = 'a'.repeat(30);
+  // jsdom has no layout: render ten characters per 20px row; a wrap point belongs to the row the side faces.
+  let measurable = true;
+  jest.spyOn(EditorView.prototype, 'coordsAtPos').mockImplementation((pos: number, side = 1) => {
+    if (!measurable) return null;
+    const row = side < 0 && pos > 0 && pos % 10 === 0 ? pos / 10 - 1 : Math.floor(pos / 10);
+    return { top: row * 20, bottom: row * 20 + 18, left: 0, right: 0 };
+  });
+  const caretOn = (pos: number) => {
+    editor.element.selectionStart = editor.element.selectionEnd = pos;
+    return [editor.element.isCaretOnEdgeRow!('up'), editor.element.isCaretOnEdgeRow!('down')];
+  };
+  expect(caretOn(5)).toEqual([true, false]);
+  expect(caretOn(15)).toEqual([false, false]);
+  expect(caretOn(30)).toEqual([false, true]);
+  measurable = false;
+  expect(caretOn(5)).toEqual([null, null]);
   editor.destroy();
   parent.remove();
 });
@@ -296,7 +346,7 @@ it('keeps the explicit send shortcut focused inside the editor', () => {
 it('lets image attachment handling consume image paste before the rich editor inserts fallback text', () => {
   const parent = document.body.createDiv({ cls: 'claudian-input-wrapper' });
   const editor = createEditor(parent);
-  const images = new ImageContextManager(parent, editor.element, {});
+  const images = new ImageContextManager({ pushScope: jest.fn(), popScope: jest.fn() }, parent, editor.element, {});
   editor.element.value = 'Keep this';
   editor.element.focus();
   const clipboardData = {
@@ -307,6 +357,152 @@ it('lets image attachment handling consume image paste before the rich editor in
   images.destroy();
   editor.destroy();
   parent.remove();
+});
+
+describe('image batch admission through the composer', () => {
+  function createFixture() {
+    const parent = document.body.createDiv();
+    const wrapper = parent.createDiv({ cls: 'claudian-input-wrapper' });
+    const editor = createEditor(wrapper);
+    const changed = jest.fn();
+    const images = new ImageContextManager({ pushScope: jest.fn(), popScope: jest.fn() }, parent, editor.element, {
+      onUserImagesChanged: changed,
+    });
+    editor.element.value = 'Keep this draft';
+    editor.element.focus();
+    editor.element.selectionStart = editor.element.selectionEnd = editor.element.value.length;
+    const textbox = within(parent).getByRole('textbox', { name: 'Message' });
+    const escapedDrop = jest.fn();
+    parent.addEventListener('drop', escapedDrop);
+    jest.mocked(Notice).mockClear();
+    return {
+      parent, wrapper, editor, images, changed, textbox, escapedDrop,
+      destroy: () => { images.destroy(); editor.destroy(); parent.remove(); },
+    };
+  }
+
+  function imageFile(name: string, type: string, bytes: number[]) {
+    const data = new Uint8Array(bytes);
+    const file = new File([data], name, { type });
+    const read = jest.fn(async () => data.buffer);
+    Object.defineProperty(file, 'arrayBuffer', { value: read });
+    return { file, read };
+  }
+
+  function dispatchBatch(fixture: ReturnType<typeof createFixture>, operation: 'paste' | 'drop', files: File[]) {
+    const event = operation === 'paste'
+      ? createEvent.paste(fixture.textbox, {
+        clipboardData: {
+          items: files.map(file => ({ type: file.type, getAsFile: () => file })),
+          files, getData: () => 'image fallback',
+        },
+      })
+      : createEvent.drop(fixture.wrapper, { dataTransfer: { types: ['Files'], files } });
+    const preventDefault = jest.spyOn(event, 'preventDefault');
+    fireEvent(operation === 'paste' ? fixture.textbox : fixture.wrapper, event);
+    return { event, preventDefault };
+  }
+
+  it.each(['paste', 'drop'] as const)('reports one unsupported Notice for a disabled two-image %s batch', async operation => {
+    const fixture = createFixture();
+    const first = imageFile('first.png', 'image/png', [1, 2, 3]);
+    const second = imageFile('second.jpg', 'image/jpeg', [4, 5]);
+    try {
+      fixture.images.setEnabled(false);
+      if (operation === 'drop') fireEvent.dragEnter(fixture.wrapper, { dataTransfer: { types: ['Files'] } });
+      const overlay = fixture.parent.querySelector('.claudian-drop-overlay');
+      expect(overlay?.classList.contains('visible')).toBe(operation === 'drop');
+      const { event, preventDefault } = dispatchBatch(fixture, operation, [first.file, second.file]);
+      // Rejected files settle synchronously through microtasks; observe the whole event, not its first Notice.
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(event.defaultPrevented).toBe(true);
+      expect(preventDefault).toHaveBeenCalledTimes(1);
+      expect(fixture.escapedDrop).not.toHaveBeenCalled();
+      expect(overlay?.classList.contains('visible')).toBe(false);
+      expect(fixture.images.getAttachedImages()).toEqual([]);
+      expect(within(fixture.parent).queryAllByRole('button', { name: /image attachment/i })).toEqual([]);
+      expect(fixture.changed).not.toHaveBeenCalled();
+      expect(first.read).not.toHaveBeenCalled();
+      expect(second.read).not.toHaveBeenCalled();
+      expect(fixture.editor.element.value).toBe('Keep this draft');
+      expect(Notice).toHaveBeenCalledTimes(1);
+      expect(Notice).toHaveBeenCalledWith('Image attachments are not supported by this provider.');
+    } finally { fixture.destroy(); }
+  });
+
+  it.each(['', 'image/png'])('attaches a dropped PNG with MIME %j by its supported filename', async type => {
+    const fixture = createFixture();
+    const image = imageFile('screenshot.PNG', type, [1, 2, 3]);
+    const unsupported = imageFile('notes.txt', '', [4, 5]);
+    const conflicting = imageFile('renamed.png', 'text/plain', [6, 7]);
+    try {
+      dispatchBatch(fixture, 'drop', [unsupported.file, conflicting.file, image.file]);
+      await waitFor(() => expect(fixture.images.getAttachedImages()).toHaveLength(1));
+      expect(fixture.images.getAttachedImages()).toEqual([
+        { id: expect.any(String), name: 'screenshot.PNG', mediaType: 'image/png', data: 'AQID', size: 3, source: 'drop' },
+      ]);
+      expect(within(fixture.parent).getByRole('button', { name: 'Image attachment: screenshot.PNG · 3 B' })).toBeTruthy();
+      expect(fixture.changed).toHaveBeenCalledTimes(1);
+      expect(image.read).toHaveBeenCalledTimes(1);
+      expect(unsupported.read).not.toHaveBeenCalled();
+      expect(conflicting.read).not.toHaveBeenCalled();
+      expect(fixture.editor.element.value).toBe('Keep this draft');
+      expect(Notice).not.toHaveBeenCalled();
+    } finally { fixture.destroy(); }
+  });
+
+  it.each(['paste', 'drop'] as const)('attaches an enabled %s batch once in byte and selection order', async operation => {
+    const fixture = createFixture();
+    const first = imageFile(operation === 'paste' ? 'screenshot' : 'first.png', 'image/png', [1, 2, 3]);
+    const second = imageFile('second.jpg', 'image/jpeg', [4, 5]);
+    try {
+      const { event, preventDefault } = dispatchBatch(fixture, operation, [first.file, second.file]);
+      await waitFor(() => expect(fixture.images.getAttachedImages()).toHaveLength(2));
+      expect(fixture.images.getAttachedImages()).toEqual([
+        { id: expect.any(String), name: first.file.name, mediaType: 'image/png', data: 'AQID', size: 3, source: operation },
+        { id: expect.any(String), name: 'second.jpg', mediaType: 'image/jpeg', data: 'BAU=', size: 2, source: operation },
+      ]);
+      expect(first.read).toHaveBeenCalledTimes(1);
+      expect(second.read).toHaveBeenCalledTimes(1);
+      expect(fixture.changed).toHaveBeenCalledTimes(2);
+      expect(within(fixture.parent).getAllByRole('button', { name: /^Image attachment:/ }).map(button => button.getAttribute('aria-label')))
+        .toEqual([`Image attachment: ${first.file.name} \u00b7 3 B`, 'Image attachment: second.jpg \u00b7 2 B']);
+      expect(event.defaultPrevented).toBe(true);
+      expect(preventDefault).toHaveBeenCalledTimes(1);
+      expect(fixture.editor.element.value).toBe('Keep this draft');
+      expect(Notice).not.toHaveBeenCalled();
+    } finally { fixture.destroy(); }
+  });
+
+  it.each(['text', 'empty', 'null-clipboard', 'null-image', 'empty-drop', 'ineligible-drop'] as const)(
+    'does not notify for a disabled %s operation without eligible images', async kind => {
+      const fixture = createFixture();
+      try {
+        fixture.images.setEnabled(false);
+        let event: Event;
+        if (kind === 'empty-drop' || kind === 'ineligible-drop') {
+          const files = kind === 'empty-drop' ? [] : [new File(['not an eligible extension'], 'image.svg', { type: 'image/png' })];
+          event = createEvent.drop(fixture.wrapper, { dataTransfer: { files } });
+          fireEvent(fixture.wrapper, event);
+        } else {
+          const items = kind === 'text' ? [{ type: 'text/plain', getAsFile: () => null }]
+            : kind === 'null-image' ? [{ type: 'image/png', getAsFile: () => null }] : [];
+          event = createEvent.paste(fixture.textbox, {
+            clipboardData: kind === 'null-clipboard' ? null : {
+              items, files: [], getData: () => kind === 'text' ? ' plain text' : '',
+            },
+          });
+          fireEvent(fixture.textbox, event);
+        }
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(Notice).not.toHaveBeenCalled();
+        expect(fixture.images.getAttachedImages()).toEqual([]);
+        expect(fixture.changed).not.toHaveBeenCalled();
+        expect(fixture.editor.element.value).toBe(kind === 'text' ? 'Keep this draft plain text' : 'Keep this draft');
+        expect(event.defaultPrevented).toBe(kind !== 'null-clipboard');
+      } finally { fixture.destroy(); }
+    },
+  );
 });
 
 it('focuses an already open note when its composer link is clicked', async () => {
@@ -532,7 +728,8 @@ it('reloads Codex skills for typed tokens while keeping completed chips atomic',
   const catalog = new CodexCommandCatalog(skills);
   const dropdown = new MainChatComposerDropdown(parent, editor.element, new FileContextManager(new VaultMentionDataProvider(createApp())), {
     providerId: 'codex', providerConfig: catalog.getDropdownConfig(),
-    providerDiscovery: createCatalogCommandDiscoveryStore(catalog),
+    // Codex has no command loader; its catalog discovers skills itself.
+    providerDiscovery: createCatalogCommandDiscoveryStore(catalog, async () => ({ result: { status: 'empty' } })),
   });
   const handleInput = jest.fn(() => dropdown.handleInputChange());
   editor.element.addEventListener('input', handleInput);
@@ -640,7 +837,7 @@ it('describes a suggestion on the unfocused host textbox and hands the descripti
   } finally { suggestion.destroy(); editor.destroy(); parent.remove(); }
 });
 
-it('retains a hidden suggestion through text, attachments, dropdowns and IME composition', () => {
+it('retains a hidden suggestion through text, attachments, expanded popups and IME composition', async () => {
   const parent = document.body.createDiv();
   const editor = createEditor(parent);
   let attachments = false;
@@ -665,12 +862,12 @@ it('retains a hidden suggestion through text, attachments, dropdowns and IME com
     attachments = false;
     suggestion.refresh();
     expect(within(parent).getByText('Add regression tests')).toBeDefined();
-    editor.element.setAttribute('aria-expanded', 'true');
-    suggestion.refresh();
-    expect(suggestion.handleKeydown(new KeyboardEvent('keydown', { key: 'Tab' }))).toBe(false);
-    expect(within(parent).queryByText('Add regression tests')).toBeNull();
-    editor.element.setAttribute('aria-expanded', 'false');
-    suggestion.refresh();
+    // Disclosures are not always native buttons.
+    const disclosure = parent.createDiv({ text: 'Details', attr: { role: 'button', tabindex: '0', 'aria-expanded': 'false' } });
+    disclosure.setAttribute('aria-expanded', 'true');
+    await waitFor(() => expect(within(parent).queryByText('Add regression tests')).toBeNull());
+    disclosure.setAttribute('aria-expanded', 'false');
+    await waitFor(() => expect(within(parent).getByText('Add regression tests')).toBeDefined());
     fireEvent.compositionStart(input);
     expect(suggestion.handleKeydown(new KeyboardEvent('keydown', { key: 'Tab' }))).toBe(false);
     fireEvent.compositionEnd(input);
@@ -679,4 +876,242 @@ it('retains a hidden suggestion through text, attachments, dropdowns and IME com
     expect(editor.element.value).toBe('');
     expect(within(parent).getByText('Add regression tests')).toBeDefined();
   } finally { suggestion.destroy(); editor.destroy(); parent.remove(); }
+});
+
+it('keeps completion relationships on the current textbox through mount and editing, then releases them', async () => {
+  const parent = document.body.createDiv();
+  const editor = createEditor(parent);
+  const app = createApp();
+  const originalFiles = app.vault.getFiles();
+  app.vault.getFiles = () => [...originalFiles, Object.assign(new TFile(), {
+    path: 'Notes/B.md', name: 'B.md', basename: 'B', stat: { mtime: testDate().getTime() },
+  })];
+  const files = new FileContextManager(new VaultMentionDataProvider(app));
+  const input = editor.element;
+  // Another tab's composer menu shares the document, so option ids must not collide.
+  const otherParent = document.body.createDiv();
+  const otherEditor = createEditor(otherParent);
+  const otherDropdown = new ComposerDropdownController(otherParent, otherEditor.element, [files.getMentionSource()]);
+  const dropdown = new ComposerDropdownController(parent, input, [files.getMentionSource()]);
+  try {
+    otherEditor.element.value = '@';
+    otherEditor.element.selectionStart = otherEditor.element.selectionEnd = 1;
+    otherDropdown.handleInputChange();
+    await waitFor(() => within(otherParent).getByRole('option', { name: 'Notes/A note.md' }));
+    input.value = '@';
+    input.selectionStart = input.selectionEnd = 1;
+    dropdown.handleInputChange();
+    const option = await waitFor(() => within(parent).getByRole('option', { name: 'Notes/A note.md' }));
+    const listbox = within(parent).getByRole('listbox');
+    const expectRelationships = (textbox: HTMLElement, active: HTMLElement | null) => {
+      const activeId = textbox.getAttribute('aria-activedescendant');
+      expect(activeId === null ? null : document.getElementById(activeId)).toBe(active);
+      expect(document.getElementById(textbox.getAttribute('aria-controls') ?? '')).toBe(listbox);
+      expect(textbox.getAttribute('aria-autocomplete')).toBe('list');
+    };
+    expectRelationships(within(parent).getByRole('textbox', { name: 'Message' }), option);
+    input.focus();
+    expect(within(parent).getAllByRole('textbox', { name: 'Message' })).toHaveLength(1);
+    const textbox = within(parent).getByRole('textbox', { name: 'Message' });
+    expect(textbox).not.toBe(input);
+    expectRelationships(textbox, option);
+    expect(await axe(parent, { runOnly: ['aria-allowed-attr'] })).toHaveNoViolations();
+    const second = within(parent).getByRole('option', { name: 'Notes/B.md' });
+    dropdown.handleKeydown(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
+    expect(second.getAttribute('aria-selected')).toBe('true');
+    expectRelationships(textbox, second);
+    fireEvent.mouseEnter(option);
+    expect(option.getAttribute('aria-selected')).toBe('true');
+    expectRelationships(textbox, option);
+    // Editor updates must not strip relationships written by the menu.
+    fireEvent.keyDown(textbox, { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(input.value).toBe('@\n'));
+    expectRelationships(textbox, option);
+    input.value = '@nonexistent';
+    input.selectionStart = input.selectionEnd = input.value.length;
+    dropdown.handleInputChange();
+    expect(textbox.getAttribute('aria-activedescendant')).toBeNull();
+    await waitFor(() => within(parent).getByRole('option', { name: 'No matches' }));
+    expectRelationships(textbox, null);
+    expect(dropdown.handleKeydown(new KeyboardEvent('keydown', { key: 'Escape' }))).toBe(true);
+    expect(textbox.getAttribute('aria-activedescendant')).toBeNull();
+    expect(textbox.getAttribute('aria-controls')).toBeNull();
+    dropdown.destroy();
+    expect(textbox.getAttribute('aria-autocomplete')).toBeNull();
+    expect(await axe(parent, { runOnly: ['aria-allowed-attr'] })).toHaveNoViolations();
+  } finally {
+    dropdown.destroy(); otherDropdown.destroy(); files.destroy();
+    editor.destroy(); otherEditor.destroy(); parent.remove(); otherParent.remove();
+  }
+});
+
+it('leaves Resume picker relationships intact when an inactive completion controller is destroyed', async () => {
+  const parent = document.body.createDiv();
+  const editor = createEditor(parent);
+  const files = new FileContextManager(new VaultMentionDataProvider(createApp()));
+  const dropdown = new ComposerDropdownController(parent, editor.element, [files.getMentionSource()]);
+  let resume: ResumeSessionDropdown | undefined;
+  try {
+    editor.element.value = '@A';
+    editor.element.selectionStart = editor.element.selectionEnd = 2;
+    dropdown.handleInputChange();
+    await waitFor(() => within(parent).getByRole('option', { name: 'Notes/A note.md' }));
+    dropdown.hide();
+    editor.element.focus();
+    const textbox = within(parent).getByRole('textbox', { name: 'Message' });
+    resume = new ResumeSessionDropdown(parent, editor.element, [{
+      id: 'previous', providerId: 'claude', title: 'Previous conversation',
+      createdAt: testDate({ minutes: -2 }).getTime(), lastActivityAt: testDate({ minutes: -1 }).getTime(),
+      messageCount: 1, preview: 'Previous prompt',
+    }], null, {
+      onSelect: () => undefined, onDismiss: () => resume?.destroy(),
+    });
+    const listbox = within(parent).getByRole('listbox', { name: 'Resume conversation' });
+    const option = within(listbox).getByRole('option', { name: /Previous conversation/ });
+    expect(textbox.getAttribute('aria-activedescendant')).toBe(option.id);
+    expect(textbox.getAttribute('aria-controls')).toBe(listbox.id);
+    dropdown.destroy();
+    expect(textbox.getAttribute('aria-activedescendant')).toBe(option.id);
+    expect(textbox.getAttribute('aria-controls')).toBe(listbox.id);
+    expect(textbox.getAttribute('aria-haspopup')).toBe('listbox');
+    expect(resume.isVisible()).toBe(true);
+    expect(await axe(parent, { runOnly: ['aria-allowed-attr'] })).toHaveNoViolations();
+    resume.handleKeydown(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(textbox.getAttribute('aria-activedescendant')).toBeNull();
+    expect(textbox.getAttribute('aria-controls')).toBeNull();
+    expect(textbox.getAttribute('aria-haspopup')).toBeNull();
+    expect(textbox.getAttribute('aria-autocomplete')).toBeNull();
+  } finally { resume?.destroy(); dropdown.destroy(); files.destroy(); editor.destroy(); parent.remove(); }
+});
+
+
+it('localizes the default composer hint before and after CodeMirror mounts', () => {
+  setLocale('zh-CN');
+  const parent = document.body.createDiv();
+  const editor = createEditor(parent);
+  try {
+    const hint = '请求修改、@提及文件、运行 /命令';
+    expect(editor.element.placeholder).toBe(hint);
+    expect(within(parent).getByRole('textbox', { name: '消息' }).getAttribute('data-placeholder')).toBe(hint);
+    editor.element.focus();
+    expect(within(parent).getByRole('textbox', { name: '消息' })).toBeDefined();
+    expect(within(parent).getByText(hint)).toBeDefined();
+  } finally {
+    editor.destroy();
+    parent.remove();
+    setLocale('en');
+  }
+});
+
+
+it('localizes the linked content removal button through the info row', async () => {
+  setLocale('zh-CN');
+  const parent = document.body.createDiv();
+  const row = new ComposerInfoRow(parent);
+  const remove = jest.fn();
+  const chip = new LinkedContentChip(row, jest.fn(), remove);
+  try {
+    chip.render({ path: 'Notes/A.md', kind: 'file', label: 'A', icon: 'file-text', missing: false, target: null }, true);
+    const button = within(parent).getByRole('button', { name: '移除关联内容：Notes/A.md' });
+    expect(await axe(parent)).toHaveNoViolations();
+    fireEvent.click(button);
+    expect(remove).toHaveBeenCalledTimes(1);
+  } finally {
+    chip.destroy();
+    row.destroy();
+    parent.remove();
+    setLocale('en');
+  }
+});
+
+
+it('localizes image attachment labels and removal controls', async () => {
+  setLocale('zh-CN');
+  const parent = document.body.createDiv();
+  const editor = createEditor(parent);
+  const images = new ImageContextManager({ pushScope: jest.fn(), popScope: jest.fn() }, parent, editor.element, {});
+  try {
+    images.setImages([{ id: 'image', name: 'photo.png', mediaType: 'image/png', data: 'dGVzdA==', size: 500, source: 'paste' }]);
+    fireEvent.click(within(parent).getByRole('button', { name: '图片附件：photo.png · 500 B' }));
+    const preview = within(document.body).getByRole('dialog', { name: '图片预览：photo.png' });
+    expect(within(preview).getByRole('img', { name: 'photo.png' })).toBeDefined();
+    expect(await axe(preview)).toHaveNoViolations();
+    fireEvent.click(within(preview).getByRole('button', { name: '关闭图片预览' }));
+    expect(within(parent).getByText('图片')).toBeDefined();
+    const remove = within(parent).getByRole('button', { name: '移除图片附件：photo.png · 500 B' });
+    expect(await axe(remove)).toHaveNoViolations();
+    fireEvent.click(remove);
+    expect(images.getAttachedImages()).toEqual([]);
+  } finally {
+    images.destroy();
+    editor.destroy();
+    parent.remove();
+    setLocale('en');
+  }
+});
+
+
+it('localizes image overflow controls and updates their accessible names on expansion', async () => {
+  setLocale('zh-CN');
+  const parent = document.body.createDiv();
+  // jsdom has no layout engine or host stylesheet; supply row metrics and host visibility semantics.
+  const style = parent.createEl('style', { text: '.claudian-hidden, .claudian-context-chip--overflow-hidden { display: none; }' });
+  const editor = createEditor(parent);
+  const trayEl = parent.createDiv();
+  const tray = new ComposerContextTray(trayEl);
+  const images = new ImageContextManager({ pushScope: jest.fn(), popScope: jest.fn() }, parent, editor.element, {}, undefined, tray);
+  try {
+    images.setImages(Array.from({ length: 4 }, (_, index) => ({
+      id: `image-${index}`, name: `photo-${index}.png`, mediaType: 'image/png' as const,
+      data: 'dGVzdA==', size: 500, source: 'paste' as const,
+    })));
+    const chips = trayEl.querySelectorAll<HTMLElement>('.claudian-context-chip');
+    [0, 0, 38, 76].forEach((top, index) => Object.defineProperties(chips[index], {
+      offsetParent: { configurable: true, value: trayEl },
+      offsetTop: { configurable: true, value: top }, offsetHeight: { configurable: true, value: 20 },
+    }));
+    tray.refreshLayout();
+    const more = within(trayEl).getByRole('button', { name: '显示另外 2 项上下文' });
+    expect(more.textContent).toBe('+2 项');
+    fireEvent.click(more);
+    const less = within(trayEl).getByRole('button', { name: '收起' });
+    expect(less).toBe(more);
+    expect(less.textContent).toBe('收起');
+    expect(less.getAttribute('aria-expanded')).toBe('true');
+    expect(within(trayEl).getByRole('button', { name: '图片附件：photo-3.png · 500 B' })).toBeDefined();
+    expect(await axe(trayEl)).toHaveNoViolations();
+    fireEvent.click(less);
+    expect(within(trayEl).getByRole('button', { name: '显示另外 2 项上下文' })).toBe(more);
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    expect(within(trayEl).queryByRole('button', { name: '图片附件：photo-3.png · 500 B' })).toBeNull();
+  } finally {
+    images.destroy(); tray.destroy(); editor.destroy(); style.remove(); parent.remove(); setLocale('en');
+  }
+});
+
+
+it.each(['loading', 'error'] as const)('localizes provider command %s wrappers through the real dropdown', async status => {
+  setLocale('zh-CN');
+  const parent = document.body.createDiv();
+  const editor = createEditor(parent);
+  const files = new FileContextManager(new VaultMentionDataProvider(createApp()));
+  const snapshot: ProviderCommandDiscoverySnapshot<ProviderCommandEntry> = status === 'loading'
+    ? { status: 'loading' } : { status: 'error', message: 'Native discovery failure', retryable: true };
+  const dropdown = new MainChatComposerDropdown(parent, editor.element, files, {
+    providerId: 'codex', providerDiscovery: {
+      getSnapshot: () => snapshot, load: async () => ({ status: 'empty' }), retry: async () => ({ status: 'empty' }), subscribe: () => () => undefined,
+    },
+  });
+  try {
+    editor.element.value = '/';
+    editor.element.selectionStart = editor.element.selectionEnd = 1;
+    dropdown.handleInputChange();
+    const expectedTexts = status === 'loading'
+      ? ['正在加载提供商命令…'] : ['重新查找提供商命令', 'Native discovery failure'];
+    await waitFor(() => expect(expectedTexts.map(text => within(parent).getByText(text).textContent)).toEqual(expectedTexts));
+    const optionName = status === 'loading' ? '正在加载提供商命令…' : /重试/;
+    expect(within(parent).getByRole('option', { name: optionName })).toBeDefined();
+  } finally {
+    dropdown.destroy(); files.destroy(); editor.destroy(); parent.remove(); setLocale('en');
+  }
 });

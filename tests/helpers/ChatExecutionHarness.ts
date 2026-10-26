@@ -175,11 +175,11 @@ export function createSubmission(overrides: Partial<ChatTurnSubmission> = {}): C
     canonicalText: 'canonical input',
     images: [],
     context: {
-      linkedContent: { path: 'note.md', content: 'note' },
+      linkedContent: { path: 'note.md' },
     },
     conversationHistory: [],
     configuration: {
-      systemInstructions: { kind: 'provider-default' },
+      systemInstructions: { kind: 'main-agent' as const, instructions: 'Main Agent prompt.' },
       model: 'model-1',
     },
     toolPolicy: { kind: 'provider-default' },
@@ -188,6 +188,7 @@ export function createSubmission(overrides: Partial<ChatTurnSubmission> = {}): C
 }
 
 export function createHarness(options: {
+  resolveBackend?: ChatExecutionCoordinatorDeps['resolveBackend'];
   onBackgroundWorkChanged?: (isWorking: boolean) => void;
   onError?: (error: unknown) => void;
   onRequestedEvent?: (
@@ -200,6 +201,7 @@ export function createHarness(options: {
   idleReleaseMs?: number;
   isOwnerIdle?: ChatExecutionCoordinatorDeps['isOwnerIdle'];
   onIdleRelease?: ChatExecutionCoordinatorDeps['onIdleRelease'];
+  bindSessionTools?: ChatExecutionCoordinatorDeps['bindSessionTools'];
 } = {}) {
   const registry = new ProviderExecutionLifecycleRegistry();
   const backends = new Map<ProviderId, FakeBackend>([
@@ -234,14 +236,14 @@ export function createHarness(options: {
   let nextId = 0;
   const coordinator = new ChatExecutionCoordinator({
     lifecycleRegistry: registry,
-    resolveBackend: (providerId) => {
+    resolveBackend: options.resolveBackend ?? ((providerId) => {
       const backend = backends.get(providerId);
       if (!backend) throw new Error(`Missing backend: ${providerId}`);
       return backend;
-    },
+    }),
     persistence: repository,
     interactionPort,
-    vaultWorkingDirectory: '/vault',
+    workingDirectory: '/vault',
     createId: () => `local-${++nextId}`,
     onRequestedEvent: options.onRequestedEvent ?? ((event) => {
       requestedEvents.push(event);
@@ -257,6 +259,7 @@ export function createHarness(options: {
     idleReleaseMs: options.idleReleaseMs,
     isOwnerIdle: options.isOwnerIdle,
     onIdleRelease: options.onIdleRelease,
+    bindSessionTools: options.bindSessionTools,
   });
 
   return {

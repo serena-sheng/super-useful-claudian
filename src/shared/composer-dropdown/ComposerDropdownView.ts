@@ -1,5 +1,7 @@
 import { setIcon } from 'obsidian';
 
+import { t } from '@/i18n/i18n';
+
 import type { ComposerDropdownItem, ComposerInputElement } from './types';
 
 export interface ComposerDropdownViewOptions {
@@ -7,11 +9,26 @@ export interface ComposerDropdownViewOptions {
   readonly inputEl: ComposerInputElement;
   readonly onHover: (index: number) => void;
   readonly onSelect: (index: number) => void;
+  readonly onVisibilityChange?: () => void;
+}
+
+let nextListboxId = 0;
+
+interface ItemRow {
+  readonly el: HTMLElement;
+  readonly iconEl: HTMLElement | null;
+  readonly labelEl: HTMLElement;
+  readonly detailEl: HTMLElement | null;
+  icon: string | undefined;
+  selectable: boolean;
 }
 
 export class ComposerDropdownView {
   private dropdownEl: HTMLElement | null = null;
-  private itemEls: HTMLElement[] = [];
+  private rows: ItemRow[] = [];
+  private readonly listboxId = `claudian-composer-listbox-${++nextListboxId}`;
+  /** Textbox relationships this menu wrote; another popup may have replaced them since. */
+  private readonly writtenAttributes = new Map<string, string>();
 
   constructor(
     private readonly containerEl: HTMLElement,
@@ -23,15 +40,20 @@ export class ComposerDropdownView {
   }
 
   destroy(): void {
+    const wasVisible = this.isVisible();
+    for (const attribute of [...this.writtenAttributes.keys()]) this.#releaseInputAttribute(attribute);
     this.dropdownEl?.remove();
     this.dropdownEl = null;
-    this.itemEls = [];
+    this.rows = [];
+    if (wasVisible) this.options.onVisibilityChange?.();
   }
 
   hide(): void {
+    this.#releaseInputAttribute('aria-activedescendant');
+    this.#releaseInputAttribute('aria-controls');
+    if (!this.isVisible()) return;
     this.dropdownEl?.removeClass('is-visible');
-    this.options.inputEl.removeAttribute?.('aria-activedescendant');
-    this.options.inputEl.setAttribute?.('aria-expanded', 'false');
+    this.options.onVisibilityChange?.();
   }
 
   isVisible(): boolean {
@@ -40,68 +62,98 @@ export class ComposerDropdownView {
 
   render(items: readonly ComposerDropdownItem[], selectedIndex: number): void {
     const dropdown = this.#ensureDropdown();
-    dropdown.empty();
-    this.itemEls = [];
+    const wasVisible = this.isVisible();
+    this.#releaseInputAttribute('aria-activedescendant');
 
-    for (let index = 0; index < items.length; index++) {
-      const item = items[index];
-      const selectable = item.kind !== 'status' && !item.disabled;
-      const itemEl = dropdown.createDiv({
-        cls: [
-          'claudian-composer-dropdown-item',
-          item.className ?? '',
-          item.kind === 'status' ? `is-${item.state}` : '',
-          index === selectedIndex ? 'is-selected' : '',
-        ].filter(Boolean).join(' '),
-      });
-      const itemId = `claudian-composer-dropdown-item-${index}`;
-      itemEl.setAttribute('id', itemId);
-      itemEl.setAttribute('role', 'option');
-      itemEl.setAttribute('aria-selected', String(index === selectedIndex));
-      if (!selectable) itemEl.setAttribute('aria-disabled', 'true');
-
-      if (item.kind !== 'status' && item.icon) {
-        const iconEl = itemEl.createSpan({ cls: 'claudian-composer-dropdown-icon' });
-        setIcon(iconEl, item.icon);
+    // Rewrite rows in place across keystrokes; rebuilding each row and its icon dominates large lists.
+    let rebuilt = items.length !== this.rows.length;
+    this.rows = items.map((item, index) => {
+      const icon = item.kind === 'status' ? undefined : item.icon;
+      const row = this.rows[index];
+      if (row && Boolean(row.iconEl) === Boolean(icon) && Boolean(row.detailEl) === Boolean(item.detail)) {
+        this.#updateRow(row, item, index === selectedIndex);
+        return row;
       }
-
-      const copyEl = itemEl.createDiv({ cls: 'claudian-composer-dropdown-copy' });
-      copyEl.createDiv({ cls: 'claudian-composer-dropdown-label', text: item.label });
-      if (item.detail) {
-        copyEl.createDiv({ cls: 'claudian-composer-dropdown-detail', text: item.detail });
-      }
-      if (item.kind === 'folder') {
-        const folderIcon = itemEl.createSpan({ cls: 'claudian-composer-dropdown-folder-icon' });
-        setIcon(folderIcon, 'chevron-right');
-      }
-
-      if (selectable) {
-        itemEl.addEventListener('mouseenter', () => this.options.onHover(index));
-        itemEl.addEventListener('click', event => {
-          event.stopPropagation();
-          this.options.onSelect(index);
-        });
-      }
-      this.itemEls.push(itemEl);
-    }
+      rebuilt = true;
+      return this.#createRow(dropdown, item, index, index === selectedIndex);
+    });
+    if (rebuilt) dropdown.replaceChildren(...this.rows.map(row => row.el));
 
     dropdown.addClass('is-visible');
-    this.options.inputEl.setAttribute?.('aria-expanded', 'true');
+    this.#setInputAttribute('aria-controls', this.listboxId);
     this.updateSelection(selectedIndex);
     this.#positionFixed();
+    if (!wasVisible) this.options.onVisibilityChange?.();
   }
 
-  updateSelection(selectedIndex: number): void {
-    for (let index = 0; index < this.itemEls.length; index++) {
-      const itemEl = this.itemEls[index];
+  #createRow(dropdown: HTMLElement, item: ComposerDropdownItem, index: number, selected: boolean): ItemRow {
+    const el = dropdown.createDiv();
+    el.setAttribute('id', `${this.listboxId}-option-${index}`);
+    el.setAttribute('role', 'option');
+    const icon = item.kind === 'status' ? undefined : item.icon;
+    const iconEl = icon ? el.createSpan({ cls: 'claudian-composer-dropdown-icon' }) : null;
+    const copyEl = el.createDiv({ cls: 'claudian-composer-dropdown-copy' });
+    const row: ItemRow = {
+      el,
+      iconEl,
+      labelEl: copyEl.createDiv({ cls: 'claudian-composer-dropdown-label' }),
+      detailEl: item.detail ? copyEl.createDiv({ cls: 'claudian-composer-dropdown-detail' }) : null,
+      icon: undefined,
+      selectable: false,
+    };
+    el.addEventListener('mouseenter', () => {
+      if (row.selectable) this.options.onHover(index);
+    });
+    el.addEventListener('click', event => {
+      if (!row.selectable) return;
+      event.stopPropagation();
+      this.options.onSelect(index);
+    });
+    this.#updateRow(row, item, selected);
+    return row;
+  }
+
+  #updateRow(row: ItemRow, item: ComposerDropdownItem, selected: boolean): void {
+    row.selectable = item.kind !== 'status' && !item.disabled;
+    row.el.className = [
+      'claudian-composer-dropdown-item',
+      item.className ?? '',
+      item.kind === 'status' ? `is-${item.state}` : '',
+      selected ? 'is-selected' : '',
+    ].filter(Boolean).join(' ');
+    if (row.selectable) row.el.removeAttribute('aria-disabled');
+    else row.el.setAttribute('aria-disabled', 'true');
+    const icon = item.kind === 'status' ? undefined : item.icon;
+    if (row.iconEl && icon && icon !== row.icon) {
+      setIcon(row.iconEl, icon);
+      row.icon = icon;
+    }
+    row.labelEl.textContent = item.label;
+    if (row.detailEl) row.detailEl.textContent = item.detail ?? '';
+  }
+
+  updateSelection(selectedIndex: number, reveal = true): void {
+    this.#releaseInputAttribute('aria-activedescendant');
+    for (let index = 0; index < this.rows.length; index++) {
+      const itemEl = this.rows[index].el;
       const selected = index === selectedIndex;
       itemEl.toggleClass('is-selected', selected);
       itemEl.setAttribute('aria-selected', String(selected));
       if (selected) {
-        this.options.inputEl.setAttribute?.('aria-activedescendant', itemEl.id);
-        itemEl.scrollIntoView({ block: 'nearest' });
+        this.#setInputAttribute('aria-activedescendant', itemEl.id);
+        if (reveal) this.#revealInList(itemEl);
       }
     }
+  }
+
+  /** As in the resume picker, reveal only inside the popup, not its workspace ancestors. */
+  #revealInList(item: HTMLElement): void {
+    const list = this.dropdownEl;
+    if (!list) return;
+    const listRect = list.getBoundingClientRect();
+    const itemRect = item.getBoundingClientRect();
+    if (itemRect.top < listRect.top) list.scrollTop -= listRect.top - itemRect.top;
+    else if (itemRect.bottom > listRect.bottom) list.scrollTop += itemRect.bottom - listRect.bottom;
   }
 
   #ensureDropdown(): HTMLElement {
@@ -111,11 +163,27 @@ export class ComposerDropdownView {
         'claudian-composer-dropdown',
         this.options.fixed ? 'claudian-composer-dropdown--fixed' : '',
       ].filter(Boolean).join(' '),
-      attr: { role: 'listbox' },
+      attr: { id: this.listboxId, role: 'listbox', 'aria-label': t('common.inputSuggestions') },
     });
-    this.options.inputEl.setAttribute?.('aria-autocomplete', 'list');
-    this.options.inputEl.setAttribute?.('aria-expanded', 'false');
+    this.#setInputAttribute('aria-autocomplete', 'list');
     return this.dropdownEl;
+  }
+
+  get #textbox(): HTMLElement {
+    return this.options.inputEl.getAccessibleTextbox?.() ?? this.options.inputEl;
+  }
+
+  #setInputAttribute(attribute: string, value: string): void {
+    this.writtenAttributes.set(attribute, value);
+    this.#textbox.setAttribute(attribute, value);
+  }
+
+  /** Leaves the attribute alone when another popup has since taken it over. */
+  #releaseInputAttribute(attribute: string): void {
+    const written = this.writtenAttributes.get(attribute);
+    if (written === undefined) return;
+    this.writtenAttributes.delete(attribute);
+    if (this.#textbox.getAttribute(attribute) === written) this.#textbox.removeAttribute(attribute);
   }
 
   #positionFixed(): void {

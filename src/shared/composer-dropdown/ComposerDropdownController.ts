@@ -1,32 +1,26 @@
+import { t } from '@/i18n/i18n';
+
 import { ComposerDropdownView } from './ComposerDropdownView';
 import type {
-  ComposerDropdownFolderItem,
   ComposerDropdownItem,
   ComposerDropdownSource,
   ComposerInputElement,
   ComposerTriggerMatch,
 } from './types';
 
-interface ActiveFolder {
-  readonly item: ComposerDropdownFolderItem;
-}
-
-const INPUT_LOAD_DEBOUNCE_MS = 200;
-
 export interface ComposerDropdownControllerOptions {
   readonly fixed?: boolean;
+  /** Runs after the menu shows or hides. */
+  readonly onVisibilityChange?: () => void;
 }
 
 export class ComposerDropdownController {
   private readonly sourceUnsubscribers: Array<() => void> = [];
   private readonly view: ComposerDropdownView;
   private activeController: AbortController | null = null;
-  private activeFolder: ActiveFolder | null = null;
   private activeMatch: ComposerTriggerMatch | null = null;
   private activeSource: ComposerDropdownSource | null = null;
   private destroyed = false;
-  private generation = 0;
-  private inputLoadTimer: number | null = null;
   private items: readonly ComposerDropdownItem[] = [];
   private selectedIndex = -1;
 
@@ -39,7 +33,8 @@ export class ComposerDropdownController {
     this.view = new ComposerDropdownView(containerEl, {
       fixed: options.fixed,
       inputEl,
-      onHover: index => this.#setSelectedIndex(index),
+      onVisibilityChange: options.onVisibilityChange,
+      onHover: index => this.#setSelectedIndex(index, false),
       onSelect: index => this.#selectIndex(index),
     });
     for (const source of sources) {
@@ -63,26 +58,21 @@ export class ComposerDropdownController {
   }
 
   handleInputChange(): void {
-    this.#rematchAndLoad(true);
+    this.#rematchAndLoad();
   }
 
-  #rematchAndLoad(inputDriven: boolean): void {
+  #rematchAndLoad(): void {
     if (this.destroyed) {
       this.hide();
       return;
     }
     const cursor = this.inputEl.selectionStart ?? 0;
-    const folderMatch = this.#matchActiveFolder(this.inputEl.value, cursor);
     let sourceMatch: { match: ComposerTriggerMatch; source: ComposerDropdownSource } | undefined;
-    if (folderMatch && this.activeSource) {
-      sourceMatch = { match: folderMatch, source: this.activeSource };
-    } else {
-      for (const source of this.sources) {
-        const match = source.match(this.inputEl.value, cursor);
-        if (match && !this.inputEl.isChipRange?.(match.start, match.end)
-          && (!sourceMatch || match.start > sourceMatch.match.start)) {
-          sourceMatch = { match, source };
-        }
+    for (const source of this.sources) {
+      const match = source.match(this.inputEl.value, cursor);
+      if (match && !this.inputEl.isChipRange?.(match.start, match.end)
+        && (!sourceMatch || match.start > sourceMatch.match.start)) {
+        sourceMatch = { match, source };
       }
     }
     if (!sourceMatch) {
@@ -91,11 +81,10 @@ export class ComposerDropdownController {
     }
     const { match, source } = sourceMatch;
     const opening = this.activeSource?.id !== source.id;
-    if (opening) this.activeFolder = null;
     this.activeSource = source;
     this.activeMatch = match;
     if (opening) source.onOpen?.();
-    this.#requestActiveLoad(inputDriven);
+    this.#requestActiveLoad();
   }
 
   handleKeydown(event: KeyboardEvent): boolean {
@@ -117,11 +106,7 @@ export class ComposerDropdownController {
         return true;
       case 'Escape':
         event.preventDefault();
-        if (this.activeFolder) {
-          this.#returnToRoot();
-        } else {
-          this.hide();
-        }
+        this.hide();
         return true;
       default:
         return false;
@@ -130,7 +115,6 @@ export class ComposerDropdownController {
 
   hide(): void {
     this.#invalidateActiveLoad();
-    this.activeFolder = null;
     this.activeMatch = null;
     this.activeSource = null;
     this.items = [];
@@ -142,104 +126,63 @@ export class ComposerDropdownController {
     return this.view.isVisible();
   }
 
-  #currentFolderQuery(match: ComposerTriggerMatch): string | null {
-    const prefix = this.activeFolder?.item.inputPrefix;
-    if (!prefix) return match.query;
-    if (!match.query.toLocaleLowerCase().startsWith(prefix.toLocaleLowerCase())) return null;
-    return match.query.slice(prefix.length);
-  }
-
-  #matchActiveFolder(input: string, cursor: number): ComposerTriggerMatch | null {
-    const prefix = this.activeFolder?.item.inputPrefix;
-    const match = this.activeMatch;
-    if (!prefix || !match || cursor < match.start) return null;
-    const segment = input.slice(match.start, cursor);
-    const expected = `${match.trigger}${prefix}`;
-    if (!segment.toLocaleLowerCase().startsWith(expected.toLocaleLowerCase())) return null;
-    return {
-      ...match,
-      end: cursor,
-      query: segment.slice(match.trigger.length),
-    };
-  }
-
   #rematchInput(): void {
     if (!this.activeSource || !this.activeMatch || this.destroyed) return;
-    this.#rematchAndLoad(false);
+    this.#rematchAndLoad();
   }
 
-  #requestActiveLoad(inputDriven: boolean): void {
+  #requestActiveLoad(): void {
     const source = this.activeSource;
     const match = this.activeMatch;
     if (!source || !match || this.destroyed) return;
 
-    const folderQuery = this.#currentFolderQuery(match);
-    if (this.activeFolder && folderQuery === null) {
-      this.activeFolder = null;
-    }
-
-    const generation = this.#invalidateActiveLoad();
-    this.items = [{ id: 'loading', kind: 'status', label: 'Loading…', state: 'loading' }];
-    this.selectedIndex = -1;
-    this.view.render(this.items, this.selectedIndex);
-
-    if (inputDriven && source.inputLoadPolicy === 'debounced') {
-      this.inputLoadTimer = window.setTimeout(() => {
-        this.inputLoadTimer = null;
-        void this.loadActive(generation);
-      }, INPUT_LOAD_DEBOUNCE_MS);
-      return;
-    }
-
-    void this.loadActive(generation);
-  }
-
-  private async loadActive(generation: number): Promise<void> {
-    const source = this.activeSource;
-    const match = this.activeMatch;
-    if (
-      !source
-      || !match
-      || this.destroyed
-      || generation !== this.generation
-    ) return;
-
+    this.#invalidateActiveLoad();
     const controller = new AbortController();
     this.activeController = controller;
-
+    let result: ReturnType<ComposerDropdownSource['load']>;
     try {
-      const items = await (this.activeFolder
-        ? this.activeFolder.item.load(this.#currentFolderQuery(match) ?? '', controller.signal)
-        : source.load(match, controller.signal));
-      if (this.destroyed || controller.signal.aborted || generation !== this.generation) return;
-      this.items = items.length > 0
-        ? items
-        : [{ id: 'empty', kind: 'status', label: 'No matches', state: 'empty' }];
-      this.selectedIndex = this.#findSelectable(0, 1, true);
-      this.view.render(this.items, this.selectedIndex);
+      result = source.load(match, controller.signal);
     } catch {
-      if (this.destroyed || controller.signal.aborted || generation !== this.generation) return;
-      this.items = [{
-        id: 'error',
-        kind: 'status',
-        label: 'Could not load suggestions',
-        detail: 'Type again to retry',
-        state: 'error',
-      }];
-      this.selectedIndex = -1;
-      this.view.render(this.items, this.selectedIndex);
+      this.#renderLoadFailure();
+      return;
     }
+    // Synchronous results replace the list directly; only pending loads show a placeholder.
+    if (!(result instanceof Promise)) {
+      this.#renderLoaded(result);
+      return;
+    }
+    this.items = [{ id: 'loading', kind: 'status', label: t('chat.suggestions.loading'), state: 'loading' }];
+    this.selectedIndex = -1;
+    this.view.render(this.items, this.selectedIndex);
+    result.then(
+      items => { if (!controller.signal.aborted) this.#renderLoaded(items); },
+      () => { if (!controller.signal.aborted) this.#renderLoadFailure(); },
+    );
   }
 
-  #invalidateActiveLoad(): number {
-    this.generation++;
-    if (this.inputLoadTimer !== null) {
-      window.clearTimeout(this.inputLoadTimer);
-      this.inputLoadTimer = null;
-    }
+  #renderLoaded(items: readonly ComposerDropdownItem[]): void {
+    this.items = items.length > 0
+      ? items
+      : [{ id: 'empty', kind: 'status', label: t('chat.suggestions.noMatches'), state: 'empty' }];
+    this.selectedIndex = this.#findSelectable(0, 1, true);
+    this.view.render(this.items, this.selectedIndex);
+  }
+
+  #renderLoadFailure(): void {
+    this.items = [{
+      id: 'error',
+      kind: 'status',
+      label: t('chat.suggestions.loadFailed'),
+      detail: t('chat.suggestions.retryHint'),
+      state: 'error',
+    }];
+    this.selectedIndex = -1;
+    this.view.render(this.items, this.selectedIndex);
+  }
+
+  #invalidateActiveLoad(): void {
     this.activeController?.abort();
     this.activeController = null;
-    return this.generation;
   }
 
   #moveSelection(delta: number): void {
@@ -262,41 +205,11 @@ export class ComposerDropdownController {
     return -1;
   }
 
-  #returnToRoot(): void {
-    const folder = this.activeFolder;
-    const match = this.activeMatch;
-    this.activeFolder = null;
-    if (folder?.item.inputPrefix && match) {
-      this.replaceRange(match, match.trigger);
-      this.activeMatch = {
-        ...match,
-        end: match.start + match.trigger.length,
-        query: '',
-      };
-    }
-    this.#requestActiveLoad(false);
-  }
-
   #selectIndex(index: number): void {
     const item = this.items[index];
     const source = this.activeSource;
     const match = this.activeMatch;
     if (!item || item.kind === 'status' || item.disabled || !source || !match) return;
-    if (item.kind === 'folder') {
-      this.activeFolder = { item };
-      if (item.inputPrefix !== undefined) {
-        const replacement = `${match.trigger}${item.inputPrefix}`;
-        this.replaceRange(match, replacement);
-        this.activeMatch = {
-          ...match,
-          end: match.start + replacement.length,
-          query: item.inputPrefix,
-        };
-      }
-      this.#requestActiveLoad(false);
-      return;
-    }
-
     const action = source.select(item, match);
     if (action.kind === 'invoke') {
       action.onApplied();
@@ -323,10 +236,10 @@ export class ComposerDropdownController {
     this.inputEl.selectionEnd = cursor;
   }
 
-  #setSelectedIndex(index: number): void {
+  #setSelectedIndex(index: number, reveal = true): void {
     const item = this.items[index];
     if (!item || item.kind === 'status' || item.disabled) return;
     this.selectedIndex = index;
-    this.view.updateSelection(index);
+    this.view.updateSelection(index, reveal);
   }
 }

@@ -4,13 +4,14 @@ import type { ProviderId } from '@/core/providers/types';
 import type { ComposerDraftController } from '@/features/chat/composer/ComposerDraftController';
 import { type QueueStripView, renderQueueStrip } from '@/features/chat/composer/QueueStrip';
 import type { ChatState } from '@/features/chat/state/ChatState';
-import { cloneQueuedMessage, mergeQueuedMessages } from '@/features/chat/state/chatTurnRequest';
+import { mergeQueuedMessages } from '@/features/chat/state/chatTurnRequest';
 import type { QueuedMessage } from '@/features/chat/state/types';
 import type { TurnCoordinator } from '@/features/chat/turns/TurnCoordinator';
 import type { TurnSteering } from '@/features/chat/turns/TurnSteering';
 import { t } from '@/i18n/i18n';
 
 export interface TurnQueueDeps {
+  onWorkChanged?: () => void;
   state: ChatState;
   turns: TurnCoordinator;
   drafts: Pick<ComposerDraftController, 'restore'>;
@@ -29,10 +30,11 @@ export interface TurnQueueDeps {
  */
 export class TurnQueue {
   readonly #write: (value: QueuedMessage | null) => void;
-  #scheduled: { conversationId: string | null; timer: number } | null = null;
+  #scheduled: { conversationId: string | null; timer: number | null } | null = null;
 
   constructor(private readonly deps: TurnQueueDeps) {
-    this.#write = deps.state.claimQueuedMessageWriter();
+    const write = deps.state.claimQueuedMessageWriter();
+    this.#write = value => { write(value); deps.onWorkChanged?.(); };
   }
 
   get message(): QueuedMessage | null {
@@ -53,9 +55,9 @@ export class TurnQueue {
 
   withdrawToComposer(): void {
     this.cancelScheduled();
-    if (!this.message) return;
+    const message = this.message;
+    if (!message) return;
 
-    const message = cloneQueuedMessage(this.message);
     this.#write(null);
     this.returnMessageToComposer(message, { merge: true });
     this.updateIndicator();
@@ -63,8 +65,7 @@ export class TurnQueue {
 
   restoreToComposer(): void {
     this.cancelScheduled();
-    const message = this.message ? cloneQueuedMessage(this.message) : null;
-    this.returnMessageToComposer(message, { merge: true });
+    this.returnMessageToComposer(this.message, { merge: true });
     this.#write(null);
     this.updateIndicator();
   }
@@ -83,7 +84,7 @@ export class TurnQueue {
   returnUnsent(message: QueuedMessage): void {
     const { turns } = this.deps;
     if (turns.isInFlight && !turns.cancelRequested) {
-      this.#write(this.message ? mergeQueuedMessages(message, this.message) : cloneQueuedMessage(message));
+      this.#write(this.message ? mergeQueuedMessages(message, this.message) : message);
     } else {
       this.returnMessageToComposer(message, { merge: true });
     }
@@ -96,13 +97,13 @@ export class TurnQueue {
     if (this.#scheduled) return true;
 
     // The visible queue retains ownership until the scheduled callback enters a turn.
-    const reservation = { conversationId: state.currentConversationId, timer: 0 };
+    const reservation = { conversationId: state.currentConversationId, timer: null as number | null };
     this.#scheduled = reservation;
     reservation.timer = window.setTimeout(
       () => {
         if (this.#scheduled !== reservation) return;
         if (state.currentConversationId !== reservation.conversationId
-          || state.isRewinding || state.isResettingToNewChat || state.isSwitchingConversation) {
+          || state.isRewinding) {
           this.restoreToComposer();
           return;
         }
@@ -138,15 +139,15 @@ export class TurnQueue {
 
   cancelScheduled(): void {
     if (!this.#scheduled) return;
-    window.clearTimeout(this.#scheduled.timer);
+    if (this.#scheduled.timer !== null) window.clearTimeout(this.#scheduled.timer);
     this.#scheduled = null;
   }
 
   async steerNow(): Promise<void> {
     const { steering } = this.deps;
-    if (!this.message || !steering.canSteer) return;
+    const message = this.message;
+    if (!message || !steering.canSteer) return;
 
-    const message = cloneQueuedMessage(this.message);
     this.#write(null);
     const pending = await steering.steer(message);
     if (pending.providerDisposition === 'definitely-unsent') steering.restoreIfDefinitelyUnsent(pending);

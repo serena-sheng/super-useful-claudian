@@ -9,9 +9,12 @@ import spawn from 'cross-spawn';
 import { CodexExecutionBackend } from '@/providers/codex/execution/CodexExecutionBackend';
 import { CodexAppServerRuntime } from '@/providers/codex/runtime/CodexAppServerRuntime';
 
+/** The backend resolves its runtime per session; tests pin one instance. */
+const fixedRuntime = (runtime: CodexAppServerRuntime) => (): CodexAppServerRuntime => runtime;
+
 const runtimes: CodexAppServerRuntime[] = [];
 function createRuntime(host: ForkTestEnvironment['host']): CodexAppServerRuntime {
-  const runtime = new CodexAppServerRuntime(host, () => undefined);
+  const runtime = new CodexAppServerRuntime(host.getRuntimeHost('codex'), () => undefined);
   runtimes.push(runtime);
   return runtime;
 }
@@ -33,13 +36,16 @@ function createNativeCodex(env: ForkTestEnvironment) {
     if (method === 'plugin/reconcile' || method === 'thread/unsubscribe') return {};
     if (method === 'thread/start') return result('codex-source');
     if (method === 'thread/fork') {
-      threads.set('codex-child', [...threads.get(params.threadId)!]);
+      const turns = threads.get(params.threadId)!;
+      const last = params.lastTurnId === undefined ? turns.length - 1 : turns.indexOf(params.lastTurnId);
+      if (last < 0) throw new Error(`Unknown fork turn: ${params.lastTurnId}`);
+      threads.set('codex-child', turns.slice(0, last + 1));
       return result('codex-child');
     }
     if (method === 'thread/resume') return result(params.threadId);
-    if (method === 'thread/rollback') {
+    if (method === 'thread/revert') {
       const turns = threads.get(params.threadId)!;
-      turns.splice(turns.length - params.numTurns);
+      turns.splice(turns.indexOf(params.beforeTurnId));
       return result(params.threadId);
     }
     if (method === 'turn/start') {
@@ -68,7 +74,10 @@ function createNativeCodex(env: ForkTestEnvironment) {
     }
     throw new Error(`Unexpected Codex method: ${method}`);
   }));
-  return { backend: new CodexExecutionBackend(env.host, createRuntime(env.host)), threads, prompts, operations, sourceFile };
+  return { backend: new CodexExecutionBackend(
+    env.host.getRuntimeHost('codex'),
+    fixedRuntime(createRuntime(env.host)),
+  ), threads, prompts, operations, sourceFile };
 }
 
 describe('Codex fork integration', () => {
@@ -76,7 +85,7 @@ describe('Codex fork integration', () => {
   beforeEach(async () => { env = await createForkTestEnvironment(); });
   afterEach(async () => { await env.dispose(); jest.mocked(spawn).mockReset(); });
 
-  it('forks the live turn checkpoint, rolls back only the child, and continues both conversations independently', async () => {
+  it('forks through the live turn checkpoint and continues both conversations independently', async () => {
     const native = createNativeCodex(env);
     const source = await env.open(native.backend);
     const selected = await env.send(source, 'Remember apples');
@@ -88,8 +97,7 @@ describe('Codex fork integration', () => {
     const fork = await env.open(native.backend, child!);
     await env.send(fork, 'Continue here');
     expect(native.prompts.at(-1)).toEqual({ threadId: 'codex-child', context: ['codex-turn-1'] });
-    expect(native.operations).toContainEqual({ method: 'thread/fork', params: { threadId: 'codex-source' } });
-    expect(native.operations).toContainEqual({ method: 'thread/rollback', params: { threadId: 'codex-child', numTurns: 1 } });
+    expect(native.operations).toContainEqual({ method: 'thread/fork', params: { threadId: 'codex-source', lastTurnId: 'codex-turn-1' } });
     expect(native.threads.get('codex-source')).toEqual(['codex-turn-1', 'codex-turn-2']);
     expect(await fs.readFile(native.sourceFile, 'utf8')).toBe(original);
     expect(env.repository.getSync(child!.id)!.sessionId).toBe('codex-child');

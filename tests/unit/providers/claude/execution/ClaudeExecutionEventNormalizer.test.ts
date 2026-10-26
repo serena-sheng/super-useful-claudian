@@ -1,7 +1,9 @@
 import { buildSDKMessage } from '@test/helpers/sdkMessages';
 
+import { encodeSessionMessage } from '@/core/session-tools/sessionMessageEnvelope';
 import { TOOL_TODO_WRITE } from '@/core/tools/toolNames';
 import { ClaudeExecutionEventNormalizer } from '@/providers/claude/execution/ClaudeExecutionEventNormalizer';
+import { parseSDKMessageToChat } from '@/providers/claude/history/sdkMessageParsing';
 
 const msg = buildSDKMessage;
 
@@ -155,12 +157,16 @@ describe('ClaudeExecutionEventNormalizer tool results', () => {
     return completed.event;
   }
 
-  it('decodes a native structured patch into the neutral result diff', () => {
+  it.each([false, true])('decodes a native structured patch without displaying EOF markers (markers: %s)', markers => {
     const completed = completeTool('Edit', { file_path: 'notes/a.md', old_string: 'old', new_string: 'new' }, {
       filePath: '/vault/notes/a.md',
       oldString: 'old',
       newString: 'new',
-      structuredPatch: [{ oldStart: 3, oldLines: 2, newStart: 3, newLines: 2, lines: [' keep', '-old', '+new'] }],
+      structuredPatch: [{
+        oldStart: 3, oldLines: 2, newStart: 3, newLines: 2,
+        lines: [' keep', '-old', ...(markers ? ['\\ No newline at end of file'] : []),
+          '+new', ...(markers ? ['\\ No newline at end of file'] : [])],
+      }],
     });
 
     expect(completed.resultDetails).toEqual({
@@ -197,14 +203,33 @@ describe('ClaudeExecutionEventNormalizer tool results', () => {
 
 describe('ClaudeExecutionEventNormalizer api error messages', () => {
   const RESET_TEXT = "You've hit your session limit · resets 4:10pm (Europe/Berlin)";
+  const AUTH_FALLBACK = 'Claude authentication failed. Sign in again or check your API key.';
 
-  const apiErrorMessage = (content: unknown[]) => msg({
+  const apiErrorMessage = (content: unknown[], error = 'rate_limit') => msg({
     type: 'assistant',
-    error: 'rate_limit',
+    error,
     isApiErrorMessage: true,
-    apiErrorStatus: 429,
+    apiErrorStatus: error === 'rate_limit' ? 429 : 401,
     message: { model: '<synthetic>', content },
   });
+
+  function expectAuthenticationOverrideGuidance(message: string): void {
+    expect(message).toContain('If the same CLI works with a subscription separately');
+    expect(message).toContain('inherited ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN');
+    expect(message).toContain('Settings → Claudian → Providers → Claude Code → Environment → Custom variables');
+    expect(message).toContain('Claude only');
+    expect(message).toContain('only for the conflicting credential you intend to disable');
+    expect(message).toContain('ANTHROPIC_API_KEY=');
+    expect(message).toContain('ANTHROPIC_AUTH_TOKEN=');
+    expect(message).not.toMatch(/subscription (?:was |has been )?detected/i);
+    expect(message).not.toMatch(/process\.env/);
+  }
+
+  function nativeError(events: ReturnType<ClaudeExecutionEventNormalizer['normalize']>): string {
+    const error = events.find(event => event.type === 'native_error');
+    if (error?.type !== 'native_error') throw new Error('Missing native error');
+    return error.message;
+  }
 
   it('uses the human-readable text of a synthetic API error message as the native error message', () => {
     const normalizer = new ClaudeExecutionEventNormalizer();
@@ -350,6 +375,71 @@ describe('ClaudeExecutionEventNormalizer api error messages', () => {
     expect(events.filter(event => event.type === 'output')).toEqual([]);
   });
 
+  it('keeps native authentication prose and adds provider-only override guidance without assistant text', () => {
+    const prose = 'API Error: 401 Invalid authentication credentials';
+    const inheritedKey = 'sk-ant-test-inherited-key';
+    const inheritedToken = 'sk-ant-test-inherited-token';
+    const previousKey = process.env.ANTHROPIC_API_KEY;
+    const previousToken = process.env.ANTHROPIC_AUTH_TOKEN;
+    process.env.ANTHROPIC_API_KEY = inheritedKey;
+    process.env.ANTHROPIC_AUTH_TOKEN = inheritedToken;
+    try {
+      const events = new ClaudeExecutionEventNormalizer().normalize(
+        apiErrorMessage([{ type: 'text', text: prose }], 'authentication_failed'),
+        'requested',
+      );
+      const message = nativeError(events);
+
+      expect(message.startsWith(prose)).toBe(true);
+      expect(message).not.toBe(prose);
+      expectAuthenticationOverrideGuidance(message);
+      expect(message).not.toContain(inheritedKey);
+      expect(message).not.toContain(inheritedToken);
+      expect(events.filter(event => event.type === 'output')).toEqual([]);
+    } finally {
+      if (previousKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = previousKey;
+      if (previousToken === undefined) delete process.env.ANTHROPIC_AUTH_TOKEN;
+      else process.env.ANTHROPIC_AUTH_TOKEN = previousToken;
+    }
+  });
+
+  it.each([
+    ['empty', []],
+    ['whitespace', [{ type: 'text', text: '  \n\t ' }]],
+  ])('appends the override hint to the fallback when synthetic authentication content is %s', (_label, content) => {
+    const events = new ClaudeExecutionEventNormalizer().normalize(
+      apiErrorMessage(content, 'authentication_failed'),
+      'requested',
+    );
+    const message = nativeError(events);
+
+    expect(message.startsWith(AUTH_FALLBACK)).toBe(true);
+    expect(message).not.toContain('  \n\t ');
+    expectAuthenticationOverrideGuidance(message);
+    expect(events.filter(event => event.type === 'output')).toEqual([]);
+  });
+
+  it('keeps partial assistant text when a real model message fails authentication', () => {
+    const events = new ClaudeExecutionEventNormalizer().normalize(msg({
+      type: 'assistant',
+      error: 'authentication_failed',
+      message: {
+        model: 'claude-sonnet-4-5',
+        content: [{ type: 'text', text: 'Partial response' }],
+      },
+    }), 'requested');
+    const message = nativeError(events);
+
+    expect(message.startsWith(AUTH_FALLBACK)).toBe(true);
+    expect(message).not.toContain('Partial response');
+    expectAuthenticationOverrideGuidance(message);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'output',
+      event: expect.objectContaining({ type: 'text_delta', text: 'Partial response' }),
+    }));
+  });
+
   it('leaves synthetic assistant messages without an error field unchanged', () => {
     const normalizer = new ClaudeExecutionEventNormalizer();
 
@@ -443,4 +533,24 @@ it('omits throughput for success-subtype API errors', () => {
     is_error: true, api_error_status: 500, duration_ms: 2500, usage: { output_tokens: 125 },
   }), 'requested');
   expect(events.find(event => event.type === 'result')).not.toHaveProperty('turnStats', expect.anything());
+});
+
+describe('Claude session message normalization', () => {
+  it.each(['claudian_list_destinations', 'claudian_send_message'])('normalizes %s in live output and native history', name => {
+    const rawName = `mcp__claudian_sessions__${name}`;
+    const native = { type: 'assistant' as const, message: { content: [
+      { type: 'tool_use' as const, id: 'session-tool', name: rawName, input: {} },
+    ] } };
+    const expected = { name, providerPayload: { rawName } };
+    expect(new ClaudeExecutionEventNormalizer().normalize(msg(native), 'requested'))
+      .toContainEqual(expect.objectContaining({ type: 'output', event: expect.objectContaining(expected) }));
+    expect(parseSDKMessageToChat(native)?.toolCalls?.[0]).toMatchObject(expected);
+  });
+
+  it('retains the sender and unwraps a session envelope in history', () => {
+    const content = encodeSessionMessage({ from: 'Research', sessionId: 'sender', text: 'Found it' });
+    expect(parseSDKMessageToChat({ type: 'user', message: { content } })).toMatchObject({
+      displayContent: 'Found it', sessionMessage: { from: 'Research', sessionId: 'sender' },
+    });
+  });
 });

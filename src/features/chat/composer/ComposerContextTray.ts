@@ -5,6 +5,7 @@ import {
   scheduleAnimationFrame,
   type ScheduledAnimationFrame,
 } from '@/features/chat/utils/animationFrame';
+import { t } from '@/i18n/i18n';
 
 /** Per-turn context only; Linked content lives in the composer info row. */
 export type ComposerContextSlot =
@@ -98,7 +99,7 @@ export class ComposerContextTray {
     for (const chip of allChips) {
       chip.removeClass('claudian-context-chip--overflow-hidden');
     }
-    moreButton.addClass('claudian-hidden');
+    if (moreButton !== this.containerEl.ownerDocument.activeElement) moreButton.addClass('claudian-hidden');
     // Chips that are not rendered (hidden by a presentation, or the whole tray undisplayed) occupy no row.
     const chips = allChips.filter(chip => chip.offsetParent !== null);
     if (chips.length === 0) return;
@@ -106,6 +107,10 @@ export class ComposerContextTray {
     const rows = this.#getRows(chips);
     const hasOverflow = rows.length > MAX_COLLAPSED_ROWS;
     if (!hasOverflow) {
+      if (moreButton === this.containerEl.ownerDocument.activeElement) {
+        this.containerEl.querySelector<HTMLElement>('.claudian-context-chip button')?.focus();
+      }
+      moreButton.addClass('claudian-hidden');
       this.expanded = false;
       this.containerEl.removeClass('claudian-context-row--expanded');
       moreButton.setAttribute('aria-expanded', 'false');
@@ -115,7 +120,9 @@ export class ComposerContextTray {
     moreButton.removeClass('claudian-hidden');
     if (this.expanded) {
       this.containerEl.addClass('claudian-context-row--expanded');
-      moreButton.textContent = 'Show less';
+      const label = t('chat.composer.showLess');
+      moreButton.textContent = label;
+      moreButton.setAttribute('aria-label', label);
       moreButton.setAttribute('aria-expanded', 'true');
       return;
     }
@@ -137,8 +144,8 @@ export class ComposerContextTray {
     }
 
     const hiddenCount = chips.length - visibleCount;
-    moreButton.textContent = `+${hiddenCount} more`;
-    moreButton.setAttribute('aria-label', `Show ${hiddenCount} more context items`);
+    moreButton.textContent = t('chat.composer.moreItems', { count: hiddenCount });
+    moreButton.setAttribute('aria-label', t('chat.composer.moreContext', { count: hiddenCount }));
   }
 
   destroy(): void {
@@ -157,6 +164,12 @@ export class ComposerContextTray {
   }
 
   private render(): void {
+    const active = this.containerEl.ownerDocument.activeElement as HTMLElement | null;
+    const oldButtons = Array.from(this.containerEl.querySelectorAll<HTMLElement>('button'));
+    const oldIndex = active ? oldButtons.indexOf(active) : -1;
+    const chip = oldIndex >= 0 ? active?.closest<HTMLElement>('.claudian-context-chip') : null;
+    const focusedMore = oldIndex >= 0 && active?.classList.contains('claudian-context-more');
+    const focusedRemove = active?.classList.contains('claudian-context-chip-remove');
     this.containerEl.empty();
     this.containerEl.removeClass('claudian-context-row--expanded');
 
@@ -188,6 +201,24 @@ export class ComposerContextTray {
     }
 
     this.options.onDidChange?.();
+    if (oldIndex >= 0) {
+      const buttons = Array.from(this.containerEl.querySelectorAll<HTMLElement>('button'));
+      const more = this.containerEl.querySelector<HTMLElement>('.claudian-context-more');
+      const same = focusedMore ? more : buttons.find(button => {
+        const candidate = button.closest<HTMLElement>('.claudian-context-chip');
+        return candidate?.dataset.contextSlot === chip?.dataset.contextSlot
+          && candidate?.dataset.contextId === chip?.dataset.contextId
+          && button.classList.contains('claudian-context-chip-remove') === focusedRemove;
+      });
+      const target = same ?? buttons[Math.min(oldIndex, buttons.length - 1)];
+      this.refreshLayout();
+      if (target?.closest('.claudian-context-chip--overflow-hidden')) {
+        this.expanded = true;
+        this.refreshLayout();
+      }
+      const visibleTarget = target?.classList.contains('claudian-hidden') ? buttons.find(button => button !== more) : target;
+      visibleTarget?.focus();
+    }
     this.#scheduleLayout();
   }
 
@@ -223,7 +254,7 @@ export class ComposerContextTray {
         text: '\u00D7',
         attr: {
           type: 'button',
-          'aria-label': `Remove ${item.ariaLabel ?? item.label}`,
+          'aria-label': t('chat.removeItem', { item: item.ariaLabel ?? item.label }),
         },
       });
       removeButton.addEventListener('click', item.onRemove);

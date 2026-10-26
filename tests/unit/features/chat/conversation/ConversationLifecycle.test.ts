@@ -1,5 +1,7 @@
+import { projectRecord } from '@test/helpers/features/chat/ProjectsFake';
 import { Notice } from 'obsidian';
 
+import type { ProjectRecord } from '@/core/types';
 import { ConversationLifecycle, type ConversationLifecycleStore } from '@/features/chat/conversation/ConversationLifecycle';
 
 interface FakeTab {
@@ -17,7 +19,6 @@ function createManager(initialTabs: FakeTab[]) {
     }),
     getTabIdentities: () => manager.tabs,
     isTabWorking: (tabId: string) => manager.tabs.find(tab => tab.id === tabId)?.isWorking ?? false,
-    retainTabs: jest.fn(),
     resetConversationTabs: jest.fn().mockResolvedValue(undefined),
   };
   return manager;
@@ -27,29 +28,103 @@ type FakeManager = ReturnType<typeof createManager>;
 
 function createStore(): jest.Mocked<ConversationLifecycleStore> {
   return {
+    getConversationList: jest.fn(() => []),
     deleteConversation: jest.fn().mockResolvedValue(undefined),
     setConversationArchived: jest.fn().mockResolvedValue(undefined),
-    setConversationsPinned: jest.fn().mockResolvedValue(undefined),
+    setConversationsPlacement: jest.fn().mockResolvedValue(undefined),
     restoreConversations: jest.fn().mockResolvedValue(undefined),
+    ensureAllConversationMetadataLoaded: jest.fn().mockResolvedValue(undefined),
+    archiveProjectIfEmpty: jest.fn().mockResolvedValue(undefined),
     archiveConversationsIf: jest.fn(async (ids, shouldArchive) => (
       ids.filter(id => shouldArchive({ id } as never)).length
     )),
   };
 }
 
+function createProjects(records: ProjectRecord[] = []) {
+  const live = new Map(records.map(record => [record.id, record]));
+  return {
+    get: jest.fn((id: string | undefined) => (id === undefined ? null : live.get(id) ?? null)),
+    setArchived: jest.fn(async (id: string, isArchived: boolean) => {
+      const record = live.get(id);
+      if (record) live.set(id, { ...record, isArchived });
+    }),
+  };
+}
+
 function createLifecycle(...managers: Array<FakeManager | null>) {
+  return createLifecycleWith(createProjects(), ...managers);
+}
+
+function createLifecycleWith(projects: ReturnType<typeof createProjects>, ...managers: Array<FakeManager | null>) {
   const conversations = createStore();
   const views = managers.map(manager => ({ getTabManager: () => manager }));
   const lifecycle = new ConversationLifecycle({
     conversations,
+    projects,
+    sessions: { get: () => null, isRunning: id => managers.some(manager => manager?.tabs.some(tab => tab.conversationId === id && tab.isWorking)), retire: async () => undefined, whenSettled: async () => true },
     views: { getAllViews: () => views as never },
   });
-  return { lifecycle, conversations };
+  return { lifecycle, conversations, projects };
 }
 
 describe('ConversationLifecycle', () => {
   beforeEach(() => {
     (Notice as unknown as jest.Mock).mockClear();
+  });
+
+  describe('project archive', () => {
+    function setupProject(running: string[] = [], launchArchived = false) {
+      const manager = createManager([
+        ...running.map(id => ({ id: `tab-${id}`, conversationId: id, isWorking: true })),
+        { id: 'tab-idle', conversationId: 'idle' },
+      ]);
+      const projects = createProjects([
+        projectRecord({ id: 'launch', isArchived: launchArchived }),
+        projectRecord({ id: 'other' }),
+      ]);
+      const { lifecycle, conversations } = createLifecycleWith(projects, manager);
+      const list = [
+        { id: 'idle', isArchived: false, projectId: 'launch' },
+        { id: 'busy', isArchived: false, projectId: 'launch' },
+        { id: 'done', isArchived: true, projectId: 'launch' },
+        { id: 'outside', isArchived: false, projectId: 'other' },
+      ];
+      conversations.getConversationList.mockReturnValue(list);
+      return { lifecycle, conversations, manager, projects };
+    }
+
+    it('archives every active member, closing idle tabs, then the project', async () => {
+      const { lifecycle, conversations, manager } = setupProject();
+
+      await lifecycle.archiveProject('launch');
+
+      expect(manager.closeTab).toHaveBeenCalledWith('tab-idle');
+      expect(conversations.archiveConversationsIf.mock.calls[0]![0]).toEqual(['idle', 'busy']);
+      expect(conversations.archiveProjectIfEmpty).toHaveBeenCalledWith('launch');
+      expect(conversations.archiveConversationsIf.mock.invocationCallOrder[0])
+        .toBeLessThan(conversations.archiveProjectIfEmpty.mock.invocationCallOrder[0]!);
+    });
+
+    it('keeps the project active when a member is running', async () => {
+      const { lifecycle, conversations } = setupProject(['busy']);
+
+      await lifecycle.archiveProject('launch');
+
+      expect(conversations.archiveProjectIfEmpty).not.toHaveBeenCalled();
+      expect(Notice).toHaveBeenCalledWith('Skipped 1 session that is open or running');
+    });
+
+    it('restores the project before its archived members', async () => {
+      const { lifecycle, conversations, projects } = setupProject([], true);
+
+      await lifecycle.restoreProject('launch');
+
+      expect(projects.setArchived).toHaveBeenCalledWith('launch', false);
+      expect(conversations.restoreConversations).toHaveBeenCalledWith(['done']);
+      expect(projects.setArchived.mock.invocationCallOrder[0])
+        .toBeLessThan(conversations.restoreConversations.mock.invocationCallOrder[0]!);
+    });
   });
 
   describe('delete', () => {
@@ -92,32 +167,17 @@ describe('ConversationLifecycle', () => {
   });
 
   describe('pin', () => {
-    it('pins in one batch and retains only tabs bound to the pinned sessions in every view', async () => {
-      const local = createManager([
-        { id: 'pinned-tab', conversationId: 'conversation-1' },
-        { id: 'other-tab', conversationId: 'conversation-3' },
-        { id: 'blank-tab', conversationId: null },
-      ]);
-      const other = createManager([{ id: 'remote-tab', conversationId: 'conversation-2' }]);
-      const { lifecycle, conversations } = createLifecycle(local, other);
+    it('pins in one batch without touching tabs in any view', async () => {
+      const local = createManager([{ id: 'pinned-tab', conversationId: 'conversation-1' }]);
+      const { lifecycle, conversations } = createLifecycle(local);
 
       await lifecycle.setPinned(['conversation-1', 'conversation-2'], true);
 
-      expect(conversations.setConversationsPinned).toHaveBeenCalledTimes(1);
-      expect(conversations.setConversationsPinned).toHaveBeenCalledWith(['conversation-1', 'conversation-2'], true);
-      expect(local.retainTabs).toHaveBeenCalledWith(['pinned-tab']);
-      expect(other.retainTabs).toHaveBeenCalledWith(['remote-tab']);
-      expect(conversations.setConversationsPinned.mock.invocationCallOrder[0])
-        .toBeLessThan(local.retainTabs.mock.invocationCallOrder[0]);
-    });
-
-    it('does not retain tabs when unpinning', async () => {
-      const manager = createManager([{ id: 'tab', conversationId: 'conversation-1' }]);
-      const { lifecycle } = createLifecycle(manager);
-
-      await lifecycle.setPinned(['conversation-1'], false);
-
-      expect(manager.retainTabs).not.toHaveBeenCalled();
+      expect(conversations.setConversationsPlacement).toHaveBeenCalledTimes(1);
+      expect(conversations.setConversationsPlacement)
+        .toHaveBeenCalledWith(['conversation-1', 'conversation-2'], { isPinned: true });
+      expect(local.resetConversationTabs).not.toHaveBeenCalled();
+      expect(local.closeTab).not.toHaveBeenCalled();
     });
   });
 
@@ -131,9 +191,9 @@ describe('ConversationLifecycle', () => {
 
       expect(local.closeTab).toHaveBeenCalledWith('local-tab');
       expect(other.closeTab).toHaveBeenCalledWith('other-tab');
-      expect(conversations.setConversationArchived).toHaveBeenCalledWith('conversation-1', true);
+      expect(conversations.archiveConversationsIf).toHaveBeenCalledWith(['conversation-1'], expect.any(Function));
       expect(other.closeTab.mock.invocationCallOrder[0])
-        .toBeLessThan(conversations.setConversationArchived.mock.invocationCallOrder[0]);
+        .toBeLessThan(conversations.archiveConversationsIf.mock.invocationCallOrder[0]);
     });
 
     it('does not archive or close anything while any bound tab is working', async () => {
@@ -201,5 +261,49 @@ describe('ConversationLifecycle', () => {
       expect(shouldArchive({ id: 'conversation-2' } as never)).toBe(true);
       expect(Notice).toHaveBeenCalledWith('Skipped 1 session that is open or running');
     });
+  });
+});
+
+
+describe('committed archive mailbox cleanup', () => {
+  it('preserves pending messages when an archive write fails without committing', async () => {
+    const conversations = createStore();
+    const clear = jest.fn();
+    conversations.getConversationList.mockReturnValue([{ id: 'target', isArchived: false }]);
+    conversations.archiveConversationsIf.mockRejectedValue(new Error('write failed'));
+    const lifecycle = new ConversationLifecycle({
+      conversations,
+      projects: createProjects(),
+      sessions: { get: () => ({ mailbox: { clear } }) as never, isRunning: () => false, retire: async () => undefined, whenSettled: async () => true },
+      views: { getAllViews: () => [] },
+    });
+    await expect(lifecycle.archiveIf(['target'], () => true)).rejects.toThrow('write failed');
+    expect(clear).not.toHaveBeenCalled();
+  });
+
+  it.each(['manual', 'batch', 'automatic'] as const)('clears only committed archives after %s persistence settles', async mode => {
+    const conversations = createStore();
+    const clear = jest.fn();
+    let archived = false;
+    let release!: () => void;
+    conversations.getConversationList.mockImplementation(() => [{ id: 'target', isArchived: archived }]);
+    conversations.archiveConversationsIf.mockImplementation(async () => {
+      await new Promise<void>(resolve => { release = resolve; });
+      archived = true;
+      return 1;
+    });
+    const lifecycle = new ConversationLifecycle({
+      conversations,
+      projects: createProjects(),
+      sessions: { get: () => ({ mailbox: { clear } }) as never, isRunning: () => false, retire: async () => undefined, whenSettled: async () => true },
+      views: { getAllViews: () => [] },
+    });
+    const saving = mode === 'manual' ? lifecycle.setArchived('target', true)
+      : mode === 'batch' ? lifecycle.archive(['target']) : lifecycle.archiveIf(['target'], () => true);
+    await new Promise(resolve => setImmediate(resolve));
+    expect(clear).not.toHaveBeenCalled();
+    release();
+    await saving;
+    expect(clear).toHaveBeenCalledTimes(1);
   });
 });

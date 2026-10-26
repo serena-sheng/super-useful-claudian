@@ -14,7 +14,7 @@ import { InstructionRefineModal } from '@/shared/modals/InstructionRefineModal';
 
 export interface InstructionSubmissionControllerDeps {
   plugin: ChatFeatureHost;
-  getInputEl: () => ComposerInputElement;
+  getInputEl: () => ComposerInputElement | null;
   getInstructionModeManager: () => InstructionModeManager | null;
   getTabProviderId: () => ProviderId | null;
   getModelOverride: () => string | undefined;
@@ -68,8 +68,10 @@ export class InstructionSubmissionController {
           service.cancel();
           const inputEl = this.deps.getInputEl();
           modeManager?.deactivate();
-          inputEl.value = finalInstruction;
-          inputEl.focus();
+          if (inputEl) {
+            inputEl.value = finalInstruction;
+            inputEl.focus();
+          }
           new Notice(t('chat.instructionMode.applied'));
         },
         onReject: () => {

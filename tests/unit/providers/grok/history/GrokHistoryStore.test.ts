@@ -2,14 +2,32 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import compactCompleted from '@test/fixtures/providers/grok/runtime/compaction-completed.json';
-import { testDate } from '@test/helpers/testClock';
-
 import {
   parseGrokHistoryContent,
   resolveGrokPromptIndexAfterAssistant,
-} from '@/providers/grok/history/GrokHistoryStore';
+} from '@test/helpers/providers/grokHistory';
+import { testDate } from '@test/helpers/testClock';
+
+import { extractUserDisplayContent } from '@/core/prompt/promptContext';
+import { encodeSessionMessage } from '@/core/session-tools/sessionMessageEnvelope';
 
 describe('GrokHistoryStore', () => {
+  it('hydrates session sender metadata and neutral MCP tool names from replay', () => {
+    const envelope = encodeSessionMessage({ from: 'Sender & reviewer', sessionId: 'sender-id', text: 'Please review.' });
+    const updates = [
+      { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: envelope } },
+      { sessionUpdate: 'tool_call', toolCallId: 'send', title: 'claudian_sessions__claudian_send_message', status: 'completed',
+        rawInput: { variant: 'UseTool', tool_name: 'claudian_sessions__claudian_send_message', tool_input: { text: 'Reviewed.' } },
+        rawOutput: { type: 'MCP', server_name: 'claudian_sessions', tool_name: 'claudian_send_message', output: { OkayOutput: 'queued' } } },
+      { sessionUpdate: 'turn_completed' },
+    ];
+    const content = updates.map(update => JSON.stringify({ timestamp: testDate().getTime(), method: 'session/update', params: { sessionId: 'recipient', update } })).join('\n');
+    const { messages } = parseGrokHistoryContent(content, 'recipient');
+    expect(messages[0].sessionMessage).toEqual({ from: 'Sender & reviewer', sessionId: 'sender-id' });
+    expect(extractUserDisplayContent(messages[0].content)).toBe('Please review.');
+    expect(messages[1].toolCalls?.[0]).toMatchObject({ name: 'claudian_send_message', input: { text: 'Reviewed.' } });
+  });
+
   it('hydrates complete turns while tolerating malformed, unknown, and incomplete tails', () => {
     const content = fs.readFileSync(path.join(
       process.cwd(),
@@ -46,8 +64,10 @@ describe('GrokHistoryStore', () => {
       { content: 'Done.', type: 'text' },
     ]);
     expect(parsed.messages[2]).toMatchObject({ content: 'Stop now.', role: 'user' });
-    expect(parsed.messages[3]).toMatchObject({ content: 'Stopping.', role: 'assistant' });
+    expect(parsed.messages[3]).toMatchObject({ content: 'Stopping.', role: 'assistant', isInterrupt: true });
     expect(parsed.messages[3].durationSeconds).toBeUndefined();
+    expect(parsed.messages[3].completedAt).toBeUndefined();
+    expect(parsed.messages[1].isInterrupt).toBeUndefined();
     expect(parsed.messages.some(message => message.content.includes('Incomplete'))).toBe(false);
     expect(parsed.lastUsage).toEqual(expect.objectContaining({
       inputTokens: 10,
@@ -74,6 +94,34 @@ describe('GrokHistoryStore', () => {
     })).join('\n');
 
     expect(parseGrokHistoryContent(content, 'timing').messages[1].durationSeconds).toBe(expected);
+  });
+
+  it('marks a turn cancelled mid-tool interrupted, and keeps a bare marker when it produced no output', () => {
+    const lines = [
+      [0, { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'Run the build' } }],
+      [1, { sessionUpdate: 'tool_call', toolCallId: 'build', title: 'run_terminal_cmd', kind: 'execute', status: 'in_progress',
+        rawInput: { command: 'npm run build' } }],
+      [9, { sessionUpdate: 'turn_completed', prompt_id: 'prompt-cancelled', stop_reason: 'cancelled',
+        usage: { inputTokens: 12, outputTokens: 3, totalTokens: 15 } }],
+      [10, { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'Never mind' } }],
+      [11, { sessionUpdate: 'turn_completed', prompt_id: 'prompt-empty', stop_reason: 'cancelled' }],
+    ] as const;
+    const content = lines.map(([seconds, update]) => JSON.stringify({
+      timestamp: testDate().getTime() + seconds * 1_000, method: 'session/update',
+      params: { sessionId: 'cancelled', update, _meta: { cancellationCategory: 'MidTurnAbort' } },
+    })).join('\n');
+
+    const { messages } = parseGrokHistoryContent(content, 'cancelled');
+
+    expect(messages.map(({ role, content: text, isInterrupt, durationSeconds, completedAt }) => (
+      { role, text, isInterrupt, durationSeconds, completedAt }))).toEqual([
+      { role: 'user', text: 'Run the build', isInterrupt: undefined, durationSeconds: undefined, completedAt: undefined },
+      { role: 'assistant', text: '', isInterrupt: true, durationSeconds: undefined, completedAt: undefined },
+      { role: 'user', text: 'Never mind', isInterrupt: undefined, durationSeconds: undefined, completedAt: undefined },
+      { role: 'assistant', text: '', isInterrupt: true, durationSeconds: undefined, completedAt: undefined },
+    ]);
+    expect(messages[1].toolCalls).toEqual([expect.objectContaining({ id: 'build' })]);
+    expect(messages[3].toolCalls).toBeUndefined();
   });
 
   it('rehydrates only the active branch after a native rewind marker', () => {

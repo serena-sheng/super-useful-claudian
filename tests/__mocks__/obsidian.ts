@@ -120,6 +120,14 @@ export class FileView extends ItemView {
   navigation = true;
 }
 
+export class TextFileView extends FileView {
+  data = '';
+
+  getViewData(): string {
+    return this.data;
+  }
+}
+
 export class WorkspaceLeaf {}
 
 export class Scope {
@@ -190,7 +198,7 @@ export class MarkdownView {
 }
 
 export class Setting {
-  constructor(containerEl: any) {}
+  constructor(_containerEl: any) {}
   setName = jest.fn().mockReturnThis();
   setDesc = jest.fn().mockReturnThis();
   addToggle = jest.fn().mockReturnThis();
@@ -308,6 +316,18 @@ export class Menu {
 
   setUseNativeMenu = jest.fn((useNativeMenu: boolean) => {
     this.useNativeMenu = useNativeMenu;
+    return this;
+  });
+
+  private hideCallbacks: Array<() => void> = [];
+
+  onHide = jest.fn((callback: () => void) => {
+    this.hideCallbacks.push(callback);
+  });
+
+  /** Runs the hide callbacks once, as Obsidian does when a shown menu closes. */
+  hide = jest.fn(() => {
+    for (const callback of this.hideCallbacks.splice(0)) callback();
     return this;
   });
 }

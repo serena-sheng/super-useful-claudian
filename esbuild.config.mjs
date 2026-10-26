@@ -88,7 +88,7 @@ const patchSdkImportMeta = {
   setup(build) {
     build.onLoad(
       {
-        filter: /[\\/]node_modules[\\/](?:@openai[\\/]codex-sdk[\\/]dist[\\/]index\.js|@anthropic-ai[\\/]claude-agent-sdk[\\/](?:sdk|core(?:-[A-Za-z0-9]+)?)\.mjs)$/,
+        filter: /[\\/]node_modules[\\/](?:@anthropic-ai[\\/]claude-agent-sdk[\\/](?:sdk|core(?:-[A-Za-z0-9]+)?)\.mjs)$/,
       },
       async (args) => {
         const contents = await fsPromises.readFile(args.path, 'utf8');
@@ -162,7 +162,7 @@ function createPatchRendererUnsafeUnref(outputPaths) {
 // Obsidian plugin folder path (set via OBSIDIAN_VAULT env var or .env.local)
 const OBSIDIAN_VAULT = process.env.OBSIDIAN_VAULT;
 const OBSIDIAN_PLUGIN_PATH = OBSIDIAN_VAULT && existsSync(OBSIDIAN_VAULT)
-  ? path.join(OBSIDIAN_VAULT, '.obsidian', 'plugins', 'claudian')
+  ? path.join(OBSIDIAN_VAULT, '.obsidian', 'plugins', 'super-useful-claudian')
   : null;
 
 // Plugin to copy built files to Obsidian plugin folder

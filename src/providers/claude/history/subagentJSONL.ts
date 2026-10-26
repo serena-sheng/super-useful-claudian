@@ -1,26 +1,29 @@
 /**
- * Extracts the final textual result from subagent JSONL output.
- * Prefers the latest assistant text block and falls back to top-level result.
+ * Accumulates the final textual result from subagent JSONL lines.
+ * Prefers all visible text blocks in the latest assistant message and falls back to top-level result.
  */
-export function extractFinalResultFromSubagentJSONL(content: string): string | null {
-  const lines = content
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && line.startsWith('{'));
-
+export function createSubagentFinalResultCollector(): {
+  addLine: (line: string) => void;
+  result: () => string | null;
+} {
   let lastAssistantText: string | null = null;
   let lastResultText: string | null = null;
 
-  for (const line of lines) {
+  const addLine = (rawLine: string): void => {
+    const line = rawLine.trim();
+    if (!line.startsWith('{')) {
+      return;
+    }
+
     let raw: unknown;
     try {
       raw = JSON.parse(line);
     } catch {
-      continue;
+      return;
     }
 
     if (!raw || typeof raw !== 'object') {
-      continue;
+      return;
     }
 
     const record = raw as {
@@ -33,9 +36,10 @@ export function extractFinalResultFromSubagentJSONL(content: string): string | n
     }
 
     if (record.message?.role !== 'assistant' || !Array.isArray(record.message.content)) {
-      continue;
+      return;
     }
 
+    const messageText: string[] = [];
     for (const blockRaw of record.message.content) {
       if (!blockRaw || typeof blockRaw !== 'object') {
         continue;
@@ -43,10 +47,22 @@ export function extractFinalResultFromSubagentJSONL(content: string): string | n
 
       const block = blockRaw as { type?: unknown; text?: unknown };
       if (block.type === 'text' && typeof block.text === 'string' && block.text.trim().length > 0) {
-        lastAssistantText = block.text.trim();
+        messageText.push(block.text.trim());
       }
     }
-  }
+    if (messageText.length > 0) {
+      lastAssistantText = messageText.join('\n');
+    }
+  };
 
-  return lastAssistantText ?? lastResultText;
+  return { addLine, result: () => lastAssistantText ?? lastResultText };
+}
+
+/** Extracts the final textual result from in-memory subagent JSONL output. */
+export function extractFinalResultFromSubagentJSONL(content: string): string | null {
+  const collector = createSubagentFinalResultCollector();
+  for (const line of content.split('\n')) {
+    collector.addLine(line);
+  }
+  return collector.result();
 }

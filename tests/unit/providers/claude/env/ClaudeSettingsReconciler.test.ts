@@ -1,31 +1,93 @@
+import '@/providers';
+
+import { getInstallationKey } from '@/core/device/InstallationKey';
+import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
 import { isVersionedRuntimeInputFingerprint } from '@/core/providers/settings/RuntimeInputFingerprint';
 import type { Conversation } from '@/core/types';
 import { claudeSettingsReconciler } from '@/providers/claude/env/ClaudeSettingsReconciler';
 import { getClaudeProviderSettings } from '@/providers/claude/settings';
 
 describe('claudeSettingsReconciler', () => {
-  it.each(['CLAUDE_CONFIG_DIR', 'HOME', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH'])('invalidates native bindings when configured %s changes or is removed', key => {
+  it.each([
+    'CLAUDE_CONFIG_DIR', 'HOME', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL',
+  ])('invalidates native bindings when session-scope %s changes or is removed', key => {
     const settings: Record<string, unknown> = {
       providerConfigs: { claude: { enabled: true, environmentVariables: `${key}=/old-home` } },
     };
-    claudeSettingsReconciler.reconcileModelWithEnvironment(settings, []);
-    const conversation = { providerId: 'claude', sessionId: 'native-session', messages: [] } as unknown as Conversation;
+    claudeSettingsReconciler.reconcileModelWithEnvironment(settings);
     for (const nextEnvironment of [`${key}=/new-home`, '']) {
       (settings.providerConfigs as any).claude.environmentVariables = nextEnvironment;
-      conversation.sessionId = 'native-session';
-      const result = claudeSettingsReconciler.reconcileModelWithEnvironment(settings, [conversation]);
-      expect(result).toMatchObject({ changed: true, invalidatedConversations: [conversation] });
-      expect(conversation.sessionId).toBeNull();
+      expect(claudeSettingsReconciler.reconcileModelWithEnvironment(settings))
+        .toEqual({ changed: true, sessionPolicy: 'invalidate' });
     }
+  });
+
+  it.each([
+    ['the CLI path', { cliPath: '/old/claude' }, { cliPath: '/new/claude' }],
+    ['the host CLI path', { hostCliPath: '/old/claude' }, { hostCliPath: '/new/claude' }],
+    ['PATH', { path: '/old/bin' }, { path: '/new/bin' }],
+    ['a first CLI path without saved inputs', { baseUrl: null }, { baseUrl: null, cliPath: '/new/claude' }],
+  ])('keeps native bindings and reloads when only %s changes', (_label, before, after) => {
+    type LaunchInputs = { baseUrl?: string | null; cliPath?: string; hostCliPath?: string; path?: string };
+    const toConfig = ({ baseUrl = 'https://api.example.com', cliPath = '', hostCliPath, path }: LaunchInputs) => ({
+      enabled: true,
+      cliPath,
+      cliPathsByHost: hostCliPath ? { [getInstallationKey()]: hostCliPath } : {},
+      environmentVariables: [
+        baseUrl ? `ANTHROPIC_BASE_URL=${baseUrl}` : '',
+        path ? `PATH=${path}` : '',
+      ].filter(Boolean).join('\n'),
+    });
+    const settings: Record<string, unknown> = {
+      settingsProvider: 'claude',
+      providerConfigs: { claude: toConfig(before) },
+    };
+    claudeSettingsReconciler.reconcileModelWithEnvironment(settings);
+    (settings.providerConfigs as any).claude = {
+      ...(settings.providerConfigs as any).claude,
+      ...toConfig(after),
+    };
+
+    const result = ProviderSettingsCoordinator.reconcileProviders(settings, ['claude']);
+
+    expect(result).toMatchObject({
+      changed: true,
+      environmentChangedProviderIds: ['claude'],
+      sessionInvalidationProviderIds: [],
+    });
+    expect(claudeSettingsReconciler.reconcileModelWithEnvironment(settings)).toEqual({ changed: false });
+  });
+
+  it.each([
+    ['backfills without invalidating when runtime inputs are unchanged', '/same/claude', 'reload'],
+    ['invalidates when runtime inputs also changed', '/new/claude', 'invalidate'],
+  ] as const)('pre-split session fingerprint %s', (_label, nextCliPath, sessionPolicy) => {
+    const settings: Record<string, unknown> = {
+      providerConfigs: {
+        claude: {
+          enabled: true,
+          cliPath: '/same/claude',
+          environmentVariables: 'ANTHROPIC_BASE_URL=https://api.example.com',
+        },
+      },
+    };
+    claudeSettingsReconciler.reconcileModelWithEnvironment(settings);
+    const config = (settings.providerConfigs as any).claude;
+    const runtimeFingerprint = config.environmentHash;
+    delete config.sessionEnvironmentHash;
+    config.cliPath = nextCliPath;
+
+    const result = claudeSettingsReconciler.reconcileModelWithEnvironment(settings);
+
+    expect(result).toEqual({ changed: true, sessionPolicy });
+    expect(getClaudeProviderSettings(settings).sessionEnvironmentHash).toMatch(/^runtime-input:v1:/);
+    expect(getClaudeProviderSettings(settings).environmentHash === runtimeFingerprint)
+      .toBe(sessionPolicy === 'reload');
+    expect(claudeSettingsReconciler.reconcileModelWithEnvironment(settings)).toEqual({ changed: false });
   });
 
   describe('reconcileModelWithEnvironment', () => {
     it('preserves an active settings-defined custom model across non-model env changes', () => {
-      const conversation = {
-        providerId: 'claude',
-        sessionId: 'session-1',
-        messages: [],
-      } as unknown as Conversation;
       const settings: Record<string, unknown> = {
         settingsProvider: 'claude',
         model: 'claude-opus-4-6',
@@ -38,14 +100,9 @@ describe('claudeSettingsReconciler', () => {
         },
       };
 
-      const result = claudeSettingsReconciler.reconcileModelWithEnvironment(settings, [conversation]);
+      const result = claudeSettingsReconciler.reconcileModelWithEnvironment(settings);
 
-      expect(result.changed).toBe(true);
-      expect(result.invalidatedConversations).toEqual([conversation]);
-      expect(conversation.sessionId).toBeNull();
-      expect(conversation.providerState).toEqual({
-        previousProviderSessionIds: ['session-1'],
-      });
+      expect(result).toEqual({ changed: true, sessionPolicy: 'invalidate' });
       expect(settings.model).toBe('claude-opus-4-6');
       const fingerprint = getClaudeProviderSettings(settings).environmentHash;
       expect(isVersionedRuntimeInputFingerprint(fingerprint)).toBe(true);
@@ -65,12 +122,15 @@ describe('claudeSettingsReconciler', () => {
         },
       };
 
-      const result = claudeSettingsReconciler.reconcileModelWithEnvironment(settings, []);
+      const result = claudeSettingsReconciler.reconcileModelWithEnvironment(settings);
 
       expect(result.changed).toBe(true);
       expect(settings.model).toBe('claude-opus-4-6');
     });
 
+  });
+
+  describe('invalidateConversationSessions', () => {
     it('invalidates only Claude conversations and preserves Claude transcript references', () => {
       const claudeConversation = {
         id: 'claude-conversation',
@@ -93,25 +153,16 @@ describe('claudeSettingsReconciler', () => {
         providerState: { threadId: 'codex-thread' },
         messages: [],
       } as unknown as Conversation;
-      const settings: Record<string, unknown> = {
-        model: 'sonnet',
-        providerConfigs: {
-          claude: {
-            environmentVariables: 'ANTHROPIC_BASE_URL=https://api.example.com',
-            environmentHash: '',
-          },
-        },
-      };
 
-      const result = claudeSettingsReconciler.reconcileModelWithEnvironment(
-        settings,
+      const invalidated = claudeSettingsReconciler.invalidateConversationSessions(
         [claudeConversation, codexConversation],
       );
 
-      expect(result.invalidatedConversations).toEqual([claudeConversation]);
+      expect(invalidated).toEqual([claudeConversation]);
       expect(claudeConversation.sessionId).toBeNull();
       expect(claudeConversation.resumeAtMessageId).toBe('assistant-1');
       expect(claudeConversation.providerState).toEqual({
+        bindingRetired: true,
         previousProviderSessionIds: ['previous-session', 'provider-session'],
         subagentData: { task: { id: 'task' } },
         uiMetadata: { keep: true },
@@ -131,20 +182,10 @@ describe('claudeSettingsReconciler', () => {
         providerState: { providerSessionId: 'provider-session' },
         messages: [],
       } as unknown as Conversation;
-      const settings: Record<string, unknown> = {
-        model: 'sonnet',
-        providerConfigs: {
-          claude: {
-            environmentVariables: 'ANTHROPIC_BASE_URL=https://api.example.com',
-            environmentHash: '',
-          },
-        },
-      };
 
-      const result = claudeSettingsReconciler.reconcileModelWithEnvironment(settings, [conversation]);
-
-      expect(result.invalidatedConversations).toEqual([conversation]);
+      expect(claudeSettingsReconciler.invalidateConversationSessions([conversation])).toEqual([conversation]);
       expect(conversation.providerState).toEqual({
+        bindingRetired: true,
         previousProviderSessionIds: ['provider-session'],
       });
     });
@@ -162,23 +203,11 @@ describe('claudeSettingsReconciler', () => {
         },
         messages: [],
       } as unknown as Conversation;
-      const settings: Record<string, unknown> = {
-        model: 'sonnet',
-        providerConfigs: {
-          claude: {
-            environmentVariables: 'ANTHROPIC_BASE_URL=https://api.example.com',
-            environmentHash: '',
-          },
-        },
-      };
 
-      const first = claudeSettingsReconciler.reconcileModelWithEnvironment(
-        settings,
-        [conversation],
-      );
+      const first = claudeSettingsReconciler.invalidateConversationSessions([conversation]);
       const second = claudeSettingsReconciler.invalidateConversationSessions([conversation]);
 
-      expect(first.invalidatedConversations).toEqual([conversation]);
+      expect(first).toEqual([conversation]);
       expect(second).toEqual([]);
       expect(conversation).toMatchObject({
         sessionId: null,
@@ -239,8 +268,7 @@ describe('claudeSettingsReconciler', () => {
       expect(isVersionedRuntimeInputFingerprint(
         getClaudeProviderSettings(settings).environmentHash,
       )).toBe(true);
-      expect(claudeSettingsReconciler.reconcileModelWithEnvironment(settings, []))
-        .toEqual({ changed: false, invalidatedConversations: [] });
+      expect(claudeSettingsReconciler.reconcileModelWithEnvironment(settings)).toEqual({ changed: false });
     });
 
 

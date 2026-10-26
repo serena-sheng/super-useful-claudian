@@ -1,5 +1,6 @@
 import '@/providers';
 
+import { getProviderConfig } from '@/core/providers/providerConfig';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
 import { isVersionedRuntimeInputFingerprint } from '@/core/providers/settings/RuntimeInputFingerprint';
 import { getOpencodeDiscoveryState, updateOpencodeDiscoveryState } from '@/providers/opencode/discoveryState';
@@ -7,13 +8,14 @@ import { opencodeSettingsReconciler } from '@/providers/opencode/env/OpencodeSet
 
 describe('coordinated OpenCode environment changes', () => {
   it('retains provider-owned discovery state when environment changes', () => {
-    const settings: Record<string, unknown> = {};
-    updateOpencodeDiscoveryState(settings, {
+    const config: Record<string, unknown> = {};
+    updateOpencodeDiscoveryState(config, {
       discoveredModels: [{ label: 'OpenAI/GPT-5', rawId: 'openai/gpt-5' }],
     });
+    const settings: Record<string, unknown> = { providerConfigs: { opencode: config } };
 
     expect(ProviderSettingsCoordinator.handleEnvironmentChange(settings, ['opencode'])).toBe(false);
-    expect(getOpencodeDiscoveryState(settings)).toEqual({
+    expect(getOpencodeDiscoveryState(getProviderConfig(settings, 'opencode'))).toEqual({
       discoveredModels: [{ label: 'OpenAI/GPT-5', rawId: 'openai/gpt-5' }],
       thinkingOptionsByModel: {},
     });
@@ -21,7 +23,7 @@ describe('coordinated OpenCode environment changes', () => {
 });
 
 describe('opencodeSettingsReconciler.reconcileModelWithEnvironment', () => {
-  it('invalidates persisted OpenCode session state when the runtime database/config env changes', () => {
+  it('retires the native binding to history-only state when the runtime database/config env changes', () => {
     const settings: Record<string, unknown> = {
       providerConfigs: {
         opencode: {
@@ -48,12 +50,13 @@ describe('opencodeSettingsReconciler.reconcileModelWithEnvironment', () => {
       },
     ] as any;
 
-    const result = opencodeSettingsReconciler.reconcileModelWithEnvironment(settings, conversations);
-
-    expect(result.changed).toBe(true);
-    expect(result.invalidatedConversations).toHaveLength(1);
+    expect(opencodeSettingsReconciler.reconcileModelWithEnvironment(settings)).toEqual({ changed: true });
+    expect(opencodeSettingsReconciler.invalidateConversationSessions(conversations)).toEqual([conversations[0]]);
     expect(conversations[0].sessionId).toBeNull();
-    expect(conversations[0].providerState).toBeUndefined();
+    expect(conversations[0].providerState).toEqual({
+      nativeConversationContextEstablished: false,
+      previousSessions: [{ sessionId: 'session-1', databasePath: '/old/opencode.db' }],
+    });
     const fingerprint = (settings.providerConfigs as any).opencode.environmentHash;
     expect(isVersionedRuntimeInputFingerprint(fingerprint)).toBe(true);
     expect(fingerprint).not.toContain('/new/opencode.db');

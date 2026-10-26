@@ -255,6 +255,7 @@ export class SessionStorage implements SessionMetadataReader {
     const rawMetadata = parsed as Record<string, unknown>;
     if (
       rawMetadata.id !== expectedId
+      || typeof rawMetadata.title !== 'string'
       || typeof rawMetadata.id !== 'string'
       || !isValidSessionMetadataId(rawMetadata.id)
     ) {
@@ -274,8 +275,12 @@ export class SessionStorage implements SessionMetadataReader {
       modelRecoverySource: rawModelRecoverySource,
       linkedContentPath: _rawLinkedContentPath,
       currentNote: _rawCurrentNote,
+      projectId: rawProjectId,
       ...metadataFields
     } = rawMetadata;
+    const projectId = typeof rawProjectId === 'string' && isValidSessionMetadataId(rawProjectId)
+      ? rawProjectId
+      : undefined;
     const selectedModel = typeof rawSelectedModel === 'string'
       ? rawSelectedModel
       : undefined;
@@ -286,6 +291,7 @@ export class SessionStorage implements SessionMetadataReader {
       ...(selectedModel !== undefined ? { selectedModel } : {}),
       ...(modelRecoverySource ? { modelRecoverySource } : {}),
       ...(linkedContent.path ? { linkedContentPath: linkedContent.path } : {}),
+      ...(projectId !== undefined ? { projectId } : {}),
       lastActivityAt,
     } as unknown as SessionMetadata;
     const needsMigration = !Number.isFinite(rawMetadata.lastActivityAt)
@@ -294,7 +300,8 @@ export class SessionStorage implements SessionMetadataReader {
       || 'lastResponseAt' in rawMetadata
       || linkedContent.needsMigration
       || (rawSelectedModel !== undefined && selectedModel === undefined)
-      || (rawModelRecoverySource !== undefined && modelRecoverySource === undefined);
+      || (rawModelRecoverySource !== undefined && modelRecoverySource === undefined)
+      || (rawProjectId !== undefined && projectId === undefined);
     const record = { metadata, needsMigration, source };
     if (version) this.readVersions.set(record, version);
     return record;

@@ -3,7 +3,10 @@ import '@/providers';
 
 import * as sdkModule from '@anthropic-ai/claude-agent-sdk';
 import { claudeCatalogFixture } from '@test/helpers/claudeModels';
+import { createProjectsFake } from '@test/helpers/features/chat/ProjectsFake';
+import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
 import { FakeSideBackend } from '@test/helpers/features/chat/SideChatSessionHarness';
+import { withRuntimeHosts } from '@test/helpers/providerRuntimeHost';
 import { fireEvent, waitFor, within } from '@testing-library/dom';
 import { App, Component } from 'obsidian';
 
@@ -64,44 +67,63 @@ async function createView(fakeBackend?: FakeSideBackend) {
     id: 'conversation-1', providerId: 'claude', selectedModel: 'claude-sonnet-4-5',
     sessionId: 'main-session', messages: [],
   } as unknown as Conversation;
+  const conversations = new Map([[conversation.id, conversation]]);
   const saved: unknown[] = [];
   const plugin = {
     app, settings,
-    providerHost: {
+    providerHost: withRuntimeHosts({
       app, settings, executionLifecycleRegistry: lifecycleRegistry,
       getResolvedProviderCliPath: async () => '/bin/claude',
       getActiveEnvironmentVariables: () => '',
-    },
+    }),
     executionPersistence: {
       registerExecutionBinding() {}, releaseExecutionBinding() {},
       assertConversationExecutionAuthority: async () => {},
       persistExecutionSnapshot: async (...args: unknown[]) => { saved.push(args); return true; },
       recordConversationActivity: async () => {},
     },
-    getSessionSnapshotDirectory: () => '/tmp/claudian-sessions',
     getCommittedSettings: () => settings,
     getActiveEnvironmentVariables: () => '',
-    getConversationSummary: () => conversation,
-    getConversationSync: () => conversation,
-    getConversationById: async () => conversation,
-    getConversationList: () => [conversation],
+    getConversationSummary: (id: string) => conversations.get(id),
+    projects: createProjectsFake(),
+    getConversationSync: (id: string) => conversations.get(id),
+    getConversationById: async (id: string) => conversations.get(id),
+    getConversationList: () => [...conversations.values()],
     renameConversation: async () => {},
     updateConversation: async (_id: string, patch: unknown) => { saved.push(structuredClone(patch)); },
     mutateSettings: async (mutate: (settings: ClaudianSettings) => void) => mutate(settings),
     chatModelSelection: { beginIntent: () => 1, commitIntent: async () => true },
   } as unknown as ChatFeatureHost;
-  const tab = await createTabRuntime({
+  if (!plugin.sessionRuntimes) installSessionRuntimePool(plugin);
+  let tab = await createTabRuntime({
     plugin, conversation, component: new Component(),
     containerEl: document.body.createDiv(),
     mentionDataProvider: new VaultMentionDataProvider(plugin.app),
     getProviderCatalogConfig: () => null, isRuntimeLive: () => true,
+    openConversation: async () => {}, startNewConversation: async () => {},
   });
   tab.hydrationState = 'ready';
   await tab.executionCoordinator.bindConversation({ conversationId: conversation.id, providerId: 'claude' });
   await tab.executionCoordinator.prepare();
+  jest.spyOn(tab.dom.messagesEl, 'getClientRects').mockImplementation(() => (tab.dom.contentEl.hasClass('claudian-hidden') ? [] : [{}]) as unknown as DOMRectList);
   activateTab(tab);
   tab.dom.inputEl.focus();
-  return { tab, conversation, saved, plugin,
+  return { get tab() { return tab; }, conversation, saved, plugin,
+    rebind: async (providerId: string) => {
+      const next = { ...conversation, id: 'next-conversation', providerId, messages: [],
+        selectedModel: providerId === 'claude' ? conversation.selectedModel : 'gpt-5.5' } as Conversation;
+      conversations.set(next.id, next);
+      const tabId = tab.id;
+      await destroyTab(tab);
+      tab = await createTabRuntime({
+        plugin, conversation: next, component: new Component(), tabId,
+        containerEl: document.body.createDiv(), mentionDataProvider: new VaultMentionDataProvider(plugin.app),
+        getProviderCatalogConfig: () => null, isRuntimeLive: () => true,
+        openConversation: async () => {}, startNewConversation: async () => {},
+      });
+      jest.spyOn(tab.dom.messagesEl, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
+      activateTab(tab);
+    },
     dispose: async () => { await destroyTab(tab); await lifecycleRegistry.dispose(); },
   };
 }
@@ -216,8 +238,7 @@ it.each(['tab', 'conversation', 'provider', 'model', 'send'] as const)(
       if (change === 'tab') {
         deactivateTab(view.tab); activateTab(view.tab);
       } else if (change === 'conversation' || change === 'provider') {
-        view.tab.session.bindConversation(change === 'conversation' ? 'other-conversation' : view.conversation.id,
-          change === 'provider' ? 'codex' : 'claude');
+        await view.rebind(change === 'provider' ? 'codex' : 'claude');
       } else if (change === 'model') {
         await selectToolbarModel(view, /opus/i);
       } else {
@@ -230,7 +251,7 @@ it.each(['tab', 'conversation', 'provider', 'model', 'send'] as const)(
       view.tab.dom.inputEl.value = '';
       fireEvent.input(view.tab.dom.inputEl);
       expect(within(view.tab.dom.inputEl).queryByText('Old suggestion')).toBeNull();
-      expect(within(view.tab.dom.inputEl).getByRole('textbox')).toBeDefined();
+      expect(within(view.tab.dom.inputComposerEl).getByRole('textbox')).toBeDefined();
     } finally { await view.dispose(); }
   },
 );
@@ -305,7 +326,7 @@ it.each(['before', 'after'] as const)('drops a trailing prediction while its ori
     backend.latest.emitSessionEvent({ type: 'prompt_suggestion', originatingTurnId: turnId, suggestion: 'Late prediction' });
     activateTab(view.tab);
     fireEvent.input(view.tab.dom.inputEl);
-    expect(within(view.tab.dom.inputEl).getByRole('textbox')).toBeDefined();
+    expect(within(view.tab.dom.inputComposerEl).getByRole('textbox')).toBeDefined();
     expect(within(view.tab.dom.inputEl).queryByText('Late prediction')).toBeNull();
   } finally { await view.dispose(); }
 });
@@ -325,6 +346,35 @@ it('hides a prediction while a toolbar dropdown is open and restores it on Escap
   } finally { await view.dispose(); }
 });
 
+it('hides a prediction while the completion menu or resume picker is open and restores it when they close', async () => {
+  const backend = new FakeSideBackend();
+  const view = await createView(backend);
+  try {
+    const turnId = await finishFakeTurn(view, backend);
+    backend.latest.emitSessionEvent({ type: 'prompt_suggestion', originatingTurnId: turnId, suggestion: 'Try the tests' });
+    const input = view.tab.dom.inputEl;
+    const textbox = within(input).getByRole('textbox');
+    expect(within(input).getByText('Try the tests')).toBeDefined();
+    input.value = '@';
+    fireEvent.input(input);
+    await waitFor(() => expect(view.tab.ui.composerDropdown.isVisible()).toBe(true));
+    // A programmatic draft reset leaves the menu open.
+    input.value = '';
+    view.tab.ui.promptSuggestion.refresh();
+    expect(within(input).queryByText('Try the tests')).toBeNull();
+    fireEvent.keyDown(textbox, { key: 'Escape' });
+    expect(view.tab.ui.composerDropdown.isVisible()).toBe(false);
+    expect(within(input).getByText('Try the tests')).toBeDefined();
+    input.value = '/sessions';
+    await view.tab.controllers.inputController.sendMessage();
+    expect(within(document.body).getByRole('listbox', { name: 'Resume conversation' })).toBeDefined();
+    expect(within(input).queryByText('Try the tests')).toBeNull();
+    fireEvent.keyDown(textbox, { key: 'Escape' });
+    expect(within(document.body).queryByRole('listbox', { name: 'Resume conversation' })).toBeNull();
+    expect(within(input).getByText('Try the tests')).toBeDefined();
+  } finally { await view.dispose(); }
+});
+
 it.each(['', 'Unsent draft'])('discards the prediction when an automatic turn starts (draft: %p)', async draft => {
   const backend = new FakeSideBackend();
   const view = await createView(backend);
@@ -338,7 +388,7 @@ it.each(['', 'Unsent draft'])('discards the prediction when an automatic turn st
     view.tab.dom.inputEl.value = '';
     fireEvent.input(view.tab.dom.inputEl);
     expect(within(view.tab.dom.inputEl).queryByText('Previous prediction')).toBeNull();
-    expect(within(view.tab.dom.inputEl).getByRole('textbox')).toBeDefined();
+    expect(within(view.tab.dom.inputComposerEl).getByRole('textbox')).toBeDefined();
     backend.latest.emitBackgroundEvent({ type: 'background_turn_completed', reason: 'completed' });
   } finally { await view.dispose(); }
 });

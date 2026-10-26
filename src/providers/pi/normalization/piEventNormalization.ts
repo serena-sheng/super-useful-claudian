@@ -1,3 +1,5 @@
+import { isSessionTool } from '@/core/tools/toolNames';
+
 import type { StreamChunk } from '../../../core/types';
 import { getPiCustomMessageDisplayText } from './piCustomMessageNormalization';
 import {
@@ -177,6 +179,7 @@ function normalizeToolUse(
     id,
     input: normalizePiToolInput(event.input ?? event.arguments ?? event.args, name),
     name,
+    ...(isSessionTool(name) ? { providerPayload: { rawName: name } } : {}),
   }];
 }
 
@@ -229,9 +232,10 @@ function normalizeToolResult(
     return [];
   }
 
-  const content = extractPiToolResultText(getPiToolName(event), event.result ?? event.output ?? event.content)
-    || state.toolOutputs.get(id)
-    || '';
+  const result = event.result ?? event.output ?? event.content;
+  const content = result === undefined
+    ? state.toolOutputs.get(id) ?? ''
+    : extractPiToolResultText(getPiToolName(event), result);
   state.toolOutputs.delete(id);
   state.divergedToolOutputIds.delete(id);
   const resultDetails = normalizePiToolResultDetails(getPiToolName(event), event.result, state.nestedToolArguments.get(id));

@@ -1,4 +1,4 @@
-import type { App, EventRef, WorkspaceLeaf } from 'obsidian';
+import type { App, Command, EventRef, WorkspaceLeaf } from 'obsidian';
 import { Platform } from 'obsidian';
 
 import { VIEW_TYPE_CLAUDIAN, type ZenModePosition } from '@/core/types';
@@ -46,12 +46,49 @@ export class ZenModeController {
   #focusOrder: ZenModeSource[] = [];
   #eventRefs: EventRef[] = [];
   #attachment: ZenAttachment | null = null;
+  /** The collapsed sidebar whose chat the user hid; zen stays hidden until it expands. */
+  #hiddenSidebar: CollapsibleSplit | null = null;
   #listening = false;
   #reconciling = false;
   #reconcileAgain = false;
   #disposed = false;
 
   constructor(private readonly deps: ZenModeControllerDeps) {}
+
+  getActiveLeaf(): WorkspaceLeaf | null {
+    return this.#attachment?.source.leaf ?? null;
+  }
+
+  createToggleHistoryCommand(): Command {
+    return {
+      id: 'toggle-zen-mode-history',
+      name: 'Toggle zen mode history',
+      checkCallback: (checking: boolean) => {
+        const panel = this.#attachment?.panel;
+        if (!panel?.runtime?.state.messages.length) return false;
+        if (!checking) panel.toggleHistoryExpanded();
+        return true;
+      },
+    };
+  }
+
+  /** Hides or re-shows the panel; false when there is no panel to toggle. */
+  toggleVisibility(): boolean {
+    if (this.#attachment) {
+      this.hide(this.#attachment.source.leaf);
+      return true;
+    }
+    if (!this.#hiddenSidebar) return false;
+    this.#hiddenSidebar = null;
+    this.reconcile();
+    return !!this.#attachment;
+  }
+
+  /** Keeps the panel hidden until the sidebar holding this chat is expanded again. */
+  hide(leaf: WorkspaceLeaf): void {
+    this.#hiddenSidebar = leaf.getRoot() as CollapsibleSplit;
+    this.reconcile();
+  }
 
   start(): void {
     if (this.#listening || this.#disposed) return;
@@ -96,7 +133,8 @@ export class ZenModeController {
   }
 
   #reconcileOnce(): void {
-    const target = this.#selectSource();
+    if (this.#hiddenSidebar?.collapsed !== true) this.#hiddenSidebar = null;
+    const target = this.#hiddenSidebar ? null : this.#selectSource();
     const attachment = this.#attachment;
     if (attachment && attachment.source === target) {
       // The source already placed a replaced runtime; only the bound state changes.
@@ -197,6 +235,7 @@ export class ZenModeController {
 
     const panel = new ZenModePanel(hostEl, {
       keymap: this.deps.app.keymap ?? null,
+      parentScope: source.scope ?? this.deps.app.scope,
       historyExpanded: this.#historyExpanded.get(source) ?? false,
       onHistoryExpandedChange: expanded => this.#historyExpanded.set(source, expanded),
       position: this.deps.getPosition(),

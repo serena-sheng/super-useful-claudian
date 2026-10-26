@@ -11,7 +11,7 @@ type LinkResolver = (
 // Mock App and vault for testing
 function createMockApp(files: Map<string, string> = new Map(), resolveLink?: LinkResolver): App {
   const mockFiles = new Map<string, TFile>();
-  files.forEach((resourcePath, filePath) => {
+  files.forEach((_resourcePath, filePath) => {
     mockFiles.set(filePath, {
       path: filePath,
       basename: filePath.split('/').pop()?.replace(/\.[^.]+$/, '') || filePath,
@@ -66,6 +66,34 @@ describe('replaceImageEmbedsWithHTML', () => {
         'Visible <span class="claudian-embedded-image"><img src="app://local/visible.png" alt="visible" loading="lazy"></span> and `literal ![[literal.png]]`'
       );
     });
+  });
+
+  describe.each([true, false])('escaped markers with resolved image=%s', resolved => {
+    it.each([
+      [0, false],
+      [1, true],
+      [2, false],
+      [3, true],
+    ])('respects escape parity with %i preceding backslashes', (count, escaped) => {
+      const app = createMockApp(resolved ? new Map([['image.png', 'app://local/image.png']]) : new Map());
+      const prefix = '\\'.repeat(count);
+      const markdown = `${prefix}![[image.png]]`;
+      const active = resolved
+        ? '<span class="claudian-embedded-image"><img src="app://local/image.png" alt="image" loading="lazy"></span>'
+        : '<span class="claudian-embedded-image-fallback">![[image.png]]</span>';
+
+      expect(replaceImageEmbedsWithHTML(markdown, app)).toBe(escaped ? markdown : prefix + active);
+    });
+  });
+
+  it('preserves escaped markers while replacing an active neighboring embed', () => {
+    const app = createMockApp(new Map([['image.png', 'app://local/image.png']]));
+    const escaped = '\\![[image.png]]';
+    const markdown = `${escaped} beside ![[image.png]]`;
+
+    expect(replaceImageEmbedsWithHTML(markdown, app)).toBe(
+      `${escaped} beside <span class="claudian-embedded-image"><img src="app://local/image.png" alt="image" loading="lazy"></span>`
+    );
   });
 
   describe('code syntax', () => {
@@ -242,6 +270,26 @@ describe('replaceImageEmbedsWithHTML', () => {
 
       expect(result).toContain('src="app://local/image.png"');
     });
+    it('keeps media folder precedence over native resolution when source path is blank', () => {
+      const app = createMockApp(
+        new Map([
+          ['media/image.png', 'app://local/media/image.png'],
+          ['s/image.png', 'app://local/s/image.png'],
+        ]),
+        (linkPath, sourcePath, files) =>
+          linkPath === 'image.png' && sourcePath === ''
+            ? files.get('s/image.png') ?? null
+            : null
+      );
+
+      const result = replaceImageEmbedsWithHTML('![[image.png]]', app, {
+        sourcePath: '',
+        mediaFolder: 'media',
+      });
+
+      expect(result).toContain('src="app://local/media/image.png"');
+      expect(result).not.toContain('app://local/s/image.png');
+    });
   });
 
   describe('source path resolution', () => {
@@ -265,6 +313,72 @@ describe('replaceImageEmbedsWithHTML', () => {
 
       expect(result).toContain('src="app://local/section-b/image.png"');
       expect(result).not.toContain('section-a/image.png');
+    });
+
+    it('keeps direct path before media folder fallback when native resolution misses for a note source path', () => {
+      const app = createMockApp(
+        new Map([
+          ['image.png', 'app://local/image.png'],
+          ['attachments/image.png', 'app://local/attachments/image.png'],
+        ]),
+        () => null
+      );
+
+      const result = replaceImageEmbedsWithHTML('![[image.png]]', app, {
+        sourcePath: 'note.md',
+        mediaFolder: 'attachments',
+      });
+
+      expect(result).toContain('src="app://local/image.png"');
+      expect(result).not.toContain('app://local/attachments/image.png');
+    });
+
+    it('falls back to the media folder when native resolution and direct path miss for a note source path', () => {
+      const app = createMockApp(
+        new Map([['attachments/image.png', 'app://local/attachments/image.png']]),
+        () => null
+      );
+
+      const result = replaceImageEmbedsWithHTML('![[image.png]]', app, {
+        sourcePath: 'note.md',
+        mediaFolder: 'attachments',
+      });
+
+      expect(result).toContain('src="app://local/attachments/image.png"');
+    });
+
+    it('preserves the vault-root hit when source path is blank', () => {
+      const app = createMockApp(
+        new Map([
+          ['image.png', 'app://local/image.png'],
+          ['section/image.png', 'app://local/section/image.png'],
+        ]),
+        (linkPath, _sourcePath, files) =>
+          linkPath === 'image.png' ? files.get('image.png') ?? null : null
+      );
+
+      const result = replaceImageEmbedsWithHTML('![[image.png]]', app, { sourcePath: '' });
+
+      expect(result).toContain('src="app://local/image.png"');
+      expect(result).not.toContain('app://local/section/image.png');
+    });
+
+    it('falls back to native resolution when source path is blank and direct and media paths miss', () => {
+      const app = createMockApp(
+        new Map([['section/image.png', 'app://local/section/image.png']]),
+        (linkPath, sourcePath, files) =>
+          linkPath === 'image.png' && sourcePath === ''
+            ? files.get('section/image.png') ?? null
+            : null
+      );
+
+      const result = replaceImageEmbedsWithHTML('![[image.png]]', app, {
+        sourcePath: '',
+        mediaFolder: 'media',
+      });
+
+      expect(result).toContain('src="app://local/section/image.png"');
+      expect(result).not.toContain('claudian-embedded-image-fallback');
     });
   });
 

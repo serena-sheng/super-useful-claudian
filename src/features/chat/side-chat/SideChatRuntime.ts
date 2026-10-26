@@ -5,17 +5,18 @@ import type {
   ProviderExecutionContext,
   ProviderExecutionLifecycleRegistry,
   ProviderSessionEvent,
+  ProviderSystemInstructions,
 } from '@/core/execution';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { ProviderCapabilities, ProviderId, TitleGenerationService } from '@/core/providers/types';
 import type { AskUserAnswers, ChatMessage, ImageAttachment, ToolCallInfo } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
-import { buildChatExecutionConfiguration } from '@/features/chat/execution/chatExecutionConfiguration';
+import { buildChatExecutionConfiguration, resolveChatSystemInstructions } from '@/features/chat/execution/chatExecutionConfiguration';
 import { deliverAsyncQuestion } from '@/features/chat/interactions/asyncQuestionDelivery';
-import { AsyncQuestionPrompts } from '@/features/chat/interactions/AsyncQuestionPrompts';
-import { InlineInteractionPrompts } from '@/features/chat/interactions/InlineInteractionPrompts';
 import { createInteractionPromptPort } from '@/features/chat/interactions/interactionPromptPort';
+import { SessionInteractions } from '@/features/chat/interactions/SessionInteractions';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
+import { SessionTranscript } from '@/features/chat/sessions/SessionTranscript';
 import { SideChatCommandSubmission } from '@/features/chat/side-chat/SideChatCommandSubmission';
 import { SideChatSession } from '@/features/chat/side-chat/SideChatSession';
 import type {
@@ -32,21 +33,24 @@ import {
   StreamController,
 } from '@/features/chat/turns/StreamController';
 import { TurnCoordinator } from '@/features/chat/turns/TurnCoordinator';
+import { t } from '@/i18n/i18n';
 
 export interface SideChatRuntimeDeps {
   readonly plugin: ChatFeatureHost;
-  readonly component: Component;
   readonly source: SideChatSource;
   readonly settings: SideChatSettingsProjection;
-  readonly messagesEl: HTMLElement;
-  /** Host for this side chat's own inline approval and question prompts. */
-  readonly getPromptParentEl: () => HTMLElement | null;
   readonly lifecycleRegistry: ProviderExecutionLifecycleRegistry;
   readonly resolveBackend: (providerId: ProviderId) => ProviderExecutionBackend;
   readonly buildChildResumeState: () => Promise<Readonly<Record<string, unknown>>>;
-  readonly vaultWorkingDirectory: string;
+  readonly workingDirectory: string;
   readonly onStatusChanged: () => void;
   readonly onError?: (error: unknown) => void;
+}
+
+export interface SideChatPresentation {
+  readonly component: Component;
+  readonly messagesEl: HTMLElement;
+  readonly getPromptParentEl: () => HTMLElement | null;
 }
 
 export interface SideChatSubmission {
@@ -66,13 +70,15 @@ export interface SideChatSubmission {
  */
 export class SideChatRuntime {
   readonly state: ChatState;
-  readonly renderer: MessageRenderer;
+  readonly #transcript: SessionTranscript;
+  #presentation: SideChatPresentation | null = null;
   readonly #stream: StreamController;
   readonly #subagents: SubagentManager;
   readonly #session: SideChatSession;
-  readonly #prompts: InlineInteractionPrompts;
-  readonly #asyncQuestions: AsyncQuestionPrompts;
+  readonly #prompts: SessionInteractions;
   readonly #settings: SideChatSettingsProjection;
+  /** Fixed for the child's lifetime: its native context cannot follow later prompt-setting changes. */
+  readonly #systemInstructions: ProviderSystemInstructions;
   #activeDelivery: SideChatSubmission['onDelivery'];
   readonly #responseStream: ResponseStream;
   /** Owns the requested side turn; presentation state derives from it. */
@@ -80,6 +86,7 @@ export class SideChatRuntime {
   #status: SideChatStatus = 'preparing';
   #lastError: string | null = null;
   #disposed = false;
+  #disposal: Promise<void> | null = null;
   #preparation: { controller: AbortController; pending: Promise<unknown> } | null = null;
   #draining = false;
   #requestedSettlement: Promise<void> | null = null;
@@ -93,60 +100,55 @@ export class SideChatRuntime {
 
   constructor(private readonly deps: SideChatRuntimeDeps) {
     this.#settings = { ...deps.settings };
+    this.#systemInstructions = resolveChatSystemInstructions(
+      deps.plugin.settings, deps.workingDirectory, deps.source.sessionInstructions,
+    );
     this.state = new ChatState({
       onAttentionChanged: () => this.#refreshStatus(),
       onStreamingStateChanged: () => this.#refreshStatus(),
     }, undefined, this.#turns);
-    this.renderer = new MessageRenderer(
-      deps.plugin,
-      deps.component,
-      deps.messagesEl,
-      undefined,
-      undefined,
-      () => this.capabilities,
-      undefined,
-    );
     this.#subagents = new SubagentManager(() => undefined);
-    this.#prompts = new InlineInteractionPrompts({
-      getPromptParentEl: () => deps.getPromptParentEl(),
+    this.#prompts = new SessionInteractions({
+      getPromptParentEl: () => this.#presentation?.getPromptParentEl() ?? null,
       onBeforeShow: () => {
         const generation = this.state.streamGeneration;
         this.#stream.thinkingIndicator.hide();
         return () => this.#stream.thinkingIndicator.resume(generation);
       },
     });
-    this.#asyncQuestions = new AsyncQuestionPrompts({
-      prompts: this.#prompts,
+    this.#prompts.subscribe(() => this.state.setActionRequired(this.#prompts.pendingCount > 0));
+    this.#prompts.bindAsyncQuestions({
       answer: (tool, answers, signal) => this.#answerQuestion(tool, answers, signal),
-      onChange: tool => this.renderer.updateQuestionTool(tool),
-      onPendingChange: (id, pending) => pending ? this.state.beginActionRequired(id) : this.state.endActionRequired(id),
+      onChange: tool => this.renderer?.updateQuestionTool(tool),
     });
+    const getRenderer = () => this.renderer;
     this.#stream = new StreamController({
-      onQuestionToolChanged: tool => this.#asyncQuestions.update(tool),
-      getMessagesEl: () => deps.messagesEl,
+      onQuestionToolChanged: tool => this.#prompts.updateAsyncQuestion(tool),
+      getMessagesEl: () => this.#transcript.messagesEl,
       getProviderId: () => deps.source.providerId,
       plugin: deps.plugin,
-      renderer: this.renderer,
+      get renderer() { return getRenderer(); },
       state: this.state,
       subagentManager: this.#subagents,
       updateQueueIndicator: () => undefined,
     });
+    this.#transcript = new SessionTranscript(this.state, this.#stream, this.#subagents);
     this.#responseStream = new ResponseStream({
-      state: this.state, renderer: this.renderer, stream: this.#stream, turns: this.#turns,
+      state: this.state, get renderer() { return getRenderer(); }, stream: this.#stream, turns: this.#turns,
       createMessageId: createSideMessageId,
     });
     this.#backgroundResponses = new BackgroundResponses({
-      state: this.state, renderer: this.renderer, stream: this.#stream,
-      isConnected: () => deps.messagesEl.isConnected, createMessageId: createSideMessageId,
+      state: this.state, get renderer() { return getRenderer(); }, stream: this.#stream,
+      createMessageId: createSideMessageId,
     });
     const ephemeral = this.capabilities.supportsEphemeralFork ?? this.capabilities.supportsEphemeralSessions;
     this.#session = new SideChatSession({
       buildChildResumeState: deps.buildChildResumeState,
-      interactionPort: createInteractionPromptPort(this.state, () => this.#prompts),
+      interactionPort: createInteractionPromptPort(() => this.#prompts),
       lifecycleRegistry: deps.lifecycleRegistry,
       onError: error => deps.onError?.(error),
       onInvalidated: () => {
-        this.#asyncQuestions.expireAll();
+        this.#prompts.expireAsyncQuestions();
         this.#discardQueuedSubmissions();
         this.#backgroundResponses.discard();
         this.#lastError = ephemeral
@@ -162,9 +164,38 @@ export class SideChatRuntime {
       },
       providerId: deps.source.providerId,
       ephemeral,
+      // The child acts for its parent session, with main chat's session tools and policy gate.
+      bindSessionTools: () => {
+        const conversationId = deps.source.conversationId;
+        return conversationId ? deps.plugin.bindSessionTools?.(conversationId) : undefined;
+      },
       resolveBackend: deps.resolveBackend,
-      vaultWorkingDirectory: deps.vaultWorkingDirectory,
+      workingDirectory: deps.workingDirectory,
     });
+  }
+
+  get renderer(): MessageRenderer | null { return this.#transcript.renderer; }
+
+  attachPresentation(presentation: SideChatPresentation): void {
+    if (this.#disposed) throw new Error('Side chat is disposed');
+    if (this.#presentation) throw new Error('Side chat already attached');
+    this.#presentation = presentation;
+    try {
+      const renderer = new MessageRenderer(this.deps.plugin, presentation.component,
+        presentation.messagesEl, undefined, undefined, () => this.capabilities);
+      const welcome = this.#transcript.attach(renderer, presentation.messagesEl, () => '');
+      welcome.remove();
+      this.#prompts.setActive(true);
+    } catch (error) {
+      this.detachPresentation();
+      throw error;
+    }
+  }
+
+  detachPresentation(): void {
+    this.#prompts.detachPresentation();
+    this.#transcript.detach();
+    this.#presentation = null;
   }
 
   async #answerQuestion(tool: ToolCallInfo, answers: AskUserAnswers, signal: AbortSignal): Promise<void> {
@@ -172,9 +203,9 @@ export class SideChatRuntime {
       providerId: this.providerId,
       assertCurrent: () => {
         if (this.#disposed || !this.state.messages.some(message => message.toolCalls?.includes(tool))) {
-          throw new Error('This side chat is no longer available.');
+          throw new Error(t('chat.questions.sideUnavailable'));
         }
-        if (this.state.cancelRequested) throw new Error('The answer was not sent. Please try again.');
+        if (this.state.cancelRequested) throw new Error(t('chat.questions.notSent'));
       },
       prepare: reply => ({
         steer: async () => {
@@ -192,7 +223,7 @@ export class SideChatRuntime {
               id: createSideMessageId(), role: 'user', timestamp: Date.now(),
             };
             this.state.addMessage(message);
-            this.renderer.addMessage(message);
+            this.renderer?.addMessage(message);
           }
           return 'accepted';
         },
@@ -203,10 +234,6 @@ export class SideChatRuntime {
         },
       }),
     }, signal);
-  }
-
-  get source(): SideChatSource {
-    return this.deps.source;
   }
 
   get providerId(): ProviderId {
@@ -353,7 +380,7 @@ export class SideChatRuntime {
       timestamp: Date.now(),
     };
     this.state.addMessage(userMessage);
-    this.renderer.addMessage(userMessage);
+    this.renderer?.addMessage(userMessage);
     if (this.state.messages.length === 1 && this.deps.plugin.settings.enableAutoTitleGeneration) {
       void this.#generateTitle(userMessage);
     }
@@ -374,7 +401,7 @@ export class SideChatRuntime {
       const result = await this.#session.execute({
         assertBeforeHandoff: submission.assertBeforeHandoff,
         ...(submission.context ? { context: submission.context } : {}),
-        configuration: buildChatExecutionConfiguration(this.#settings, this.deps.plugin.getSessionSnapshotDirectory()),
+        configuration: buildChatExecutionConfiguration(this.#settings, this.#systemInstructions),
         conversationHistory: [
           ...this.deps.source.messages,
           ...this.state.messages.slice(0, -2),
@@ -430,7 +457,7 @@ export class SideChatRuntime {
   }
 
   cancel(): void {
-    this.#asyncQuestions.cancelSubmissions();
+    this.#prompts.cancelAsyncSubmissions();
     this.#activeCommand?.cancel();
     this.#preparation?.controller.abort();
     this.#discardQueuedSubmissions();
@@ -439,7 +466,7 @@ export class SideChatRuntime {
     this.#session.cancel();
   }
 
-  async dispose(): Promise<void> {
+  beginShutdown(): void {
     if (this.#disposed) return;
     this.#disposed = true;
     this.#turns.cancel('shutdown');
@@ -447,6 +474,14 @@ export class SideChatRuntime {
     this.#activeCommand?.cancel();
     this.#preparation?.controller.abort();
     this.#discardQueuedSubmissions();
+  }
+
+  dispose(): Promise<void> {
+    this.beginShutdown();
+    return this.#disposal ??= this.#disposeOnce();
+  }
+
+  async #disposeOnce(): Promise<void> {
     await Promise.allSettled([
       this.#preparation?.pending,
       ...[...this.#pendingCommands].map(command => command.settled),
@@ -454,13 +489,13 @@ export class SideChatRuntime {
     this.#backgroundResponses.discard();
     this.#titleService?.cancel();
     this.#titleService = null;
-    this.#asyncQuestions.expireAll();
+    this.#prompts.expireAsyncQuestions();
     this.#prompts.dismissAll();
     await this.#session.dispose();
     this.state.clearFlavorTimerInterval();
     this.state.clearThinkingIndicatorTimeout();
     this.#stream.dispose();
-    this.renderer.dispose();
+    this.detachPresentation();
     this.#subagents.resetStreamingState();
   }
 
@@ -499,6 +534,9 @@ export class SideChatRuntime {
     if (event.type === 'background_turn_started') {
       this.#backgroundResponses.reserve(event.scope.sessionInstanceId, event.scope.turnId);
     }
+    if (event.type === 'user_message_started' && event.scope.kind === 'background') {
+      this.#backgroundResponses.userMessage(event.scope.sessionInstanceId, event);
+    }
     const deliver = () => this.#handleSessionEvent(event, isCurrent);
     if (event.type === 'task_notification' && event.scope.kind === 'session') return deliver();
     const work = this.#sessionEventWork.then(deliver);
@@ -509,9 +547,10 @@ export class SideChatRuntime {
   async #handleSessionEvent(event: ProviderSessionEvent, isCurrent: () => boolean): Promise<void> {
     if (this.#disposed || !isCurrent()) return;
     if (event.type === 'task_notification' && event.scope.kind === 'session') {
+      const getRenderer = () => this.renderer;
       renderSessionTaskNotification({
-        state: this.state, renderer: this.renderer,
-        isConnected: () => this.deps.messagesEl.isConnected, createMessageId: createSideMessageId,
+        state: this.state, get renderer() { return getRenderer(); },
+        createMessageId: createSideMessageId,
       }, event.content, event.afterRequestedEvent, event.afterBackgroundEvent);
       return;
     }

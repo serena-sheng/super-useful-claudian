@@ -1,7 +1,6 @@
-import { getVaultPath } from '../../utils/path';
 import type { AuxiliaryExecutionContext } from '../auxiliary/AuxiliaryExecutionContext';
-import { InlineEditService as SharedInlineEditService } from '../auxiliary/InlineEditService';
-import { InstructionRefineService as SharedInstructionRefineService } from '../auxiliary/InstructionRefineService';
+import { InlineEditService } from '../auxiliary/InlineEditService';
+import { InstructionRefineService } from '../auxiliary/InstructionRefineService';
 import { RoutedTitleGenerationService } from '../auxiliary/RoutedTitleGenerationService';
 import { TitleGenerationService as SharedTitleGenerationService } from '../auxiliary/TitleGenerationService';
 import type {
@@ -17,8 +16,7 @@ import type { ProviderHost } from './ProviderHost';
 import { ProviderWorkspaceRegistry } from './ProviderWorkspaceRegistry';
 import {
   DEFAULT_CHAT_PROVIDER_ID,
-  type InlineEditService,
-  type InstructionRefineService,
+  type InstructionRefineService as InstructionRefineServiceContract,
   type ProviderCapabilities,
   type ProviderChatUIConfig,
   type ProviderConversationHistoryService,
@@ -74,26 +72,25 @@ export class ProviderRegistry {
     return factory?.(plugin) ?? null;
   }
 
-  static createTitleGenerationService(plugin: ProviderHost, providerId?: ProviderId): TitleGenerationService {
-    if (!providerId) {
-      return new RoutedTitleGenerationService({
-        resolveProviderId: () => this.resolveTitleGenerationSelection(plugin.settings)?.providerId ?? null,
-        initializeProvider: provider => ProviderWorkspaceRegistry.ensureInitialized(
-          plugin, provider, 'title-generation',
-        ),
-        createService: provider => this.createTitleGenerationService(plugin, provider),
-      });
-    }
-    const registration = this.getProviderRegistration(providerId);
-    return new SharedTitleGenerationService({
-      ...this.createAuxiliaryExecutionContext(plugin, providerId),
-      resolveLocale: () => resolveTitleGenerationLocale(plugin.settings),
-      resolveModel: () => {
-        const selection = this.resolveTitleGenerationSelection(plugin.settings);
-        if (!selection || selection.providerId !== providerId) {
-          throw new ProviderModelUnavailableError(registration.displayName);
-        }
-        return selection.model;
+  static createTitleGenerationService(plugin: ProviderHost): TitleGenerationService {
+    return new RoutedTitleGenerationService({
+      resolveProviderId: () => this.resolveTitleGenerationSelection(plugin.settings)?.providerId ?? null,
+      initializeProvider: provider => ProviderWorkspaceRegistry.ensureInitialized(
+        plugin, provider, 'title-generation',
+      ),
+      createService: providerId => {
+        const registration = this.getProviderRegistration(providerId);
+        return new SharedTitleGenerationService({
+          ...this.createAuxiliaryExecutionContext(plugin, providerId),
+          resolveLocale: () => resolveTitleGenerationLocale(plugin.settings),
+          resolveModel: () => {
+            const selection = this.resolveTitleGenerationSelection(plugin.settings);
+            if (!selection || selection.providerId !== providerId) {
+              throw new ProviderModelUnavailableError(registration.displayName);
+            }
+            return selection.model;
+          },
+        });
       },
     });
   }
@@ -112,10 +109,8 @@ export class ProviderRegistry {
     return candidates.length === 1 ? candidates[0] : null;
   }
 
-  static createInlineEditService(plugin: ProviderHost, providerId: ProviderId = DEFAULT_CHAT_PROVIDER_ID): InlineEditService {
-    return new SharedInlineEditService(
-      this.createAuxiliaryExecutionContext(plugin, providerId),
-    );
+  static createInlineEditService(plugin: ProviderHost, providerId: ProviderId): InlineEditService {
+    return new InlineEditService(this.createAuxiliaryExecutionContext(plugin, providerId));
   }
 
   /**
@@ -125,13 +120,11 @@ export class ProviderRegistry {
   static createInstructionRefineService(
     plugin: ProviderHost,
     providerId: ProviderId = DEFAULT_CHAT_PROVIDER_ID,
-  ): InstructionRefineService | null {
+  ): InstructionRefineServiceContract | null {
     if (!this.getCapabilities(providerId).supportsInstructionMode) {
       return null;
     }
-    return new SharedInstructionRefineService(
-      this.createAuxiliaryExecutionContext(plugin, providerId),
-    );
+    return new InstructionRefineService(this.createAuxiliaryExecutionContext(plugin, providerId));
   }
 
   private static createAuxiliaryExecutionContext(
@@ -145,7 +138,7 @@ export class ProviderRegistry {
       backend: this.createExecutionBackend(plugin, providerId),
       interactionPort: PASSIVE_AUXILIARY_INTERACTION_PORT,
       lifecycleRegistry: plugin.executionLifecycleRegistry,
-      vaultWorkingDirectory: getVaultPath(plugin.app) ?? '.',
+      workingDirectory: plugin.workingDirectory ?? '.',
     };
   }
 
@@ -188,6 +181,11 @@ export class ProviderRegistry {
     return this.getProviderRegistration(providerId).chatUIConfig;
   }
 
+  static prepareAssistantMarkdown(providerId: ProviderId, markdown: string): string {
+    const ui = Object.hasOwn(this.registrations, providerId) ? this.registrations[providerId]?.chatUIConfig : undefined;
+    return ui?.prepareAssistantMarkdown?.(markdown) ?? markdown;
+  }
+
   static getTitleGenerationModelOptions(
     settings: Record<string, unknown>,
   ): ProviderUIOption[] {
@@ -206,7 +204,8 @@ export class ProviderRegistry {
         seenValues.add(option.value);
         options.push({
           ...option,
-          label: `${this.getProviderDisplayName(providerId)}: ${option.label}`,
+          // The flat list has no group headings, so an upstream group stays in the label.
+          label: `${this.getProviderDisplayName(providerId)}: ${option.group ? `${option.group}/` : ''}${option.label}`,
         });
       }
     }
@@ -238,7 +237,7 @@ export class ProviderRegistry {
       ));
   }
 
-  /** Provider order as presented from top to bottom in the blank-tab model selector. */
+  /** Priority for choosing a blank tab's default provider when no model was selected before. */
   static getBlankTabProviderIds(settings: Record<string, unknown>): ProviderId[] {
     return this.getEnabledProviderIds(settings).reverse();
   }

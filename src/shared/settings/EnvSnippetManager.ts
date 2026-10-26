@@ -65,22 +65,24 @@ export class EnvSnippetModal extends Modal {
         return;
       }
 
-      const contextLimits: Record<string, number> = {};
+      const contextLimits = new Map<string, number>();
       for (const [modelId, input] of contextLimitInputs) {
         const value = input.value.trim();
         if (value) {
           const parsed = parseContextLimit(value);
-          if (parsed !== null) {
-            contextLimits[modelId] = parsed;
+          if (parsed === null) {
+            new Notice(t('settings.customContextLimits.invalid'));
+            return;
           }
+          contextLimits.set(modelId, parsed);
         }
       }
 
-      const modelAliases: Record<string, string> = {};
+      const modelAliases = new Map<string, string>();
       for (const [modelId, input] of modelAliasInputs) {
         const value = input.value.trim();
         if (value) {
-          modelAliases[modelId] = value;
+          modelAliases.set(modelId, value);
         }
       }
 
@@ -93,8 +95,8 @@ export class EnvSnippetModal extends Modal {
           envVarsEl.value,
           this.snippet?.scope ?? this.snippetScope,
         ),
-        contextLimits: Object.keys(contextLimits).length > 0 ? contextLimits : undefined,
-        modelAliases: modelAliasInputs.size > 0 ? modelAliases : undefined,
+        contextLimits: contextLimits.size > 0 ? Object.fromEntries(contextLimits) : undefined,
+        modelAliases: modelAliasInputs.size > 0 ? Object.fromEntries(modelAliases) : undefined,
       };
 
       this.onSave(snippet);
@@ -103,6 +105,8 @@ export class EnvSnippetModal extends Modal {
 
     const renderContextLimitFields = () => {
       if (!contextLimitsContainer) return;
+      const draftLimits = new Map([...contextLimitInputs].map(([id, input]) => [id, input.value]));
+      const draftAliases = new Map([...modelAliasInputs].map(([id, input]) => [id, input.value]));
       contextLimitsContainer.empty();
       contextLimitInputs.clear();
       modelAliasInputs.clear();
@@ -139,7 +143,8 @@ export class EnvSnippetModal extends Modal {
           placeholder: t('settings.customModelAliases.placeholder'),
           cls: 'claudian-snippet-alias-input',
         });
-        aliasInput.value = existingAliases[modelId] ?? '';
+        aliasInput.value = draftAliases.get(modelId)
+          ?? (Object.prototype.hasOwnProperty.call(existingAliases, modelId) ? existingAliases[modelId] : '');
         aliasInput.setAttribute('aria-label', `Alias for ${modelId}`);
         aliasInput.setAttribute('aria-description', t('settings.customModelAliases.ariaDescription'));
         modelAliasInputs.set(modelId, aliasInput);
@@ -149,7 +154,8 @@ export class EnvSnippetModal extends Modal {
           placeholder: '200k',
           cls: 'claudian-snippet-limit-input',
         });
-        input.value = existingLimits[modelId] ? formatContextLimit(existingLimits[modelId]) : '';
+        input.value = draftLimits.get(modelId)
+          ?? (Object.prototype.hasOwnProperty.call(existingLimits, modelId) ? formatContextLimit(existingLimits[modelId]) : '');
         input.setAttribute('aria-label', `Context window for ${modelId}`);
         contextLimitInputs.set(modelId, input);
       }
@@ -193,13 +199,15 @@ export class EnvSnippetModal extends Modal {
 
     const cancelBtn = buttonContainer.createEl('button', {
       text: t('settings.envSnippets.modal.cancel'),
-      cls: 'claudian-cancel-btn'
+      cls: 'claudian-cancel-btn',
+      attr: { type: 'button' },
     });
     cancelBtn.addEventListener('click', () => this.close());
 
     const saveBtn = buttonContainer.createEl('button', {
       text: this.snippet ? t('settings.envSnippets.modal.update') : t('settings.envSnippets.modal.save'),
-      cls: 'claudian-save-btn'
+      cls: 'claudian-save-btn',
+      attr: { type: 'button' },
     });
     saveBtn.addEventListener('click', () => saveSnippet());
 
@@ -282,7 +290,7 @@ export class EnvSnippetManager {
 
       const restoreBtn = actionsEl.createEl('button', {
         cls: 'claudian-settings-action-btn',
-        attr: { 'aria-label': t('settings.envSnippets.insert') },
+        attr: { type: 'button', 'aria-label': t('settings.envSnippets.insert') },
       });
       setIcon(restoreBtn, 'clipboard-paste');
       restoreBtn.addEventListener('click', () => {
@@ -297,7 +305,7 @@ export class EnvSnippetManager {
 
       const editBtn = actionsEl.createEl('button', {
         cls: 'claudian-settings-action-btn',
-        attr: { 'aria-label': t('common.edit') },
+        attr: { type: 'button', 'aria-label': t('common.edit') },
       });
       setIcon(editBtn, 'pencil');
       editBtn.addEventListener('click', () => {
@@ -306,7 +314,7 @@ export class EnvSnippetManager {
 
       const deleteBtn = actionsEl.createEl('button', {
         cls: 'claudian-settings-action-btn claudian-settings-delete-btn',
-        attr: { 'aria-label': t('common.delete') },
+        attr: { type: 'button', 'aria-label': t('common.delete') },
       });
       setIcon(deleteBtn, 'trash-2');
       deleteBtn.addEventListener('click', () => {
@@ -331,9 +339,14 @@ export class EnvSnippetManager {
       this.scope,
       (snippet) => {
         void (async (): Promise<void> => {
-          await this.plugin.mutateSettings((settings) => {
-            settings.envSnippets.push(snippet);
-          });
+          try {
+            await this.plugin.mutateSettings((settings) => {
+              settings.envSnippets.push(snippet);
+            });
+          } catch {
+            new Notice('Could not complete environment snippet save');
+            return;
+          }
           this.render();
           new Notice(`Environment snippet "${snippet.name}" saved`);
         })();
@@ -372,16 +385,17 @@ export class EnvSnippetManager {
       if (snippet.modelAliases) {
         const modelIds = ProviderRegistry.getCustomModelIds(parseEnvironmentVariables(snippet.envVars));
         const modelAliases = ProviderRegistry.getChatUIConfig('claude').customModelAliases;
-        const nextAliases = modelAliases?.get(settings) ?? {};
+        const nextAliases = new Map(Object.entries(modelAliases?.get(settings) ?? {}));
         for (const modelId of modelIds) {
-          const alias = snippet.modelAliases[modelId]?.trim();
+          const alias = Object.prototype.hasOwnProperty.call(snippet.modelAliases, modelId)
+            ? snippet.modelAliases[modelId].trim() : undefined;
           if (alias) {
-            nextAliases[modelId] = alias;
+            nextAliases.set(modelId, alias);
           } else {
-            delete nextAliases[modelId];
+            nextAliases.delete(modelId);
           }
         }
-        modelAliases?.update(settings, nextAliases);
+        modelAliases?.update(settings, Object.fromEntries(nextAliases));
       }
     });
 
@@ -402,12 +416,17 @@ export class EnvSnippetManager {
         void (async (): Promise<void> => {
           const exists = this.plugin.settings.envSnippets.some(s => s.id === snippet.id);
           if (exists) {
-            await this.plugin.mutateSettings((settings) => {
-              const index = settings.envSnippets.findIndex(s => s.id === snippet.id);
-              if (index !== -1) {
-                settings.envSnippets[index] = updatedSnippet;
-              }
-            });
+            try {
+              await this.plugin.mutateSettings((settings) => {
+                const index = settings.envSnippets.findIndex(s => s.id === snippet.id);
+                if (index !== -1) {
+                  settings.envSnippets[index] = updatedSnippet;
+                }
+              });
+            } catch {
+              new Notice('Could not complete environment snippet update');
+              return;
+            }
             this.render();
             new Notice(`Environment snippet "${updatedSnippet.name}" updated`);
           }
@@ -442,6 +461,8 @@ export class EnvSnippetManager {
     const envTextarea = (this.containerEl.ownerDocument ?? window.document).querySelector<HTMLTextAreaElement>(selector);
     if (envTextarea) {
       envTextarea.value = value;
+      const EventConstructor = envTextarea.ownerDocument.defaultView?.Event ?? Event;
+      envTextarea.dispatchEvent(new EventConstructor('input', { bubbles: true }));
     }
   }
 }

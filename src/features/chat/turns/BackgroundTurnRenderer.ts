@@ -4,61 +4,87 @@ import type { ChatMessage, StreamChunk } from '@/core/types';
 import type { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
 import { recordNotificationPredecessors, recordResponseContinuation } from '@/features/chat/rendering/NotificationBoundaries';
 import { providerOutputEventToStreamChunk } from '@/features/chat/rendering/providerOutputChunks';
-import { getAutomaticNotificationPredecessor, isStandaloneTaskNotification } from '@/features/chat/rendering/ResponseLayout';
+import { getAutomaticNotificationPredecessor, hasResponseOutput, isStandaloneTaskNotification } from '@/features/chat/rendering/ResponseLayout';
 import { ChatState } from '@/features/chat/state/ChatState';
-import { continueResponseAfterNotification } from '@/features/chat/turns/ResponseContinuation';
+import {
+  continueResponseAfterNotification,
+  getTrailingNotificationsEnd,
+  getTurnIdentity,
+  markStoppedTurn,
+  type StoppedTurnEvents,
+} from '@/features/chat/turns/ResponseContinuation';
 import type { StreamController } from '@/features/chat/turns/StreamController';
 
 export interface BackgroundTurnRenderHost {
   readonly state: ChatState;
-  readonly renderer: MessageRenderer;
+  readonly renderer: MessageRenderer | null;
   readonly stream: StreamController;
-  isConnected(): boolean;
   createMessageId(): string;
 }
 
 interface BackgroundTurnRenderResult {
-  events: readonly ProviderBackgroundOutputEvent[];
+  spans: readonly BackgroundTurnRenderSpan[];
   metadata: { assistantMessageId?: string };
+  /** The terminal event of a stopped native turn; its last reply shows the interrupt as a live Stop does. */
+  interruptedAt?: ProviderBackgroundEventScope;
+}
+
+export interface BackgroundTurnRenderSpan {
+  events: ProviderBackgroundOutputEvent[];
   target?: BackgroundTurnRenderTarget;
 }
 
 export interface BackgroundTurnRenderTarget {
   readonly message: ChatMessage;
-  readonly element: HTMLElement;
+}
+
+/** Inserts a reply mid-transcript instead of appending an automatic response. */
+export interface BackgroundTurnPlacement {
+  readonly index: number;
+  /** The message whose rendering the reply follows. */
+  readonly after?: string;
+  readonly automatic: boolean;
 }
 
 /** Reserve transcript order before asynchronous rendering or later input. */
 export function reserveBackgroundTurn(
   host: Pick<BackgroundTurnRenderHost, 'state' | 'renderer' | 'createMessageId'>,
+  placement?: BackgroundTurnPlacement,
 ): BackgroundTurnRenderTarget {
   const message: ChatMessage = {
-    id: host.createMessageId(), role: 'assistant', isAutomaticResponse: true,
+    id: host.createMessageId(), role: 'assistant', isAutomaticResponse: placement?.automatic ?? true,
     content: '', timestamp: Date.now(), toolCalls: [], contentBlocks: [],
   };
-  const previous = host.state.messages.at(-1);
+  const messages = host.state.messages;
+  const index = placement?.index ?? messages.length;
+  const previous = messages[index - 1];
   if (isStandaloneTaskNotification(previous)) recordResponseContinuation(message, previous);
-  host.state.addMessage(message);
-  const element = host.renderer.addMessage(message);
-  element.hidden = true;
-  return { message, element };
+  if (placement) {
+    messages.splice(index, 0, message);
+    host.state.messages = messages;
+  } else {
+    host.state.addMessage(message);
+  }
+  const element = host.renderer?.addMessage(message, placement?.after) ?? null;
+  if (element) element.hidden = true;
+  return { message };
 }
 
-export function discardBackgroundTurn(state: ChatState, target: BackgroundTurnRenderTarget): void {
-  target.element.remove();
+export function discardBackgroundTurn(host: Pick<BackgroundTurnRenderHost, 'state' | 'renderer'>, target: BackgroundTurnRenderTarget): void {
+  const { state } = host;
+  host.renderer?.removeMessage(target.message.id);
   if (state.messages.includes(target.message)) {
     state.messages = state.messages.filter(message => message !== target.message);
   }
 }
 
-/** A task can finish during any turn; its disclosure must not borrow live stream state. */
+/** The caller admits live session events; detaching the transcript must not drop a notification. */
 export function renderSessionTaskNotification(
-  host: Pick<BackgroundTurnRenderHost, 'state' | 'renderer' | 'isConnected' | 'createMessageId'>,
+  host: Pick<BackgroundTurnRenderHost, 'state' | 'renderer' | 'createMessageId'>,
   content: string,
   afterRequestedEvent?: ProviderRequestedEventScope,
   afterBackgroundEvent?: ProviderBackgroundEventScope,
 ): void {
-  if (!host.isConnected()) return;
   const message: ChatMessage = {
     id: host.createMessageId(), role: 'assistant', isAutomaticResponse: true,
     content: '', timestamp: Date.now(),
@@ -66,10 +92,10 @@ export function renderSessionTaskNotification(
   };
   recordNotificationPredecessors(message, afterRequestedEvent, afterBackgroundEvent);
   host.state.addMessage(message);
-  const element = host.renderer.addMessage(message);
-  const contentEl = element.querySelector<HTMLElement>('.claudian-message-content');
-  if (contentEl) host.renderer.renderTaskNotification(contentEl, content);
-  host.renderer.scrollToBottom();
+  const element = host.renderer?.addMessage(message) ?? null;
+  const contentEl = element?.querySelector<HTMLElement>('.claudian-message-content');
+  if (contentEl) host.renderer?.renderTaskNotification(contentEl, content);
+  host.renderer?.scrollToBottom();
 }
 
 function isVisibleAutoTurnChunk(chunk: StreamChunk, hiddenToolIds: Set<string>): boolean {
@@ -95,12 +121,40 @@ function isVisibleAutoTurnChunk(chunk: StreamChunk, hiddenToolIds: Set<string>):
   }
 }
 
-function hasVisibleAutoTurnMessageContent(message: ChatMessage): boolean {
-  if (message.content.trim().length > 0) return true;
-  if (message.toolCalls && message.toolCalls.length > 0) return true;
-  return message.contentBlocks?.some(block =>
-    block.type !== 'text' || block.content.trim().length > 0
-  ) ?? false;
+/**
+ * The stopped input span's last message carries the interrupt: its last reply, or a
+ * notification that trailed it; a span without output keeps a bare marker after its
+ * reserved position and trailing notifications, as replay records it. Returns the
+ * message whose finalization folds the turn.
+ */
+function markInterruptedTurn(
+  host: BackgroundTurnRenderHost,
+  stopped: readonly ChatMessage[],
+  anchor: ChatMessage | undefined,
+  terminal: ProviderBackgroundEventScope,
+): ChatMessage | undefined {
+  const messages = host.state.messages;
+  // Only notifications the turn received before it ended belong to it.
+  const turn: StoppedTurnEvents = { scope: terminal, through: terminal.sequence - 1 };
+  const reply = stopped.at(-1);
+  if (!reply) {
+    const marker: ChatMessage = {
+      id: host.createMessageId(), role: 'assistant', content: '', timestamp: Date.now(), isInterrupt: true,
+      turnId: getTurnIdentity(terminal),
+    };
+    const index = getTrailingNotificationsEnd(messages, anchor ? messages.indexOf(anchor) : -1, turn);
+    messages.splice(index + 1, 0, marker);
+    host.state.messages = messages;
+    const contentEl = host.renderer?.addMessage(marker, messages[index]?.id).querySelector<HTMLElement>('.claudian-message-content');
+    if (contentEl) host.renderer?.appendInterruptIndicator(contentEl);
+    return undefined;
+  }
+  // The span is one native turn with no completion, like a stopped requested reply.
+  for (const segment of stopped) {
+    segment.turnId = getTurnIdentity(terminal);
+    segment.completedAt = undefined;
+  }
+  return markStoppedTurn(host.renderer, reply, host.renderer?.getMessageContentEl(reply.id) ?? null, messages, turn);
 }
 
 /** Render a settled native background turn; the caller owns storage and execution lifetime. */
@@ -109,32 +163,18 @@ export async function renderAutoTriggeredTurn(
   result: BackgroundTurnRenderResult,
   isCurrent: () => boolean,
 ): Promise<boolean> {
-  if (!isCurrent() || !host.isConnected()) {
+  if (!isCurrent()) {
     return false;
   }
 
   const { metadata } = result;
-  const chunks = result.events.flatMap(event => {
+  const spans = result.spans.map(span => ({ ...span, chunks: span.events.flatMap(event => {
     const chunk = providerOutputEventToStreamChunk(event);
     return chunk ? [{ chunk, scope: event.scope }] : [];
-  });
-  if (chunks.length === 0) {
-    if (result.target) discardBackgroundTurn(host.state, result.target);
-    return false;
-  }
-
-  const hiddenToolIds = new Set(chunks.flatMap(({ chunk }) =>
+  }) }));
+  const hiddenToolIds = new Set(spans.flatMap(span => span.chunks).flatMap(({ chunk }) =>
     chunk.type === 'tool_use' && chunk.name === TOOL_AGENT_OUTPUT ? [chunk.id] : []
   ));
-  const hasVisibleContent = chunks.some(({ chunk }) => isVisibleAutoTurnChunk(chunk, hiddenToolIds));
-
-  const target = result.target ?? (hasVisibleContent ? reserveBackgroundTurn(host) : undefined);
-  let assistantMessage: ChatMessage = target?.message ?? {
-    id: host.createMessageId(), role: 'assistant', content: '', timestamp: Date.now(),
-  };
-  const segments = [assistantMessage];
-  if (!hasVisibleContent && target) discardBackgroundTurn(host.state, target);
-
   const state = new ChatState({
     onUsageChanged: usage => {
       if (isCurrent() && !host.state.isStreaming) {
@@ -146,63 +186,83 @@ export async function renderAutoTriggeredTurn(
   state.currentConversationId = host.state.currentConversationId;
   state.autoScrollEnabled = host.state.autoScrollEnabled;
   const stream = host.stream.createBackgroundStream(state);
-
-  if (hasVisibleContent && target) {
-    target.element.hidden = false;
-    state.currentContentEl = target.element.querySelector<HTMLElement>('.claudian-message-content');
-  }
-  state.messages = host.state.messages;
+  const segments: ChatMessage[] = [];
+  let checkpointMessage: ChatMessage | undefined;
+  // Each span follows one input boundary; a stop belongs to the last one.
+  let finalSpanStart = 0;
+  let finalSpanAnchor: ChatMessage | undefined;
 
   try {
-    for (const { scope, chunk } of chunks) {
-      if (!isCurrent()) return false;
-      if (hasVisibleContent) {
-        const continuation = await continueResponseAfterNotification({
-          state: host.state, streamState: state, renderer: host.renderer, stream,
-          createMessageId: () => host.createMessageId(), isCurrent,
-        }, assistantMessage, chunk, scope);
+    for (const span of spans) {
+      const start = segments.length;
+      finalSpanStart = start;
+      const hasVisibleContent = span.chunks.some(({ chunk }) => isVisibleAutoTurnChunk(chunk, hiddenToolIds));
+      const target = span.target ?? (hasVisibleContent ? reserveBackgroundTurn(host) : undefined);
+      const reserved = target ? host.state.messages.indexOf(target.message) : -1;
+      finalSpanAnchor = reserved > 0 ? host.state.messages[reserved - 1] : reserved < 0 ? host.state.messages.at(-1) : undefined;
+      let assistantMessage: ChatMessage = target?.message ?? {
+        id: host.createMessageId(), role: 'assistant', content: '', timestamp: Date.now(),
+      };
+      segments.push(assistantMessage);
+      state.response.messageId = assistantMessage.id;
+      if (target && !hasVisibleContent) discardBackgroundTurn(host, target);
+      state.currentContentEl = hasVisibleContent && target ? host.renderer?.getMessageContentEl(target.message.id) ?? null : null;
+      if (state.currentContentEl?.parentElement) state.currentContentEl.parentElement.hidden = false;
+      for (const { scope, chunk } of span.chunks) {
         if (!isCurrent()) return false;
-        if (continuation !== assistantMessage) {
-          assistantMessage = continuation;
-          segments.push(continuation);
+        if (hasVisibleContent) {
+          const continuation = await continueResponseAfterNotification({
+            state: host.state, streamState: state, renderer: host.renderer, stream,
+            createMessageId: () => host.createMessageId(), isCurrent,
+          }, assistantMessage, chunk, scope);
+          if (!isCurrent()) return false;
+          if (continuation !== assistantMessage) {
+            assistantMessage = continuation;
+            segments.push(continuation);
+          }
         }
+        state.messages = host.state.messages;
+        await stream.handleStreamChunk(chunk, assistantMessage);
+        if (!isCurrent()) return false;
       }
-      state.messages = host.state.messages;
-      await stream.handleStreamChunk(chunk, assistantMessage);
+
       if (!isCurrent()) return false;
-    }
-
-    if (!isCurrent()) return false;
-    await stream.handleStreamChunk({ type: 'done' }, assistantMessage);
-
-    if (
-      isCurrent()
-      && hasVisibleContent
-      && !hasVisibleAutoTurnMessageContent(assistantMessage)
-    ) {
-      const placeholder = '(background task completed)';
-      assistantMessage.content = placeholder;
-      await stream.appendText(placeholder);
-    }
-
-    if (isCurrent() && hasVisibleContent) {
+      await stream.handleStreamChunk({ type: 'done' }, assistantMessage);
       await stream.finalizeCurrentThinkingBlock(assistantMessage);
       if (!isCurrent()) return false;
       await stream.finalizeCurrentTextBlock(assistantMessage);
       if (!isCurrent()) return false;
+      stream.thinkingIndicator.hide();
       assistantMessage.completedAt = Date.now();
-      if (metadata.assistantMessageId) assistantMessage.assistantMessageId = metadata.assistantMessageId;
-      for (const segment of segments) {
-        if (!host.state.messages.includes(segment)) continue;
-        const previous = getAutomaticNotificationPredecessor(segment, host.state.messages);
-        // Include only notification context, never another response's live work.
-        const responseMessages = previous ? [previous, segment] : [segment];
-        host.renderer.finalizeResponse(segment, responseMessages);
+      if (!hasResponseOutput(assistantMessage) && host.state.messages.includes(assistantMessage)) {
+        host.state.messages = host.state.messages.filter(message => message !== assistantMessage);
+        host.renderer?.removeMessage(assistantMessage.id);
       }
+      checkpointMessage = segments.slice(start).reverse().find(segment => host.state.messages.includes(segment));
     }
+
+    if (result.interruptedAt) {
+      // A stopped span ends at its output: output-free segments on either side of its notifications show nothing.
+      const empty = segments.slice(finalSpanStart).filter(segment => !hasResponseOutput(segment));
+      host.state.messages = host.state.messages.filter(message => !empty.includes(message));
+      for (const segment of empty) host.renderer?.removeMessage(segment.id);
+      checkpointMessage = segments.slice(finalSpanStart).reverse().find(segment => host.state.messages.includes(segment));
+    }
+    const visible = segments.filter(segment => host.state.messages.includes(segment));
+    if (checkpointMessage && metadata.assistantMessageId) checkpointMessage.assistantMessageId = metadata.assistantMessageId;
+    const stopped = result.interruptedAt ? segments.slice(finalSpanStart).filter(segment => visible.includes(segment)) : [];
+    const owner = result.interruptedAt ? markInterruptedTurn(host, stopped, finalSpanAnchor, result.interruptedAt) : undefined;
+    for (const segment of visible) {
+      if (stopped.includes(segment)) continue;
+      const previous = getAutomaticNotificationPredecessor(segment, host.state.messages);
+      // Include only notification context, never another response's live work.
+      host.renderer?.finalizeResponse(segment, previous ? [previous, segment] : [segment]);
+    }
+    // The stopped span folds once, from its owner; the shared layout bounds it.
+    if (owner) host.renderer?.finalizeResponse(owner, host.state.messages);
+    return visible.length > 0 || result.interruptedAt !== undefined;
   } finally {
     stream.dispose();
-    if (hasVisibleContent) host.renderer.scrollToBottom();
+    host.renderer?.scrollToBottom();
   }
-  return hasVisibleContent;
 }

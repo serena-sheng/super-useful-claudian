@@ -1,5 +1,6 @@
 {
   "common": {
+    "inputSuggestions": "Eingabevorschläge",
     "save": "Speichern",
     "cancel": "Abbrechen",
     "delete": "Löschen",
@@ -8,7 +9,9 @@
     "clearAll": "Alle löschen",
     "error": "Fehler",
     "confirm": "Bestätigen",
-    "refresh": "Aktualisieren"
+    "refresh": "Aktualisieren",
+    "retry": "Erneut versuchen",
+    "none": "Keine"
   },
   "chat": {
     "promptSuggestionHint": "Mit Tab übernehmen",
@@ -51,9 +54,14 @@
     "quote": {
       "buttonLabel": "Zitieren"
     },
+    "codeBlock": {
+      "copyAriaLabel": "{language}-Code kopieren",
+      "copied": "Kopiert!"
+    },
     "sideChat": {
       "title": "Nebenchat",
       "collapse": "Einklappen",
+      "fullHeight": "Volle Höhe",
       "discard": "Verwerfen",
       "statusPreparing": "Wird vorbereitet",
       "statusQueued": "{count} in Warteschlange",
@@ -89,6 +97,343 @@
       "toolCompleted": "{tool} · fertig",
       "toolFailed": "{tool} · fehlgeschlagen",
       "toolBlocked": "{tool} · blockiert"
+    },
+    "composer": {
+      "placeholder": "Änderungen anfragen, Dateien mit @ erwähnen, /Befehle ausführen",
+      "message": "Nachricht",
+      "dropImage": "Bild hier ablegen",
+      "moreContext": "{count} weitere Kontextelemente anzeigen",
+      "showLess": "Weniger anzeigen",
+      "moreItems": "+{count} weitere"
+    },
+    "worked": "Gearbeitet",
+    "taskNotification": "Aufgabenbenachrichtigung",
+    "copyMessage": "Nachricht kopieren",
+    "showEarlierMessages": "Frühere Nachrichten anzeigen",
+    "renderFailed": "Nachrichteninhalt konnte nicht angezeigt werden.",
+    "interruptedHint": "· Was soll Claudian stattdessen tun?",
+    "sessions": {
+      "empty": "Keine Unterhaltungen",
+      "noMatch": "Keine passenden Sitzungen",
+      "resume": "Unterhaltung fortsetzen",
+      "loading": "Unterhaltung wird geladen…",
+      "current": "Aktuelle Sitzung",
+      "loadFailed": "Unterhaltung konnte nicht geladen werden"
+    },
+    "linkedContent": {
+      "label": "Verknüpfter Inhalt:",
+      "choices": "Auswahl verknüpfter Inhalte",
+      "noMatch": "Keine passenden Dateien oder Ordner",
+      "missing": "Inhalt fehlt",
+      "path": "Verknüpfter Inhalt: {path}",
+      "missingPath": "Verknüpfter Inhalt: {path}. Inhalt fehlt",
+      "noContent": "Kein verknüpfter Inhalt",
+      "missingNotice": "Verknüpfter Inhalt fehlt: {path}",
+      "openFailed": "Verknüpfter Inhalt konnte nicht geöffnet werden: {error}"
+    },
+    "questions": {
+      "title": "Frage",
+      "submit": "Absenden",
+      "review": "Antworten überprüfen",
+      "ready": "Bereit, die Antworten abzusenden?",
+      "sending": "Wird gesendet…",
+      "submitAnswers": "Antworten absenden",
+      "notAnswered": "Nicht beantwortet",
+      "customAnswer": "Eigene Antwort eingeben…",
+      "secret": "Geheime Eingabe…",
+      "editAnswer": "Antwort auf {question} bearbeiten",
+      "waiting": "Warte auf Antwort…",
+      "noOptions": "Keine Optionen aufgezeichnet",
+      "sendFailed": "Antwort konnte nicht gesendet werden. Bitte erneut versuchen.",
+      "answerBelow": "Bitte im Fragenbereich unten antworten.",
+      "expired": "Frage abgelaufen.",
+      "notSent": "Die Antwort wurde nicht gesendet. Bitte erneut versuchen.",
+      "unsupportedReply": "Diese Frage kann diese Antwort nicht annehmen.",
+      "uncertainDelivery": "Die Zustellung der Antwort konnte nicht bestätigt werden. Sie wurde nicht erneut eingereiht, um doppeltes Senden zu vermeiden.",
+      "differentConversation": "Diese Frage gehört zu einer anderen Unterhaltung.",
+      "sideUnavailable": "Dieser Nebenchat ist nicht mehr verfügbar."
+    },
+    "tools": {
+      "calls": "Werkzeugaufrufe",
+      "output": "Ausgabe",
+      "noResult": "Kein Ergebnis",
+      "noMatches": "Keine Treffer",
+      "tasksUpdated": "Aufgaben aktualisiert",
+      "noChanges": "Keine Änderungen",
+      "moreLines": "… {count} weitere Zeilen",
+      "moreCharacters": "… {count} weitere Zeichen",
+      "running": "Wird ausgeführt…",
+      "noOutput": "Keine Ausgabe",
+      "status": {
+        "running": "Status: läuft",
+        "completed": "Status: abgeschlossen",
+        "error": "Status: Fehler",
+        "cancelled": "Status: abgebrochen",
+        "blocked": "Status: blockiert"
+      },
+      "inProgress": "Status: in Bearbeitung",
+      "writing": "Wird geschrieben…",
+      "done": "FERTIG",
+      "errorResult": "FEHLER",
+      "tasks": "Aufgaben",
+      "taskProgress": "Aufgaben {completed}/{total}",
+      "taskProgressLabel": "Aufgaben ({completed}/{total})",
+      "changes": "Änderungen: +{added} -{removed}",
+      "fileDeleted": "Datei gelöscht",
+      "noTextDiff": "Kein Textvergleich verfügbar",
+      "patch": "Patch",
+      "files": "{count} Dateien",
+      "file": "Datei",
+      "enteringPlan": "Planungsmodus wird gestartet",
+      "planComplete": "Plan abgeschlossen",
+      "messageAgent": "Agent benachrichtigen",
+      "listDestinations": "Ziele auflisten",
+      "messageSession": "Sitzung benachrichtigen",
+      "stopSession": "Sitzung stoppen",
+      "readSession": "Sitzung lesen",
+      "continueAgent": "Agent fortsetzen",
+      "listAgents": "Agents auflisten",
+      "interruptAgent": "Agent unterbrechen",
+      "allAgents": "Alle Agents",
+      "commandPlaceholder": "Befehl",
+      "filesPlaceholder": "Dateien",
+      "patternPlaceholder": "Muster",
+      "toolsPlaceholder": "Werkzeuge",
+      "agentCount": "{count} Agent",
+      "agentCountPlural": "{count} Agenten"
+    },
+    "citations": {
+      "memoryUsed": "Verwendete Erinnerungen",
+      "source": "{count} Quelle",
+      "sources": "{count} Quellen"
+    },
+    "web": {
+      "findInPage": "Auf Seite suchen",
+      "openPage": "Seite öffnen",
+      "urlUnavailable": "URL nicht verfügbar",
+      "clickLink": "Link {id} anklicken",
+      "pattern": "Muster: {pattern}",
+      "query": "Suchanfrage: {query}",
+      "altQuery": "Alternative Suchanfrage: {query}",
+      "search": "Web durchsuchen",
+      "moreQueries": "… {count} weitere Suchanfragen",
+      "clickInPage": "Link {id} auf {url} anklicken",
+      "open": "{url} öffnen",
+      "find": "„{pattern}“ suchen",
+      "inPage": "{action} auf {url}",
+      "operations": "{count} Webaktionen",
+      "searchTerm": "Suche"
+    },
+    "permissionMode": {
+      "label": "Berechtigungsmodus",
+      "current": "Berechtigungsmodus: {mode}",
+      "changeFailed": "Berechtigungsmodus konnte nicht geändert werden",
+      "claude": {
+        "auto": "Automatisch",
+        "manual": "Manuell",
+        "acceptEdits": "Änderungen akzeptieren",
+        "yolo": "YOLO",
+        "autoDesc": "Claude entscheidet über Berechtigungen",
+        "manualDesc": "Vor Änderungen immer fragen",
+        "acceptEditsDesc": "Alle Dateiänderungen automatisch akzeptieren",
+        "yoloDesc": "Alle Berechtigungen ohne Nachfrage erteilen"
+      },
+      "codex": {
+        "autoReview": "Für mich genehmigen",
+        "normal": "Genehmigung anfragen",
+        "yolo": "Vollzugriff",
+        "autoReviewDesc": "Zusätzlichen Zugriff automatisch prüfen.",
+        "readOnlyDesc": "Vor Änderungen oder Internetzugriff fragen.",
+        "normalDesc": "Vor zusätzlichem Zugriff fragen.",
+        "yoloDesc": "Uneingeschränkter Datei- und Internetzugriff."
+      }
+    },
+    "thinking": {
+      "active": "Denke seit {seconds}s…",
+      "completed": "{seconds}s nachgedacht",
+      "label": "Gedanken"
+    },
+    "suggestions": {
+      "loading": "Wird geladen…",
+      "noMatches": "Keine Treffer",
+      "loadFailed": "Vorschläge konnten nicht geladen werden",
+      "retryHint": "Erneut eingeben, um es noch einmal zu versuchen",
+      "providerLoading": "Anbieterbefehle werden geladen…",
+      "providerRetry": "Anbieterbefehle erneut suchen"
+    },
+    "approval": {
+      "title": "Berechtigung erforderlich",
+      "question": "Diese Aktion erlauben?",
+      "deny": "Ablehnen",
+      "allowOnce": "Einmal erlauben",
+      "alwaysAllow": "Immer erlauben",
+      "mcpRequest": "MCP-Anfrage",
+      "mcpServer": "MCP-Server: {server}",
+      "decline": "Ablehnen",
+      "allow": "Erlauben",
+      "cancelRequest": "Diese Anfrage abbrechen.",
+      "declineRequest": "Diese Anfrage ablehnen.",
+      "acceptRequest": "Diese Anfrage annehmen.",
+      "fileChange": "Dateiänderung",
+      "fileChangeReason": "Dateiänderung: {reason}",
+      "permissionRequest": "Berechtigungsanfrage",
+      "permissionReason": "Berechtigungsanfrage: {reason}",
+      "networkAccess": "{protocol}-Zugriff auf {host} erlauben",
+      "execute": "Ausführen: {command}",
+      "executeCommand": "Befehl ausführen",
+      "allowSimilar": "Ähnliche Befehle erlauben",
+      "execPolicy": "Änderung der Ausführungsrichtlinie genehmigen und speichern.",
+      "host": "Host",
+      "allowHost": "{host} für diese Sitzung erlauben",
+      "denyHost": "{host} für diese Sitzung ablehnen",
+      "allowRule": "Eine Zulassungsregel für {host} anwenden.",
+      "denyRule": "Eine Ablehnungsregel für {host} anwenden.",
+      "details": "Genehmigungsdetails für {tool}",
+      "unexpectedSelection": "Unerwartete Genehmigungsauswahl: „{value}“",
+      "runCommand": "Befehl ausführen: {pattern}",
+      "readFile": "Datei lesen: {pattern}",
+      "writeFile": "In Datei schreiben: {pattern}",
+      "editFile": "Datei bearbeiten: {pattern}",
+      "searchFiles": "Passende Dateien suchen: {pattern}",
+      "searchContent": "Passende Inhalte suchen: {pattern}",
+      "unknownPattern": "(unbekannt)",
+      "deepseekRequest": "DeepSeek fordert eine Berechtigung an."
+    },
+    "disclosure": {
+      "expand": "{label} - zum Erweitern klicken",
+      "collapse": "{label} - zum Einklappen klicken"
+    },
+    "removeItem": "{item} entfernen",
+    "agent": "Agent: {agent}",
+    "images": {
+      "unsupportedProvider": "Dieser Anbieter unterstützt keine Bildanhänge.",
+      "tooLarge": "Bild überschreitet das Limit von {size}.",
+      "unsupportedType": "Nicht unterstütztes Bildformat.",
+      "attachFailed": "Bild konnte nicht angehängt werden.",
+      "label": "Bild",
+      "numbered": "Bild {number}",
+      "attachment": "Bildanhang: {name} · {size}",
+      "fileNotFound": "{message} (Datei nicht gefunden)",
+      "permissionDenied": "{message} (Zugriff verweigert)",
+      "preview": "Bildvorschau: {name}",
+      "closePreview": "Bildvorschau schließen"
+    },
+    "pi": {
+      "extension": "Pi-Erweiterung",
+      "notification": "Benachrichtigung der Pi-Erweiterung."
+    },
+    "sessionMessage": {
+      "undelivered": "Nachrichten von {senders} konnten nicht zugestellt werden.",
+      "fromLabel": "Von Sitzung:"
+    },
+    "sessionTools": {
+      "noSessions": "Keine Sitzungen",
+      "thisSession": "Diese Sitzung",
+      "truncated": "Weitere Sitzungen nicht angezeigt",
+      "recipient": "Empfänger",
+      "model": "Modell",
+      "reasoning": "Reasoning",
+      "message": "Nachricht",
+      "openSession": "Sitzung {sessionId} öffnen",
+      "openProviderSession": "{provider}-Sitzung {sessionId} öffnen",
+      "sessionMissing": "Diese Sitzung existiert nicht mehr.",
+      "openFailed": "Sitzung konnte nicht geöffnet werden: {message}",
+      "openUnavailable": "Sitzungen können hier nicht geöffnet werden.",
+      "providersIncluded": "Verfügbare Anbieter und Modelle einbezogen",
+      "newSession": "Neue Sitzung",
+      "session": "Sitzung",
+      "turns": "Runden",
+      "turnRange": "{from}–{to} von {total}",
+      "noTurns": "Noch keine",
+      "mode": "Zustellung",
+      "modeSteer": "In laufende Runde einsteuern",
+      "modeInterrupt": "Aktuelle Arbeit unterbrechen"
+    },
+    "navigation": {
+      "scrollToTop": "Nach oben scrollen",
+      "previousMessage": "Vorherige Nachricht",
+      "directory": "Unterhaltungsübersicht",
+      "nextMessage": "Nächste Nachricht",
+      "scrollToBottom": "Nach unten scrollen",
+      "emptyDirectory": "Keine Benutzer-Prompts in dieser Unterhaltung"
+    },
+    "projects": {
+      "header": "Projekte",
+      "options": "Projektoptionen",
+      "sortBy": "Projekte sortieren nach",
+      "sort": {
+        "lastActivity": "Letzte Aktivität",
+        "created": "Erstellt"
+      },
+      "noSessions": "Keine Sitzungen",
+      "newSessionIn": "Neue Sitzung in {name}",
+      "actionsFor": "Aktionen für {name}",
+      "newProjectAction": "Neues Projekt",
+      "chipLabel": "Projekt: {name}",
+      "noProject": "Kein Projekt",
+      "menu": {
+        "edit": "Projekt bearbeiten",
+        "openMemory": "Projektgedächtnis öffnen",
+        "archive": "Projekt archivieren",
+        "restore": "Projekt wiederherstellen",
+        "pin": "Projekt anheften",
+        "unpin": "Projekt lösen",
+        "delete": "Projekt löschen",
+        "moveTo": "In Projekt verschieben…",
+        "moveSelectionTo": "{count} Sitzungen in Projekt verschieben…",
+        "removeFrom": "Aus Projekt entfernen",
+        "removeSelectionFrom": "{count} Sitzungen aus Projekt entfernen",
+        "newProject": "Neues Projekt…"
+      },
+      "deleteConfirm": "Projekt „{name}“ löschen und seine Gedächtnisdatei in den Papierkorb verschieben? Die Sitzungen bleiben erhalten, ohne Projekt.",
+      "errors": {
+        "create": "Projekt konnte nicht erstellt werden",
+        "update": "Projekt konnte nicht aktualisiert werden",
+        "delete": "Projekt konnte nicht gelöscht werden",
+        "archive": "Projekt konnte nicht archiviert werden",
+        "restore": "Projekt konnte nicht wiederhergestellt werden",
+        "pin": "Anheften des Projekts konnte nicht geändert werden",
+        "move": "Sitzungen konnten nicht in das Projekt verschoben werden",
+        "remove": "Sitzungen konnten nicht aus dem Projekt entfernt werden",
+        "start": "Sitzung in diesem Projekt konnte nicht gestartet werden",
+        "sort": "Projektsortierung konnte nicht aktualisiert werden"
+      },
+      "editor": {
+        "titleNew": "Neues Projekt",
+        "titleEdit": "Projekt bearbeiten",
+        "name": "Name",
+        "nameDesc": "Wird in der Sitzungsverwaltung und in den Mitgliedssitzungen angezeigt.",
+        "namePlaceholder": "Projektname",
+        "instructions": "Anweisungen",
+        "instructionsDesc": "Wird ab dem nächsten Zug zum Systemprompt jeder Mitgliedssitzung hinzugefügt.",
+        "memoryPath": "Gedächtnisdatei",
+        "memoryPathDesc": "Vault-Pfad der Gedächtnisdatei des Projekts. Eine fehlende Endung .md wird ergänzt. Eine Änderung verschiebt die Datei.",
+        "memoryPathPlaceholder": "Ordner/MEMORY.md",
+        "memoryPathInvalid": "Gib einen Dateipfad innerhalb des Vaults ein, z. B. Projects/MEMORY.md.",
+        "memoryPathTaken": "{path} wird bereits von einer Datei oder einem anderen Projekt verwendet.",
+        "openMemory": "Öffnen",
+        "nameRequired": "Gib einen Projektnamen ein."
+      },
+      "memory": {
+        "title": "Projektgedächtnis: {name}",
+        "reload": "Neu laden",
+        "overwrite": "Überschreiben",
+        "recreate": "Aus Vorlage neu erstellen",
+        "edit": "Bearbeiten",
+        "preview": "Vorschau",
+        "missing": "Die Gedächtnisdatei des Projekts fehlt.",
+        "conflict": "Die Gedächtnisdatei wurde seit dem Laden geändert. Neu laden verwirft deine Änderungen, Überschreiben behält sie.",
+        "loadFailed": "Projektgedächtnis konnte nicht geladen werden",
+        "saveFailed": "Projektgedächtnis konnte nicht gespeichert werden",
+        "saved": "Projektgedächtnis gespeichert",
+        "loading": "Wird geladen…",
+        "updated": "Aktualisiert {time}",
+        "changedOutside": "Die Gedächtnisdatei wurde außerhalb dieses Fensters aktualisiert, vermutlich von einem Agenten.",
+        "keepMine": "Meine Änderungen behalten",
+        "discardConfirm": "Ungespeicherte Änderungen am Projektgedächtnis verwerfen?",
+        "discard": "Verwerfen",
+        "emptyHint": "Agenten füllen dies im Laufe des Projekts aus."
+      }
     },
     "instructionMode": {
       "placeholder": "# Refine an instruction into a prompt",
@@ -126,110 +471,13 @@
       "noDetails": "This tool call did not include the plan details.",
       "approveMessage": "Implement the plan.",
       "rejectMessage": "Please revise the plan before implementing."
+    },
+    "transcriptRestored": {
+      "banner": "Diese Unterhaltung wurde aus dem lokalen Archiv wiederhergestellt, weil die Agent-CLI ihren nativen Verlauf nicht bereitstellen konnte. Unten werden alle gespeicherten Runden angezeigt.",
+      "label": "Aus dem lokalen Archiv wiederhergestellt"
     }
   },
   "settings": {
-      "capabilityMatrix": {
-          "title": "Provider capabilities",
-          "desc": "What each agent harness can actually do, read straight from the capabilities the providers declare rather than a table kept here.",
-          "providerColumn": "Provider",
-          "unsupported": "Not supported",
-          "reasoningEffort": "effort",
-          "reasoningNone": "none",
-          "columns": {
-              "imageAttachments": "Images",
-              "fork": "Fork",
-              "rewind": "Rewind",
-              "turnSteer": "Steer",
-              "planMode": "Plan",
-              "instructionMode": "Instruct",
-              "providerCommands": "Commands",
-              "reasoningControl": "Reasoning"
-          }
-      },
-      "gettingStarted": {
-          "title": "Getting started",
-          "install": {
-              "name": "1. Install an agent CLI",
-              "desc": "Install at least one harness: the OMP install script, or npm install -g @deepseek-ai/dsh. The plugin never installs anything for you."
-          },
-          "provider": {
-              "name": "2. Enable it here",
-              "desc": "Enable the provider in the Providers tab and pick a model. Its readiness panel says what is still missing."
-          },
-          "chat": {
-              "name": "3. Start a chat",
-              "desc": "Open the chat view from the ribbon icon or the command palette and send a message."
-          }
-      },
-      "hotkeys": {
-          "title": "Hotkeys",
-          "desc": "This plugin sets no default hotkeys. Bind them in Obsidian's Settings, Hotkeys - search for \"Super Useful Claudian\" to see every command it registers."
-      },
-      "usage": {
-          "title": "Token usage",
-          "today": "Today",
-          "total": "Total",
-          "input": "Input",
-          "output": "Output",
-          "cache": "Cache",
-          "date": "Date",
-          "sessions": "Top sessions",
-          "empty": "No usage recorded yet.",
-          "note": "Figures are best-effort, as reported by each provider.",
-          "last7days": "Last 7 days"
-      },
-    "readiness": {
-      "heading": "Betriebsbereitschaft",
-      "refresh": "Erneut prüfen",
-      "checking": "Wird geprüft…",
-      "checkFailed": "Betriebsbereitschaft konnte nicht geprüft werden",
-      "status": {
-        "ready": "Bereit",
-        "attention": "Beachten",
-        "blocked": "Blockiert",
-        "disabled": "Deaktiviert"
-      },
-      "check": {
-        "enabled": "Anbieter aktiviert",
-        "cli": "CLI verfügbar",
-        "models": "Modellkatalog",
-        "selection": "Modell ausgewählt"
-      },
-      "detail": {
-        "enabled": "Aktiviert",
-        "disabled": "Deaktiviert",
-        "cliFound": "v{version} · {path}",
-        "cliNoVersion": "{path} · Version nicht lesbar",
-        "cliMissing": "Nicht im PATH gefunden",
-        "models": "{count} Modelle gefunden",
-        "modelsNone": "Noch keine Modelle gefunden",
-        "selection": "{count} Modelle aktiviert",
-        "selectionNone": "Kein Modell aktiviert"
-      },
-      "remedy": {
-        "enable": "Aktiviere {provider}, um ihn zu verwenden.",
-        "cliMissing": "{name} wurde nicht gefunden. Installiere es und prüfe erneut – Claudian führt keine Installationen aus:",
-        "cliUnreadable": "Die CLI wurde gefunden, meldet aber keine Version. Prüfe den Pfad unten.",
-        "refreshModels": "Öffne unten „Modelle“ und aktualisiere den Modellkatalog.",
-        "selectModel": "Aktiviere unten unter „Modelle“ mindestens ein Modell."
-      },
-      "action": {
-        "copy": "Kopieren",
-        "copied": "Kopiert",
-        "checkUpdate": "Auf Update prüfen"
-      },
-      "update": {
-        "checking": "npm wird abgefragt…",
-        "available": "Neue Version {version} verfügbar. Aktualisieren mit:",
-        "latest": "Aktuell ({version} ist die neueste).",
-        "unavailable": "npm-Registry nicht erreichbar."
-      }
-    },
-    "cliUpdates": {
-      "name": "Check CLI updates",
-      "desc": "Show a \"Check for update\" button in each provider's readiness panel. Pressing it queries registry.npmjs.org for the latest published version of that provider's CLI package. Off by default: Claudian makes no registry request unless you enable this."
-    },
     "tabs": {
       "general": "Allgemein",
       "providers": "Anbieter",
@@ -277,14 +525,6 @@
       "select": "Modell auswählen",
       "unavailableWarning": "Automatische Titel sind pausiert. Wählen Sie ein verfügbares Titelmodell."
     },
-    "instructionMode": {
-      "name": "Instruction mode",
-      "desc": "Type # in an empty composer to refine a rough instruction into a polished prompt before sending."
-    },
-    "bangBash": {
-      "name": "Bash-Modus",
-      "desc": "Mit ! im leeren Eingabefeld einen Shell-Befehl im Vault in der eigenen Shell ausführen. Die Ausgabe des Befehls wird der Unterhaltung hinzugefügt."
-    },
     "navMappings": {
       "name": "Vim-Style Navigationszuordnungen",
       "desc": "Eine Zuordnung pro Zeile. Format: \"map <Taste> <Aktion>\" (Aktionen: scrollUp, scrollDown, focusInput)."
@@ -300,7 +540,7 @@
     },
     "codexSandbox": {
       "name": "Sandbox",
-      "desc": "Dateizugriff in den Modi „Approve for me“ und „Ask for approval“. „Nur lesen“ fragt vor jeder Änderung; „Full access“ ignoriert diese Einstellung."
+      "desc": "Dateizugriff in den Modi „Für mich genehmigen“ und „Genehmigung anfragen“. „Nur lesen“ fragt vor jeder Änderung; „Vollzugriff“ ignoriert diese Einstellung."
     },
     "environment": "Umgebung",
     "sharedEnvironment": {
@@ -384,6 +624,10 @@
     "deferMathRenderingDuringStreaming": {
       "name": "Mathe-Rendering während Streaming aufschieben",
       "desc": "LaTeX während des Streamings roh anzeigen und Mathematik einmal rendern, wenn der Textblock abgeschlossen ist."
+    },
+    "pluginRenderedFenceLanguages": {
+      "name": "Von Plugins gerenderte Codeblock-Sprachen",
+      "desc": "Codeblock-Sprachen, eine pro Zeile, die an das Plugin übergeben werden, das sie in Notizen rendert (z. B. vega-lite). Sie werden gerendert, sobald die Antwort fertig ist. Andere Codeblöcke werden immer als Code angezeigt."
     },
     "expandFileEditsByDefault": {
       "name": "Dateibearbeitungen standardmäßig ausklappen",
@@ -477,7 +721,7 @@
     "codex": {
       "installationMethod": {
         "name": "Installationsmethode",
-        "desc": "Wie Claudian Codex CLI unter Windows starten soll. Native Windows verwendet einen Windows-Programmpfad. WSL startet die Linux-CLI in einer ausgewählten Distribution.",
+        "desc": "Wie Claudian Codex unter Windows starten soll. Native Windows verwendet einen Windows-Programmpfad. WSL startet die Linux-CLI in einer ausgewählten Distribution.",
         "nativeWindows": "Natives Windows",
         "wsl": "WSL"
       },
@@ -497,7 +741,7 @@
       },
       "responseStyle": {
         "name": "Antwortstil",
-        "desc": "Wähle den Kommunikationsstil von Codex CLI bei unterstützten Modellen.",
+        "desc": "Wähle den Kommunikationsstil von Codex bei unterstützten Modellen.",
         "pragmatic": "Pragmatisch",
         "friendly": "Freundlich",
         "neutral": "Neutral"
@@ -523,8 +767,8 @@
         "desc": "Ultra in der Auswahl für Codex-Modelle anzeigen, die es unterstützen. Ultra nutzt maximale Denktiefe mit automatischer Aufgabendelegation."
       },
       "environment": {
-        "name": "Codex-CLI-Umgebung",
-        "desc": "Nur Laufzeitvariablen, die Codex CLI gehören. Verwende dies für OPENAI_*- und CODEX_*-Einstellungen. Wenn die Autoerkennung von Codex CLI Hilfe braucht, füge das Installationsverzeichnis dem gemeinsamen PATH hinzu statt diesem Anbieterabschnitt."
+        "name": "Codex-Umgebung",
+        "desc": "Nur Laufzeitvariablen, die Codex gehören. Verwende dies für OPENAI_*- und CODEX_*-Einstellungen. Wenn die Autoerkennung von Codex Hilfe braucht, füge das Installationsverzeichnis dem gemeinsamen PATH hinzu statt diesem Anbieterabschnitt."
       }
     },
     "agentSkills": {
@@ -565,6 +809,7 @@
       }
     },
     "opencode": {
+      "emptyModels": "Der OpenCode-Server hat keine aktivierten Modelle für diesen Vault zurückgegeben. Prüfen Sie .opencode/opencode.json im Vault und die OpenCode-Protokolle (opencode debug paths zeigt deren Speicherort). Bei OpenCode v2 können konfigurierte V1-Plugins inkompatibel sein. Vergleichen Sie opencode models --standalone im Vault und klicken Sie erneut auf Entdecken.",
       "environment": {
         "name": "OpenCode-Umgebungsvariablen",
         "desc": "Zusätzliche Umgebungsvariablen, die an OpenCode übergeben werden."
@@ -574,29 +819,40 @@
         "link": "Zu OpenCode v2 migrieren"
       }
     },
-    "omp": {
-      "environment": {
-        "name": "OMP-Umgebungsvariablen",
-        "desc": "Umgebungsvariablen, die nur an OMP übergeben werden."
-      }
-    },
     "pi": {
       "environment": {
         "name": "Pi-Umgebungsvariablen",
         "desc": "Umgebungsvariablen, die nur an Pi übergeben werden."
-      }
-    },
-    "dsh": {
-      "environment": {
-        "name": "DeepSeek-Harness-Umgebungsvariablen",
-        "desc": "Umgebungsvariablen, die nur an DeepSeek Harness übergeben werden. DEEPSEEK_API_KEY hier setzen, um sich zu authentifizieren."
       },
-      "cliNote": "Erfordert Node.js. Installation der CLI: npm install -g @deepseek-ai/dsh."
+      "models": {
+        "desc": "Claudian führt eine eigene Modellliste, getrennt von Pis enabledModels. „Discover“ listet alle Modelle, die Pi in seiner aktuellen Umgebung authentifizieren kann, gruppiert nach der Provider-Route, die Pi aufruft. Die Route bestimmt Zugangsdaten und Abrechnung."
+      }
     },
     "grok": {
       "environment": {
         "name": "Grok-Build-Umgebungsvariablen",
         "desc": "Umgebungsvariablen, die nur an Grok Build übergeben werden. Geheimnisse für benutzerdefinierte Modelle bleiben in diesem Anbieterbereich und werden in der nativen Konfiguration über env_key referenziert."
+      }
+    },
+    "deepseek": {
+      "installation": {
+        "desc": "Die automatische Suche bevorzugt dsh und sucht danach unter macOS oder Windows nach Desktop. Sind beide installiert, wähle Desktop durch Angabe des .app-Pfads oder des Windows-Installationsordners. Öffne Desktop zunächst, um die Einrichtung abzuschließen.",
+        "desktop": "Dein natives Desktop-Profil wird verwendet.",
+        "web": "Dein natives Web-Profil wird verwendet."
+      },
+      "preset": "Preset",
+      "codeMode": {
+        "name": "Code-Modus aktivieren",
+        "desc": "Gilt ab dem nächsten Zug jeder Unterhaltung, auch für bestehende Unterhaltungen. Fügt natives run_code neben den direkten Werkzeugen hinzu."
+      },
+      "presetPlugins": {
+        "name": "Zusätzliche Preset-Plugins",
+        "desc": "Erweitert. Eine YAML-Liste (dsh-Format) nativer dsh-Plugin-Zeilen, die an Claudians Chat-Preset angehängt werden, jeweils mit eigener \"id\" und eigenem \"name\". Zeilen können Claudians eigene nicht ersetzen. Speichern startet DeepSeek Harness neu und beendet laufende Züge. Plugins ohne Claudian-Oberfläche, etwa der Planmodus, funktionieren möglicherweise nicht."
+      },
+      "presetPreview": "Preset-Vorschau",
+      "environment": {
+        "name": "DeepSeek-Harness-Umgebungsvariablen",
+        "desc": "Umgebungsvariablen, die nur an DeepSeek Harness übergeben werden. Verwendet das ausgewählte native Web- oder Desktop-Profil, deine Anmeldedaten, Modelle und MCP-Server."
       }
     },
     "skills": {
@@ -605,7 +861,7 @@
         "shared": "Andere Anbieter"
       },
       "claudeHelp": "Claude-Code-Skills in .claude/skills/ und Befehle in .claude/commands/.",
-      "sharedHelp": "Gemeinsame Skills in .agents/skills/ für Codex CLI, OpenCode, Pi und Grok Build.",
+      "sharedHelp": "Gemeinsame Skills in .agents/skills/ für Codex, OpenCode, Pi, Grok Build und DeepSeek Harness.",
       "status": {
         "error": "Die Skill-Ordner konnten nicht gelesen werden: {message}"
       },
@@ -681,6 +937,128 @@
         "failed": "Synchronisierung fehlgeschlagen: {message}",
         "summary": "Verschoben {moved}, umgewandelt {converted}, im Papierkorb {trashed}, {unlinked} Link(s) entfernt."
       }
+    },
+    "capabilityMatrix": {
+      "title": "Provider capabilities",
+      "desc": "What each agent harness can actually do, read straight from the capabilities the providers declare rather than a table kept here.",
+      "providerColumn": "Provider",
+      "unsupported": "Not supported",
+      "reasoningEffort": "effort",
+      "reasoningNone": "none",
+      "columns": {
+        "imageAttachments": "Images",
+        "fork": "Fork",
+        "rewind": "Rewind",
+        "turnSteer": "Steer",
+        "planMode": "Plan",
+        "instructionMode": "Instruct",
+        "providerCommands": "Commands",
+        "reasoningControl": "Reasoning"
+      }
+    },
+    "gettingStarted": {
+      "title": "Getting started",
+      "install": {
+        "name": "1. Install an agent CLI",
+        "desc": "Install at least one harness: the OMP install script, or npm install -g @deepseek-ai/dsh. The plugin never installs anything for you."
+      },
+      "provider": {
+        "name": "2. Enable it here",
+        "desc": "Enable the provider in the Providers tab and pick a model. Its readiness panel says what is still missing."
+      },
+      "chat": {
+        "name": "3. Start a chat",
+        "desc": "Open the chat view from the ribbon icon or the command palette and send a message."
+      }
+    },
+    "hotkeys": {
+      "title": "Hotkeys",
+      "desc": "This plugin sets no default hotkeys. Bind them in Obsidian's Settings, Hotkeys - search for \"Super Useful Claudian\" to see every command it registers."
+    },
+    "usage": {
+      "title": "Token usage",
+      "today": "Today",
+      "total": "Total",
+      "input": "Input",
+      "output": "Output",
+      "cache": "Cache",
+      "date": "Date",
+      "sessions": "Top sessions",
+      "empty": "No usage recorded yet.",
+      "note": "Figures are best-effort, as reported by each provider.",
+      "last7days": "Last 7 days"
+    },
+    "readiness": {
+      "heading": "Betriebsbereitschaft",
+      "refresh": "Erneut prüfen",
+      "checking": "Wird geprüft…",
+      "checkFailed": "Betriebsbereitschaft konnte nicht geprüft werden",
+      "status": {
+        "ready": "Bereit",
+        "attention": "Beachten",
+        "blocked": "Blockiert",
+        "disabled": "Deaktiviert"
+      },
+      "check": {
+        "enabled": "Anbieter aktiviert",
+        "cli": "CLI verfügbar",
+        "models": "Modellkatalog",
+        "selection": "Modell ausgewählt"
+      },
+      "detail": {
+        "enabled": "Aktiviert",
+        "disabled": "Deaktiviert",
+        "cliFound": "v{version} · {path}",
+        "cliNoVersion": "{path} · Version nicht lesbar",
+        "cliMissing": "Nicht im PATH gefunden",
+        "models": "{count} Modelle gefunden",
+        "modelsNone": "Noch keine Modelle gefunden",
+        "selection": "{count} Modelle aktiviert",
+        "selectionNone": "Kein Modell aktiviert"
+      },
+      "remedy": {
+        "enable": "Aktiviere {provider}, um ihn zu verwenden.",
+        "cliMissing": "{name} wurde nicht gefunden. Installiere es und prüfe erneut – Claudian führt keine Installationen aus:",
+        "cliUnreadable": "Die CLI wurde gefunden, meldet aber keine Version. Prüfe den Pfad unten.",
+        "refreshModels": "Öffne unten „Modelle“ und aktualisiere den Modellkatalog.",
+        "selectModel": "Aktiviere unten unter „Modelle“ mindestens ein Modell."
+      },
+      "action": {
+        "copy": "Kopieren",
+        "copied": "Kopiert",
+        "checkUpdate": "Auf Update prüfen"
+      },
+      "update": {
+        "checking": "npm wird abgefragt…",
+        "available": "Neue Version {version} verfügbar. Aktualisieren mit:",
+        "latest": "Aktuell ({version} ist die neueste).",
+        "unavailable": "npm-Registry nicht erreichbar."
+      }
+    },
+    "cliUpdates": {
+      "name": "Check CLI updates",
+      "desc": "Show a \"Check for update\" button in each provider's readiness panel. Pressing it queries registry.npmjs.org for the latest published version of that provider's CLI package. Off by default: Claudian makes no registry request unless you enable this."
+    },
+    "instructionMode": {
+      "name": "Instruction mode",
+      "desc": "Type # in an empty composer to refine a rough instruction into a polished prompt before sending."
+    },
+    "bangBash": {
+      "name": "Bash-Modus",
+      "desc": "Mit ! im leeren Eingabefeld einen Shell-Befehl im Vault in der eigenen Shell ausführen. Die Ausgabe des Befehls wird der Unterhaltung hinzugefügt."
+    },
+    "omp": {
+      "environment": {
+        "name": "OMP-Umgebungsvariablen",
+        "desc": "Umgebungsvariablen, die nur an OMP übergeben werden."
+      }
+    },
+    "dsh": {
+      "environment": {
+        "name": "DeepSeek-Harness-Umgebungsvariablen",
+        "desc": "Umgebungsvariablen, die nur an DeepSeek Harness übergeben werden. DEEPSEEK_API_KEY hier setzen, um sich zu authentifizieren."
+      },
+      "cliNote": "Erfordert Node.js. Installation der CLI: npm install -g @deepseek-ai/dsh."
     }
   }
 }

@@ -1,3 +1,4 @@
+import type { ProviderExecutionLifecycleRegistry } from '@/core/execution/ProviderExecutionLifecycleRegistry';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator, type SettingsReconciliationResult } from '@/core/providers/ProviderSettingsCoordinator';
 import type { ProviderId } from '@/core/providers/types';
@@ -9,6 +10,8 @@ import { type SettingsCoordinator, type SettingsMutation, SettingsPostCommitErro
 interface RuntimeSettingsCoordinatorOptions {
   readonly settings: SettingsCoordinator<ClaudianSettings>;
   readonly conversations: Pick<ConversationRepository, 'invalidateProviderSessions' | 'persistProviderSessionInvalidations'>;
+  /** Learns which providers' sessions a transition's change invalidated, so preserved sessions follow their bindings. */
+  readonly executionLifecycle: Pick<ProviderExecutionLifecycleRegistry, 'markSessionsInvalidated'>;
   readonly getSettings: () => ClaudianSettings;
   readonly canCompleteInvalidations: () => boolean;
 }
@@ -58,7 +61,6 @@ function hasSamePendingProviderSessionInvalidations(
 
 export class RuntimeSettingsCoordinator {
   private pendingEnvironmentInvalidationGenerations = new Map<ProviderId, number>();
-  private blockedEnvironmentInvalidationGenerations = new Map<ProviderId, number>();
 
   constructor(private readonly options: RuntimeSettingsCoordinatorOptions) {}
 
@@ -72,18 +74,9 @@ export class RuntimeSettingsCoordinator {
 
   reconcile(
     providerIds: ProviderId[] = ProviderRegistry.getRegisteredProviderIds(),
-    invalidateConversations = true,
     settings = this.options.getSettings(),
   ): SettingsReconciliationResult {
-    const result = ProviderSettingsCoordinator.reconcileProviders(
-      settings, [], providerIds, { invalidateConversations: false },
-    );
-    if (invalidateConversations) {
-      result.invalidatedConversations = this.options.conversations.invalidateProviderSessions(
-        result.sessionInvalidationProviderIds,
-      );
-    }
-    return result;
+    return ProviderSettingsCoordinator.reconcileProviders(settings, providerIds);
   }
 
   syncPendingSessionInvalidations(): boolean {
@@ -135,33 +128,6 @@ export class RuntimeSettingsCoordinator {
     }
   }
 
-  private blockEnvironmentInvalidationCompletion(
-    generations: ReadonlyMap<ProviderId, number>,
-  ): void {
-    for (const [providerId, generation] of generations) {
-      this.blockedEnvironmentInvalidationGenerations.set(providerId, generation);
-    }
-  }
-
-  private releaseEnvironmentInvalidationCompletion(
-    generations: ReadonlyMap<ProviderId, number>,
-  ): void {
-    for (const [providerId, generation] of generations) {
-      if (this.blockedEnvironmentInvalidationGenerations.get(providerId) === generation) {
-        this.blockedEnvironmentInvalidationGenerations.delete(providerId);
-      }
-    }
-  }
-
-  getCompletablePendingSessionInvalidations(): Map<ProviderId, number> {
-    return new Map(Array.from(
-      this.pendingEnvironmentInvalidationGenerations,
-      ([providerId, generation]) => [providerId, generation] as const,
-    ).filter(([providerId, generation]) => (
-      this.blockedEnvironmentInvalidationGenerations.get(providerId) !== generation
-    )));
-  }
-
   async completePendingSessionInvalidations(
     completedGenerations: ReadonlyMap<ProviderId, number>,
   ): Promise<void> {
@@ -207,7 +173,6 @@ export class RuntimeSettingsCoordinator {
     let reconciliation: SettingsReconciliationResult = {
       changed: false,
       environmentChangedProviderIds: [],
-      invalidatedConversations: [],
       sessionInvalidationProviderIds: [],
     };
     let invalidationGenerations = new Map<ProviderId, number>();
@@ -218,15 +183,15 @@ export class RuntimeSettingsCoordinator {
     try {
       await this.options.settings.mutate(async (settings) => {
         await mutation(settings);
-        reconciliation = this.reconcile(providerIds, false, settings);
+        reconciliation = this.reconcile(providerIds, settings);
         invalidationGenerations = this.stagePendingSessionInvalidations(
           settings,
           reconciliation.sessionInvalidationProviderIds,
         );
       }, () => {
         this.commitPendingSessionInvalidations(invalidationGenerations);
-        this.blockEnvironmentInvalidationCompletion(invalidationGenerations);
         this.options.conversations.invalidateProviderSessions(reconciliation.sessionInvalidationProviderIds);
+        this.options.executionLifecycle.markSessionsInvalidated(reconciliation.sessionInvalidationProviderIds);
         invalidationPublished = true;
       });
       settingsCommitted = true;
@@ -257,14 +222,11 @@ export class RuntimeSettingsCoordinator {
       } catch (error) {
         errors.push(error);
       }
-      if (invalidationMetadataPersisted) {
-        this.releaseEnvironmentInvalidationCompletion(invalidationGenerations);
-        if (this.options.canCompleteInvalidations()) {
-          try {
-            await this.completePendingSessionInvalidations(invalidationGenerations);
-          } catch (error) {
-            errors.push(error);
-          }
+      if (invalidationMetadataPersisted && this.options.canCompleteInvalidations()) {
+        try {
+          await this.completePendingSessionInvalidations(invalidationGenerations);
+        } catch (error) {
+          errors.push(error);
         }
       }
     }

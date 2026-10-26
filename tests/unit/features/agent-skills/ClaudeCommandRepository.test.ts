@@ -1,7 +1,6 @@
-import { MemoryDataAdapter } from '@test/helpers/MemoryDataAdapter';
-import type { App } from 'obsidian';
+import { DesktopVault } from '@test/helpers/core/DesktopVault';
 
-import { VaultFileAdapter } from '@/core/storage/VaultFileAdapter';
+import type { VaultFileAdapter } from '@/core/storage/VaultFileAdapter';
 import { CLAUDE_COMMANDS_ROOT } from '@/features/agent-skills/AgentSkillRepository';
 import {
   ClaudeCommandCollisionError,
@@ -21,28 +20,25 @@ const REVIEW_COMMAND = [
 ].join('\n');
 
 describe('ClaudeCommandRepository', () => {
-  let dataAdapter: MemoryDataAdapter;
+  let vault: DesktopVault;
   let files: VaultFileAdapter;
 
-  beforeEach(() => {
-    dataAdapter = new MemoryDataAdapter();
-    files = new VaultFileAdapter({ vault: { adapter: dataAdapter } } as unknown as App);
-    dataAdapter.addFolder('.claude');
-    dataAdapter.addFolder(CLAUDE_COMMANDS_ROOT);
+  beforeEach(async () => {
+    vault = await DesktopVault.create();
+    files = vault.files;
+    await vault.mkdir(CLAUDE_COMMANDS_ROOT);
   });
 
-  function addCommand(relativePath: string, content: string): void {
-    const segments = relativePath.split('/');
-    let current = CLAUDE_COMMANDS_ROOT;
-    for (const segment of segments.slice(0, -1)) {
-      current = `${current}/${segment}`;
-      dataAdapter.addFolder(current);
-    }
-    dataAdapter.addFile(`${CLAUDE_COMMANDS_ROOT}/${relativePath}`, content);
+  afterEach(async () => {
+    await vault.dispose();
+  });
+
+  function addCommand(relativePath: string, content: string): Promise<void> {
+    return vault.write(`${CLAUDE_COMMANDS_ROOT}/${relativePath}`, content);
   }
 
   it('returns an empty list when the commands folder is missing', async () => {
-    dataAdapter.nodes.delete(CLAUDE_COMMANDS_ROOT);
+    await vault.remove(CLAUDE_COMMANDS_ROOT);
     await expect(new ClaudeCommandRepository(files).list()).resolves.toEqual({
       commands: [],
       diagnostics: [],
@@ -50,10 +46,10 @@ describe('ClaudeCommandRepository', () => {
   });
 
   it('lists markdown commands recursively with nested names and optional frontmatter', async () => {
-    addCommand('review.md', REVIEW_COMMAND);
-    addCommand('git/commit.md', 'Commit the staged changes.\n');
-    addCommand('git/deep/push.md', '---\ndescription: Push\n---\nPush it.\n');
-    addCommand('notes.txt', 'ignored');
+    await addCommand('review.md', REVIEW_COMMAND);
+    await addCommand('git/commit.md', 'Commit the staged changes.\n');
+    await addCommand('git/deep/push.md', '---\ndescription: Push\n---\nPush it.\n');
+    await addCommand('notes.txt', 'ignored');
 
     const result = await new ClaudeCommandRepository(files).list();
 
@@ -68,8 +64,23 @@ describe('ClaudeCommandRepository', () => {
     expect(result.commands[2].revision).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it('preserves metadata when editing a UTF-8 BOM command', async () => {
+    addCommand('review.md', `\uFEFF${REVIEW_COMMAND}`);
+    const repository = new ClaudeCommandRepository(files);
+    const [loaded] = (await repository.list()).commands;
+
+    expect(loaded.description).toBe('Review a change');
+    expect(loaded.instructions).toBe('Review $ARGUMENTS carefully.');
+    await repository.update(loaded.name, loaded.revision, {
+      name: loaded.name, description: 'Edited', instructions: 'Updated body',
+    });
+    const [reloaded] = (await repository.list()).commands;
+    expect(reloaded.frontmatter).toMatchObject({ 'argument-hint': '[file]', 'allowed-tools': ['Read', 'Grep'] });
+    expect(reloaded.instructions).toBe('Updated body');
+  });
+
   it('keeps unedited frontmatter under the preserve policy', async () => {
-    addCommand('review.md', REVIEW_COMMAND);
+    await addCommand('review.md', REVIEW_COMMAND);
     const repository = new ClaudeCommandRepository(files);
     const [loaded] = (await repository.list()).commands;
 
@@ -88,7 +99,7 @@ describe('ClaudeCommandRepository', () => {
   });
 
   it('writes only the description under the portable policy', async () => {
-    addCommand('review.md', REVIEW_COMMAND);
+    await addCommand('review.md', REVIEW_COMMAND);
     const repository = new ClaudeCommandRepository(files, { frontmatterPolicy: 'portable' });
     const [loaded] = (await repository.list()).commands;
 
@@ -99,13 +110,13 @@ describe('ClaudeCommandRepository', () => {
     });
 
     expect(updated.frontmatter).toEqual({ description: 'Updated' });
-    const written = await dataAdapter.read(updated.filePath);
+    const written = await vault.read(updated.filePath);
     expect(written).not.toContain('allowed-tools');
     expect(written).not.toContain('argument-hint');
   });
 
   it('writes no frontmatter block when nothing remains to store', async () => {
-    addCommand('plain.md', 'Plain body.\n');
+    await addCommand('plain.md', 'Plain body.\n');
     const repository = new ClaudeCommandRepository(files);
     const [loaded] = (await repository.list()).commands;
 
@@ -115,12 +126,82 @@ describe('ClaudeCommandRepository', () => {
       instructions: 'New body.',
     });
 
-    expect(await dataAdapter.read(updated.filePath)).toBe('New body.\n');
+    expect(await vault.read(updated.filePath)).toBe('New body.\n');
+  });
+
+  it.each([
+    ['LF', '---\n---\nPrompt\n'],
+    ['CRLF', '---\r\n---\r\nPrompt\r\n'],
+  ])('keeps adjacent empty frontmatter delimiters out of the instructions (%s)', async (_label, source) => {
+    await addCommand('empty.md', source);
+    const repository = new ClaudeCommandRepository(files);
+
+    const result = await repository.list();
+
+    expect(result.diagnostics).toEqual([]);
+    const [loaded] = result.commands;
+    expect(loaded.frontmatter).toEqual({});
+    expect(loaded.description).toBe('');
+    expect(loaded.instructions).toBe('Prompt');
+
+    await repository.update('empty', loaded.revision, {
+      name: 'empty',
+      description: '',
+      instructions: 'Prompt',
+    });
+    expect(await vault.read(loaded.filePath)).toBe('Prompt\n');
+  });
+
+  it('treats a closing delimiter with trailing text as body instead of frontmatter', async () => {
+    await addCommand('broken-close.md', '---\ndescription: test\n---suffix\nPrompt\n');
+    const repository = new ClaudeCommandRepository(files);
+
+    const result = await repository.list();
+
+    expect(result.diagnostics).toEqual([]);
+    const [loaded] = result.commands;
+    expect(loaded.frontmatter).toEqual({});
+    expect(loaded.description).toBe('');
+    expect(loaded.instructions).toBe('---\ndescription: test\n---suffix\nPrompt');
+
+    await repository.update('broken-close', loaded.revision, {
+      name: 'broken-close',
+      description: '',
+      instructions: loaded.instructions,
+    });
+    expect(await vault.read(loaded.filePath)).toBe('---\ndescription: test\n---suffix\nPrompt\n');
+  });
+
+  it('accepts a closing delimiter at end of file', async () => {
+    await addCommand('tail.md', '---\ndescription: test\n---');
+
+    const result = await new ClaudeCommandRepository(files).list();
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.commands.map(command => [command.description, command.instructions])).toEqual([['test', '']]);
+  });
+
+  it.each<[string, string, string]>([
+    ['LF-space', '---\ndescription: Example\nargument-hint: target\n--- \nPrompt', 'Prompt'],
+    ['CRLF-tab', '---\r\ndescription: Example\r\nargument-hint: target\r\n---\t\r\nPrompt', 'Prompt'],
+    ['padded-EOF', '---\ndescription: Example\nargument-hint: target\n--- \t', ''],
+  ])('retains command metadata with a padded closing delimiter (%s)', async (_label, source, instructions) => {
+    await addCommand('padded.md', source);
+
+    const result = await new ClaudeCommandRepository(files).list();
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.commands.map(command => [
+      command.description,
+      command.frontmatter['argument-hint'],
+      command.instructions,
+    ])).toEqual([['Example', 'target', instructions]]);
+    expect(await vault.read(`${CLAUDE_COMMANDS_ROOT}/padded.md`)).toBe(source);
   });
 
   it('renames into a nested path, prunes empty folders and rejects collisions', async () => {
-    addCommand('old/review.md', REVIEW_COMMAND);
-    addCommand('taken.md', 'Taken.\n');
+    await addCommand('old/review.md', REVIEW_COMMAND);
+    await addCommand('taken.md', 'Taken.\n');
     const repository = new ClaudeCommandRepository(files);
     const loaded = (await repository.list()).commands.find(command => command.name === 'old/review')!;
 
@@ -137,13 +218,13 @@ describe('ClaudeCommandRepository', () => {
     });
 
     expect(renamed.filePath).toBe(`${CLAUDE_COMMANDS_ROOT}/team/review.md`);
-    expect(dataAdapter.nodes.has(`${CLAUDE_COMMANDS_ROOT}/old/review.md`)).toBe(false);
-    expect(dataAdapter.nodes.has(`${CLAUDE_COMMANDS_ROOT}/old`)).toBe(false);
-    expect(dataAdapter.nodes.has(CLAUDE_COMMANDS_ROOT)).toBe(true);
+    expect(await vault.exists(`${CLAUDE_COMMANDS_ROOT}/old/review.md`)).toBe(false);
+    expect(await vault.exists(`${CLAUDE_COMMANDS_ROOT}/old`)).toBe(false);
+    expect(await vault.exists(CLAUDE_COMMANDS_ROOT)).toBe(true);
   });
 
   it('validates renamed segments but tolerates an unchanged legacy name', async () => {
-    addCommand('Legacy_Name.md', 'Body.\n');
+    await addCommand('Legacy_Name.md', 'Body.\n');
     const repository = new ClaudeCommandRepository(files);
     const [loaded] = (await repository.list()).commands;
 
@@ -161,11 +242,25 @@ describe('ClaudeCommandRepository', () => {
     expect(updated.description).toBe('Now described');
   });
 
+  it.each(['aux/review', 'team/lpt9'])(
+    'rejects a device name in any renamed command segment: %s', async name => {
+      await addCommand('review.md', REVIEW_COMMAND);
+      const repository = new ClaudeCommandRepository(files);
+      const [loaded] = (await repository.list()).commands;
+      const original = await vault.snapshot();
+
+      await expect(repository.update('review', loaded.revision, {
+        name, description: 'Updated', instructions: 'Updated body.',
+      })).rejects.toBeInstanceOf(AgentSkillValidationError);
+      expect(await vault.snapshot()).toEqual(original);
+    },
+  );
+
   it('rejects stale updates and trashes only a current revision', async () => {
-    addCommand('review.md', REVIEW_COMMAND);
+    await addCommand('review.md', REVIEW_COMMAND);
     const repository = new ClaudeCommandRepository(files);
     const [loaded] = (await repository.list()).commands;
-    dataAdapter.addFile(loaded.filePath, 'Changed elsewhere.\n');
+    await vault.write(loaded.filePath, 'Changed elsewhere.\n');
 
     await expect(repository.update('review', loaded.revision, {
       name: 'review',
@@ -177,12 +272,12 @@ describe('ClaudeCommandRepository', () => {
 
     const [current] = (await repository.list()).commands;
     await repository.trash('review', current.revision);
-    expect(dataAdapter.trashed).toEqual([`${CLAUDE_COMMANDS_ROOT}/review.md`]);
+    expect(vault.trashed).toEqual([`${CLAUDE_COMMANDS_ROOT}/review.md`]);
   });
 
   it('reports unreadable command files as diagnostics', async () => {
-    addCommand('good.md', 'Good.\n');
-    dataAdapter.addFolder(`${CLAUDE_COMMANDS_ROOT}/bad.md`);
+    await addCommand('good.md', 'Good.\n');
+    await vault.mkdir(`${CLAUDE_COMMANDS_ROOT}/bad.md`);
 
     const result = await new ClaudeCommandRepository(files).list();
 
@@ -191,15 +286,33 @@ describe('ClaudeCommandRepository', () => {
 
     const readFailure = new ClaudeCommandRepository({
       verifyManagedPath: jest.fn().mockResolvedValue(true),
-      listManagedFolder: jest.fn().mockResolvedValue({
-        files: [`${CLAUDE_COMMANDS_ROOT}/broken.md`],
-        folders: [],
-      }),
+      listManagedFolderEntries: jest.fn().mockResolvedValue([
+        { path: `${CLAUDE_COMMANDS_ROOT}/broken.md`, type: 'file' },
+      ]),
       readManagedFile: jest.fn().mockRejectedValue(new Error('unreadable')),
     } as unknown as VaultFileAdapter);
     await expect(readFailure.list()).resolves.toEqual({
       commands: [],
       diagnostics: [{ directoryPath: `${CLAUDE_COMMANDS_ROOT}/broken.md`, message: 'unreadable' }],
     });
+  });
+});
+
+describe('ClaudeCommandRepository desktop listing', () => {
+  it('keeps readable commands when a sibling link is dangling', async () => {
+    const vault = await DesktopVault.create();
+    try {
+      await vault.write(`${CLAUDE_COMMANDS_ROOT}/good.md`, 'Good command.\n');
+      await vault.write(`${CLAUDE_COMMANDS_ROOT}/nested/other.md`, 'Nested command.\n');
+      await vault.symlink(`${CLAUDE_COMMANDS_ROOT}/broken`, vault.resolve('missing-target'));
+      const result = await new ClaudeCommandRepository(vault.files).list();
+
+      expect(result.commands.map(command => command.name)).toEqual(['good', 'nested/other']);
+      expect(result.diagnostics).toEqual([expect.objectContaining({
+        directoryPath: `${CLAUDE_COMMANDS_ROOT}/broken`,
+      })]);
+      expect(await vault.readlink(`${CLAUDE_COMMANDS_ROOT}/broken`)).toBe(vault.resolve('missing-target'));
+      expect(await vault.read(`${CLAUDE_COMMANDS_ROOT}/good.md`)).toBe('Good command.\n');
+    } finally { await vault.dispose(); }
   });
 });

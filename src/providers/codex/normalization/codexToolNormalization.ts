@@ -1,3 +1,5 @@
+import { isSessionTool } from '@/core/tools/toolNames';
+import type { ToolProviderPayload } from '@/core/types';
 import { stringifyUnknown } from '@/utils/stringify';
 
 import { isCodexEncryptedMessage } from './codexSubagentNormalization';
@@ -51,11 +53,19 @@ export function isCodexInternalToolCall(rawName: string | undefined, namespace?:
 
 export function normalizeCodexToolName(rawName: string | undefined): string {
   if (!rawName) return 'tool';
+  const sessionName = rawName.startsWith('claudian_sessions__') ? rawName.slice('claudian_sessions__'.length) : rawName;
+  if (isSessionTool(sessionName)) return sessionName;
   if (NATIVE_TOOLS.has(rawName)) return rawName;
-  return TOOL_NAME_MAP[rawName] ?? rawName;
+  // Own entries only: prototype keys (e.g. constructor) stay unknown names verbatim.
+  return Object.hasOwn(TOOL_NAME_MAP, rawName) ? TOOL_NAME_MAP[rawName] : rawName;
+}
+
+function sessionToolPayload(rawName: string | undefined): Pick<NormalizedCodexToolCall, 'providerPayload'> {
+  return isSessionTool(normalizeCodexToolName(rawName)) ? { providerPayload: { rawName } } : {};
 }
 
 export interface NormalizedCodexToolCall {
+  providerPayload?: ToolProviderPayload;
   name: string;
   input: Record<string, unknown>;
 }
@@ -77,15 +87,17 @@ export function normalizeCodexToolCall(
   return {
     name: normalizeCodexToolName(rawName),
     input: normalizeCodexToolInput(rawName, rawInput),
+    ...sessionToolPayload(rawName),
   };
 }
 
 export function decodeCodexExecEnvelope(
   input: Record<string, unknown>,
 ): NormalizedCodexToolCall[] | null {
-  return decodeCodexExecEnvelopeCalls(input)?.map(({ name, input: normalizedInput }) => ({
+  return decodeCodexExecEnvelopeCalls(input)?.map(({ name, input: normalizedInput, providerPayload }) => ({
     name,
     input: normalizedInput,
+    ...(providerPayload ? { providerPayload } : {}),
   })) ?? null;
 }
 
@@ -110,6 +122,7 @@ export function decodeCodexExecEnvelopeCalls(
       rawInput,
       name: normalizeCodexToolName(call.name),
       input: normalizeCodexToolInput(call.name, rawInput),
+      ...sessionToolPayload(call.name),
     });
   }
 
@@ -778,7 +791,11 @@ export function normalizeCodexMCPToolState(
   rawError?: unknown,
 ): NormalizedCodexMCPToolState {
   const status = typeof rawStatus === 'string' ? rawStatus : '';
-  const error = typeof rawError === 'string' ? rawError : '';
+  const error = typeof rawError === 'string' ? rawError
+    : rawError !== null && typeof rawError === 'object' && !Array.isArray(rawError)
+      && typeof (rawError as Record<string, unknown>).message === 'string'
+      ? (rawError as { message: string }).message
+      : '';
   const resultText = extractCodexMCPResultText(resultPayload);
   const isTerminalStatus = status === 'completed' || isCodexFailedToolStatus(status);
   const isTerminal = isTerminalStatus || Boolean(error) || Boolean(resultText);
@@ -847,6 +864,11 @@ export function normalizeCodexToolResult(
   return unwrapTerminalResult(rawResult);
 }
 
+function isImageContentPart(part: unknown): boolean {
+  return !!part && typeof part === 'object' && !Array.isArray(part)
+    && (part as Record<string, unknown>).type === 'input_image';
+}
+
 export function stringifyCodexToolOutput(value: unknown): string {
   if (typeof value === 'string') return value;
   if (value === undefined) return '';
@@ -860,6 +882,11 @@ export function stringifyCodexToolOutput(value: unknown): string {
       })
       .filter(Boolean);
     if (textParts.length > 0) return textParts.join('');
+    // Image payloads have no text projection; stringifying them would copy base64 into result text.
+    const nonImageParts = value.filter(part => !isImageContentPart(part));
+    if (nonImageParts.length < value.length) {
+      return nonImageParts.length > 0 ? stringifyUnknown(nonImageParts) : '';
+    }
   }
 
   return stringifyUnknown(value);

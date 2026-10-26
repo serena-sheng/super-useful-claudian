@@ -1,9 +1,8 @@
+import { grokEnvironmentHash } from '@test/helpers/providers/grokSettings';
+
 import { isVersionedRuntimeInputFingerprint } from '@/core/providers/settings/RuntimeInputFingerprint';
 import type { Conversation } from '@/core/types';
-import {
-  computeGrokEnvironmentHash,
-  grokSettingsReconciler,
-} from '@/providers/grok/env/GrokSettingsReconciler';
+import { grokSettingsReconciler } from '@/providers/grok/env/GrokSettingsReconciler';
 import { getGrokProviderSettings } from '@/providers/grok/settings';
 
 jest.mock('@/core/device/InstallationKey', () => ({
@@ -25,7 +24,7 @@ describe('GrokSettingsReconciler', () => {
   });
 
   it('computes a stable SHA-256 digest without exposing raw secret values', () => {
-    const first = computeGrokEnvironmentHash({
+    const first = grokEnvironmentHash({
       providerConfigs: {
         grok: {
           cliPathsByHost: { 'current-host': '/bin/grok' },
@@ -34,7 +33,7 @@ describe('GrokSettingsReconciler', () => {
       },
       sharedEnvironmentVariables: 'HTTPS_PROXY=https://proxy.example.com',
     });
-    const reordered = computeGrokEnvironmentHash({
+    const reordered = grokEnvironmentHash({
       providerConfigs: {
         grok: {
           cliPathsByHost: { 'current-host': '/bin/grok' },
@@ -61,8 +60,8 @@ describe('GrokSettingsReconciler', () => {
       },
     });
 
-    expect(computeGrokEnvironmentHash(createSettings('/bin/grok-a'))).not.toBe(
-      computeGrokEnvironmentHash(createSettings('/bin/grok-b')),
+    expect(grokEnvironmentHash(createSettings('/bin/grok-a'))).not.toBe(
+      grokEnvironmentHash(createSettings('/bin/grok-b')),
     );
   });
 
@@ -74,7 +73,6 @@ describe('GrokSettingsReconciler', () => {
       sessionId: 'session-1',
     } as unknown as Conversation;
 
-    expect(grokSettingsReconciler.environmentSessionPolicy).toBe('reload');
     expect(grokSettingsReconciler.invalidateConversationSessions([grokConversation]))
       .toEqual([]);
     expect(grokConversation).toEqual(expect.objectContaining({
@@ -95,8 +93,7 @@ describe('GrokSettingsReconciler', () => {
       },
     };
 
-    expect(grokSettingsReconciler.reconcileModelWithEnvironment(settings, []))
-      .toEqual({ changed: false, invalidatedConversations: [] });
+    expect(grokSettingsReconciler.reconcileModelWithEnvironment(settings)).toEqual({ changed: false });
     expect(getGrokProviderSettings(settings).environmentHash).toBe('');
   });
 
@@ -121,27 +118,18 @@ describe('GrokSettingsReconciler', () => {
       providerState: { sessionDirectory: '/tmp/grok/session-1' },
       sessionId: 'session-1',
     } as unknown as Conversation;
-    const otherConversation = {
-      messages: [],
-      providerId: 'claude',
-      providerState: { providerSessionId: 'claude-session' },
-      sessionId: 'claude-session',
-    } as unknown as Conversation;
 
-    const result = grokSettingsReconciler.reconcileModelWithEnvironment(
-      settings,
-      [grokConversation, otherConversation],
-    );
+    const result = grokSettingsReconciler.reconcileModelWithEnvironment(settings);
 
-    expect(result).toEqual({ changed: true, invalidatedConversations: [] });
+    expect(result).toEqual({ changed: true, sessionPolicy: 'reload' });
+    expect(grokSettingsReconciler.invalidateConversationSessions([grokConversation])).toEqual([]);
     expect(getGrokProviderSettings(settings).catalogsByHost).toEqual({
       'current-host': catalog('current-model'),
       'other-host': catalog('other-model'),
     });
     expect(getGrokProviderSettings(settings).environmentHash)
-      .toBe(computeGrokEnvironmentHash(settings));
+      .toBe(grokEnvironmentHash(settings));
     expect(grokConversation.sessionId).toBe('session-1');
-    expect(otherConversation.sessionId).toBe('claude-session');
     expect((settings.providerConfigs as Record<string, unknown>).codex).toEqual({
       enabled: true,
       marker: 'untouched',
@@ -159,10 +147,9 @@ describe('GrokSettingsReconciler', () => {
       },
     };
     (settings.providerConfigs as Record<string, any>).grok.environmentHash =
-      computeGrokEnvironmentHash(settings);
+      grokEnvironmentHash(settings);
 
-    expect(grokSettingsReconciler.reconcileModelWithEnvironment(settings, []))
-      .toEqual({ changed: false, invalidatedConversations: [] });
+    expect(grokSettingsReconciler.reconcileModelWithEnvironment(settings)).toEqual({ changed: false });
     expect(getGrokProviderSettings(settings).currentCatalog).toEqual(catalog('current-model'));
   });
 

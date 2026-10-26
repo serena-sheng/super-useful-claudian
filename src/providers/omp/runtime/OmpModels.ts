@@ -5,26 +5,32 @@ import { OmpModelDiscoveryService } from './OmpModelDiscoveryService';
 
 export function createOmpModels(host: ProviderHost): ProviderModelCatalogController {
   const discovery = new OmpModelDiscoveryService(host);
+  const readState = (settings = host.settings) => {
+    const current = getOmpProviderSettings(settings);
+    return {
+      enabled: current.enabled,
+      models: current.discoveredModels.map(model => ({
+        id: model.encodedId, name: model.label, providerKey: model.provider, providerLabel: model.provider,
+        description: [
+          model.api,
+          model.contextWindow ? `${model.contextWindow.toLocaleString()} context` : '',
+          model.reasoning ? `thinking: ${model.thinkingLevels.join(', ')}` : 'thinking: off',
+        ].filter(Boolean).join(' | '),
+      })).reverse(),
+      selectedIds: current.visibleModels,
+      aliases: current.modelAliases,
+    };
+  };
   return new ProviderModelCatalogController({
-    providerId: 'omp',
-    host,
-    update: updateOmpProviderSettings,
     providerName: 'OMP',
-    read: (settings = host.settings) => {
-      const current = getOmpProviderSettings(settings);
-      return {
-        enabled: current.enabled,
-        models: current.discoveredModels.map(model => ({
-          id: model.encodedId, name: model.label, providerKey: model.provider, providerLabel: model.provider,
-          description: [
-            model.api,
-            model.contextWindow ? `${model.contextWindow.toLocaleString()} context` : '',
-            model.reasoning ? `thinking: ${model.thinkingLevels.join(', ')}` : 'thinking: off',
-          ].filter(Boolean).join(' | '),
-        })).reverse(),
-        selectedIds: current.visibleModels,
-        aliases: current.modelAliases,
-      };
+    store: {
+      read: () => readState(),
+      write: async change => {
+        await host.mutateSettings(settings => {
+          updateOmpProviderSettings(settings, change(readState(settings)));
+        });
+      },
+      notifyChatOptionsChanged: () => host.notifyProviderChatOptionsChanged('omp'),
     },
     discover: async signal => {
       const result = await discovery.discoverModels(signal);

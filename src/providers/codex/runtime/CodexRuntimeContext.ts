@@ -15,13 +15,13 @@ export interface CodexRuntimeContext {
 function normalizeTargetPath(launchSpec: CodexLaunchSpec, value: string): string {
   return launchSpec.target.platformFamily === 'windows'
     ? path.win32.normalize(value)
-    : path.posix.normalize(value.replace(/\\/g, '/'));
+    : path.posix.normalize(value.startsWith('/') ? value : value.replace(/\\/g, '/'));
 }
 
 function joinTargetPath(launchSpec: CodexLaunchSpec, ...parts: string[]): string {
   return launchSpec.target.platformFamily === 'windows'
     ? path.win32.join(...parts)
-    : path.posix.join(...parts.map(part => part.replace(/\\/g, '/')));
+    : path.posix.join(...parts.map(part => part.startsWith('/') ? part : part.replace(/\\/g, '/')));
 }
 
 function normalizeOptionalTargetPath(
@@ -71,13 +71,13 @@ function validateInitializeTarget(
 ): void {
   if (initializeResult.platformOs !== launchSpec.target.platformOs) {
     throw new Error(
-      `Codex CLI target mismatch: expected ${launchSpec.target.platformOs}, received ${initializeResult.platformOs}`,
+      `Codex target mismatch: expected ${launchSpec.target.platformOs}, received ${initializeResult.platformOs}`,
     );
   }
 
   if (initializeResult.platformFamily !== launchSpec.target.platformFamily) {
     throw new Error(
-      `Codex CLI target mismatch: expected ${launchSpec.target.platformFamily}, received ${initializeResult.platformFamily}`,
+      `Codex target mismatch: expected ${launchSpec.target.platformFamily}, received ${initializeResult.platformFamily}`,
     );
   }
 }
