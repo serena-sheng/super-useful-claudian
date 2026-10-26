@@ -27,9 +27,10 @@ export async function createOmpWorkspaceServices(
   plugin: ProviderHost,
   options: OmpWorkspaceServicesOptions = {},
 ): Promise<OmpWorkspaceServices> {
+  const runtimeHost = plugin.getRuntimeHost('omp');
   const commandMetadataProbe = options.commandMetadataProbe
-    ?? new OmpCommandMetadataProbe(plugin);
-  const modelCatalog = createOmpModels(plugin);
+    ?? new OmpCommandMetadataProbe(runtimeHost);
+  const modelCatalog = createOmpModels(runtimeHost);
   const unregisterTransitionHook = plugin.executionLifecycleRegistry
     .registerTransitionHook('omp', {
       beforeTransition: async () => {

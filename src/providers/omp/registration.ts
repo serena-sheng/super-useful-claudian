@@ -2,10 +2,7 @@ import { NOOP_TASK_RESULT_INTERPRETER } from '../../core/providers/NoopTaskResul
 import { getProviderConfig } from '../../core/providers/providerConfig';
 import { hasStoredConfigNormalization } from '../../core/providers/settings/storedSettings';
 import type { ProviderModule } from '../../core/providers/types';
-import {
-  getOmpWorkspaceServices,
-  ompWorkspaceRegistration,
-} from './app/OmpWorkspaceServices';
+import { ompWorkspaceRegistration } from './app/OmpWorkspaceServices';
 import { OMP_PROVIDER_CAPABILITIES } from './capabilities';
 import { ompSettingsReconciler } from './env/OmpSettingsReconciler';
 import { OmpExecutionBackend } from './execution/OmpExecutionBackend';
@@ -22,8 +19,7 @@ export const ompProviderRegistration: ProviderModule = {
   modelPolicy: ompModelPolicy,
   chatUIConfig: ompChatUIConfig,
   createExecutionBackend: (plugin) => new OmpExecutionBackend(
-    plugin,
-    getOmpWorkspaceServices(),
+    plugin.getRuntimeHost('omp'),
     { extensionUiRenderer: new ObsidianOmpExtensionUIRenderer(plugin.app) },
   ),
 

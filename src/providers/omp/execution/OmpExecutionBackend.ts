@@ -3,8 +3,7 @@ import type {
   ProviderExecutionSession,
   ProviderSessionConfig,
 } from '../../../core/execution';
-import type { ProviderHost } from '../../../core/providers/ProviderHost';
-import type { OmpWorkspaceServices } from '../app/OmpWorkspaceServices';
+import type { ProviderRuntimeHost } from '../../../core/providers/ProviderRuntimeHost';
 import {
   createOmpForkSessionFile,
   rollbackCreatedOmpForkSessionFile,
@@ -15,8 +14,6 @@ import {
   type OmpExecutionKernelFactory,
 } from './OmpExecutionKernel';
 import { OmpExecutionSession } from './OmpExecutionSession';
-
-type OmpExecutionServices = Pick<OmpWorkspaceServices, 'commandCatalog'>;
 
 export interface OmpExecutionBackendOptions {
   readonly createForkSessionFile?: typeof createOmpForkSessionFile;
@@ -29,15 +26,13 @@ export class OmpExecutionBackend implements ProviderExecutionBackend {
   readonly providerId = 'omp' as const;
 
   constructor(
-    private readonly host: ProviderHost,
-    private readonly services: OmpExecutionServices,
+    private readonly host: ProviderRuntimeHost,
     private readonly options: OmpExecutionBackendOptions = {},
   ) {}
 
   createSession(config: ProviderSessionConfig): ProviderExecutionSession {
     return new OmpExecutionSession(
       this.host,
-      this.services,
       config,
       {
         createForkSessionFile: this.options.createForkSessionFile

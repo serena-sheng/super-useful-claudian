@@ -1,5 +1,5 @@
+import type { OmpProviderSettings } from '../config';
 import { decodeOmpModelId, normalizeOmpThinkingLevel } from '../models';
-import type { OmpProviderSettings } from '../settings';
 import type { OmpProviderState } from '../types';
 
 /** Tool approval modes accepted by `omp --approval-mode`. */
