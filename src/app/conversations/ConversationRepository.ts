@@ -1202,6 +1202,7 @@ export class ConversationRepository {
   /** The local archive is recovery-only: it must never fail a metadata save. */
   async #saveTranscript(conversation: Conversation): Promise<void> {
     if (conversation.messages.length === 0) return;
+    if (this.#getRecord(conversation.id) !== conversation) return;
     try {
       await this.persistence.transcripts.save(conversation.id, conversation.messages);
     } catch {
