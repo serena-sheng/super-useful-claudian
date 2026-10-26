@@ -2021,10 +2021,9 @@ function resolveToolProfile(policy: ProviderToolPolicy): {
   return { noTools: false };
 }
 
+/** Chat and auxiliary runs both supply the shared Main Agent prompt authoritatively. */
 function resolveSystemPrompt(request: ProviderExecutionRequest): string {
-  return request.configuration.systemInstructions.kind === 'explicit'
-    ? request.configuration.systemInstructions.instructions
-    : '';
+  return request.configuration.systemInstructions.instructions;
 }
 
 function encodePrompt(
