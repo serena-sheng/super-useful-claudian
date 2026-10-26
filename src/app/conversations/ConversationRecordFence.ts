@@ -12,7 +12,7 @@ export type ConversationProviderCatalog = Pick<
 /** Provider settings policy the conversation repository depends on. */
 export type ConversationProviderSettings = Pick<
   typeof ProviderSettingsCoordinator,
-  'getProviderSettingsSnapshot' | 'invalidateConversationSessions'
+  'getProviderSettingsSnapshot' | 'invalidateConversationSessions' | 'preservesConversationSession'
 >;
 
 export interface ConversationMetadataWriteOptions {
@@ -31,7 +31,7 @@ export interface ConversationRecordFence {
   isCurrent(conversation: Conversation, generation: number): boolean;
   /** The record is live or retained for deletion rollback. */
   isRetained(conversation: Conversation): boolean;
-  canWrite(conversation: Conversation): Promise<boolean>;
+  canWrite(conversation: Conversation): boolean;
   /** No live, deleting, or deleted record owns this id. */
   canAdopt(id: string): boolean;
   isHydrated(id: string): boolean;

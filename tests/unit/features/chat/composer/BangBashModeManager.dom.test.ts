@@ -11,7 +11,7 @@ import { ChatState } from '@/features/chat/state/ChatState';
 import type {
   PublishedTabRuntimeRef,
   TabRuntimeConstructionContext,
-  TabRuntimeShellBundle,
+  TabRuntimeCore,
 } from '@/features/chat/tabs/runtime/TabRuntimeConstruction';
 import { buildTabRuntimeInputBindings } from '@/features/chat/tabs/runtime/TabRuntimeInputBindings';
 import { shouldSendMessageFromEnterKey } from '@/features/chat/tabs/TabInputEvents';
@@ -91,7 +91,7 @@ function createScenario(
   const cleanup: (() => void)[] = [() => { manager.destroy(); renderer.dispose(); }];
   // Partial stubs: the binding only reads the members exercised below.
   buildTabRuntimeInputBindings(
-    { dom: { messagesEl, inputEl, inputComposerEl, inputWrapper }, state } as unknown as TabRuntimeShellBundle,
+    { dom: { messagesEl, inputEl, inputComposerEl, inputWrapper }, state } as unknown as TabRuntimeCore,
     {
       bangBashModeManager: manager,
       instructionModeManager: {
@@ -109,10 +109,22 @@ function createScenario(
     } as unknown as TabControllers,
     {
       plugin: { settings },
+      isRuntimeLive: () => true,
       registerCleanup: (_resource: string, dispose: () => void) => { cleanup.push(dispose); },
     } as unknown as TabRuntimeConstructionContext,
     {
-      requirePublished: () => ({ lifecycleState: 'open', session: { claimUserOwnership: jest.fn() } }),
+      requirePublished: () => ({
+        lifecycleState: 'open',
+        session: { claimUserOwnership: jest.fn() },
+        controllers: {
+          builtInCommandController: { handleResumeKeydown: () => false },
+          promptHistoryNavigation: { handleKeydown: () => false },
+        },
+        ui: {
+          composerDropdown: { handleKeydown: () => false },
+          promptSuggestion: { handleKeydown: () => false },
+        },
+      }),
     } as unknown as PublishedTabRuntimeRef,
   );
 

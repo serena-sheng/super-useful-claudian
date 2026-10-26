@@ -384,8 +384,11 @@ describe('transformSDKMessage', () => {
       ]);
     });
 
-    it('omits base64 image payloads from tool_result content', () => {
+    it.each(['anthropic', 'mcp'])('omits %s image payloads from tool_result content', format => {
       const data = 'a'.repeat(4096);
+      const image = (data: string) => format === 'mcp'
+        ? { type: 'image', mimeType: 'image/png', data }
+        : { type: 'image', source: { type: 'base64', media_type: 'image/png', data } };
       const message = msg({
         type: 'user',
         message: {
@@ -393,7 +396,7 @@ describe('transformSDKMessage', () => {
             {
               type: 'tool_result',
               tool_use_id: 'tool-image',
-              content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data } }],
+              content: [image(data)],
               is_error: false,
             },
           ],
@@ -407,7 +410,7 @@ describe('transformSDKMessage', () => {
       const content = 'content' in result ? result.content : undefined;
       expect(content).not.toContain(data);
       expect(JSON.parse(content as string)).toEqual([
-        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: '' } },
+        image(''),
       ]);
     });
 
@@ -637,6 +640,42 @@ describe('transformSDKMessage', () => {
           input: { file_path: 'notes.md', content: 'Hello' },
         },
       ]);
+    });
+
+    it.each([
+      { number: '1e3', expected: 1000 },
+      { number: '1e-3', expected: 0.001 },
+      { number: '-2.5E+2', expected: -250 },
+    ])('preserves JSON exponent numbers $number in streamed tool inputs', ({ number, expected }) => {
+      const streamState = createTransformStreamState();
+      const event = (value: Record<string, unknown>) => msg({ type: 'stream_event', event: { index: 0, ...value } });
+      transform(event({ type: 'content_block_start', content_block: {
+        type: 'tool_use', id: 'numeric-tool', name: 'mcp__calculator__scale', input: {},
+      } }), { streamState });
+      const results = transform(event({ type: 'content_block_delta', delta: {
+        type: 'input_json_delta', partial_json: `{"scale":${number},"label":`,
+      } }), { streamState });
+      expect(results).toEqual([{ type: 'tool_use', id: 'numeric-tool', name: 'mcp__calculator__scale', input: { scale: expected } }]);
+      expect(transform(event({ type: 'content_block_delta', delta: {
+        type: 'input_json_delta', partial_json: '"value"}',
+      } }), { streamState })).toEqual([{ type: 'tool_use', id: 'numeric-tool', name: 'mcp__calculator__scale', input: { scale: expected, label: 'value' } }]);
+    });
+
+    it('waits for an incomplete exponent before publishing that number', () => {
+      const streamState = createTransformStreamState();
+      const event = (value: Record<string, unknown>) => msg({ type: 'stream_event', event: { index: 0, ...value } });
+      transform(event({ type: 'content_block_start', content_block: {
+        type: 'tool_use', id: 'numeric-tool', name: 'mcp__calculator__scale', input: {},
+      } }), { streamState });
+      const delta = (partial_json: string) => transform(event({ type: 'content_block_delta', delta: {
+        type: 'input_json_delta', partial_json,
+      } }), { streamState });
+      expect(delta('{"label":"value","scale":1e-')).toEqual([{
+        type: 'tool_use', id: 'numeric-tool', name: 'mcp__calculator__scale', input: { label: 'value' },
+      }]);
+      expect(delta('3}')).toEqual([{
+        type: 'tool_use', id: 'numeric-tool', name: 'mcp__calculator__scale', input: { label: 'value', scale: 0.001 },
+      }]);
     });
 
     it('reparses streamed tool input only when a delta can change the parsed snapshot', () => {

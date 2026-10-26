@@ -1,9 +1,9 @@
 /** @jest-environment jsdom */
 import '@/providers';
 
-import * as reviewFs from 'node:fs/promises';
 import { deserialize, serialize } from 'node:v8';
 
+import { useClaudeSessionFiles } from '@test/helpers/providers/claudeHistory';
 import { testDate, testTime } from '@test/helpers/testClock';
 import { fireEvent, within } from '@testing-library/dom';
 import { axe } from 'jest-axe';
@@ -20,6 +20,7 @@ import * as historyStore from '@/providers/claude/history/ClaudeHistoryStore';
 import { loadSDKSessionMessages } from '@/providers/claude/history/ClaudeHistoryStore';
 
 jest.mock('node:fs/promises');
+const writeSession = useClaudeSessionFiles();
 const originalStructuredClone = globalThis.structuredClone;
 beforeAll(() => { globalThis.structuredClone = value => deserialize(serialize(value)); });
 afterAll(() => { globalThis.structuredClone = originalStructuredClone; });
@@ -82,7 +83,7 @@ it.each([false, true])('collapses work across compaction on completion and reloa
     await stream.handleStreamChunk({ type: 'tool_use', id: 'before', name: 'Read', input: { file_path: 'before.md' } }, response);
     await stream.handleStreamChunk({ type: 'tool_result', id: 'before', content: 'Before compaction' }, response);
     await stream.handleStreamChunk({ type: 'context_compacted' }, response);
-    if (notification) renderSessionTaskNotification({ state, renderer, isConnected: () => true,
+    if (notification) renderSessionTaskNotification({ state, renderer,
       createMessageId: () => 'notification' }, 'Task finished.');
     const tool = { type: 'tool_use' as const, id: 'after', name: 'Read', input: { file_path: 'after.md' } };
     response = await continueResponseAfterNotification({ state, renderer, stream, createMessageId: () => 'continuation' }, response, tool);
@@ -127,7 +128,7 @@ it.each(['early', 'late', 'none'])('matches live and JSONL notification order wi
     state.addMessage(response);
     state.currentContentEl = renderer.addMessage(response).querySelector('.claudian-message-content');
     if (hasTool) await stream.handleStreamChunk({ type: 'tool_use', id: 'read', name: 'Read', input: { file_path: 'note.md' } }, response);
-    renderSessionTaskNotification({ state, renderer, isConnected: () => true, createMessageId: () => 'notification' }, 'Task finished.');
+    renderSessionTaskNotification({ state, renderer, createMessageId: () => 'notification' }, 'Task finished.');
     const notificationElement = within(messagesEl).getByRole('button', { name: 'Task notification' });
     const toolMessage = response;
     if (hasTool && !lateResult) await stream.handleStreamChunk({ type: 'tool_result', id: 'read', content: 'The note.' }, response);
@@ -171,8 +172,7 @@ it.each(['early', 'late', 'none'])('matches live and JSONL notification order wi
       { type: 'attachment', uuid: 'notification', parentUuid: hasTool ? 'result' : 'u', timestamp: testTime({ seconds: 3 }), attachment: { type: 'queued_command', commandMode: 'task-notification', prompt: '<task-notification><task-id>task</task-id><status>completed</status><summary>Task finished.</summary></task-notification>' } },
       { type: 'assistant', uuid: 'answer', parentUuid: 'notification', timestamp: testTime({ seconds: 5 }), message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Requested answer.' }] } },
     ];
-    jest.mocked(reviewFs.readFile).mockResolvedValue(entries.map(entry => JSON.stringify(entry)).join('\n'));
-    const replay = await loadSDKSessionMessages('/vault', 'session', undefined, '/session.jsonl');
+    const replay = await loadSDKSessionMessages('/vault', 'session', undefined, writeSession(entries));
     expect(replay.error).toBeUndefined();
     messagesEl.replaceChildren();
     replay.messages.forEach((message, index) => renderer.renderStoredMessage(message, replay.messages, index));
@@ -214,13 +214,12 @@ it.each(['between', 'during-second', 'after-second'])('groups an older task noti
   const nativeRows = [...prefix, ...(position === 'between' ? [notification] : []), secondUser,
     ...(position === 'during-second' ? [notification] : []), secondFinal,
     ...(position === 'after-second' ? [notification] : [])];
+  let sessionPath = '';
   const loadNative = async (rows: typeof nativeRows) => {
-    jest.mocked(reviewFs.readFile).mockResolvedValue(rows.map((row, index) => JSON.stringify({
-      ...row, parentUuid: rows[index - 1]?.uuid,
-    })).join('\n'));
-    return loadSDKSessionMessages('/vault', 'session', undefined, '/session.jsonl');
+    sessionPath = writeSession(rows.map((row, index) => ({ ...row, parentUuid: rows[index - 1]?.uuid })));
+    return loadSDKSessionMessages('/vault', 'session', undefined, sessionPath);
   };
-  const notify = () => renderSessionTaskNotification({ state, renderer, isConnected: () => true,
+  const notify = () => renderSessionTaskNotification({ state, renderer,
     createMessageId: () => 'notification' }, 'Old research finished.');
   const assertPlacement = () => {
     const headers = within(messagesEl).getAllByRole('button', { name: /^Worked for/ });
@@ -269,7 +268,7 @@ it.each(['between', 'during-second', 'after-second'])('groups an older task noti
     await Promise.resolve();
     assertPlacement();
     const locate = jest.spyOn(historyStore, 'locateSDKSessions').mockResolvedValue(new Map([
-      ['session', { availability: 'relocated', sessionPath: '/session.jsonl' }],
+      ['session', { availability: 'relocated', sessionPath }],
     ]));
     try {
       const cachedOnly: ChatMessage = { id: 'cached-only', role: 'assistant', content: 'Cached commentary.',
@@ -282,9 +281,8 @@ it.each(['between', 'during-second', 'after-second'])('groups an older task noti
         }, '/vault');
         expect(hydrated.messages!.filter(message => message.id !== cachedOnly.id).map(message => message.id))
           .toEqual(replay.messages.map(message => message.id));
-        const secondUserIndex = hydrated.messages!.findIndex(message => message.id === 'second-user');
-        expect(hydrated.messages!.findIndex(message => message.id === cachedOnly.id))
-          .toBe(cached === cachedWithExtra ? secondUserIndex + 1 : -1);
+        // Complete native history supersedes a live projection between reflected messages.
+        expect(hydrated.messages!.some(message => message.id === cachedOnly.id)).toBe(false);
         renderer.renderMessages(hydrated.messages!, () => 'Welcome');
         await Promise.resolve();
         assertPlacement();
@@ -311,7 +309,7 @@ it.each(['child', 'result', 'snapshot'] as const)('keeps a pending Agent before 
     state.addMessage(original);
     state.currentContentEl = renderer.addMessage(original).querySelector('.claudian-message-content');
     await stream.handleStreamChunk({ type: 'tool_use', id: 'agent', name: 'Agent', input: { description: 'Research' } }, original);
-    renderSessionTaskNotification({ state, renderer, isConnected: () => true, createMessageId: () => 'notification' }, 'Task finished.');
+    renderSessionTaskNotification({ state, renderer, createMessageId: () => 'notification' }, 'Task finished.');
     const text = { type: 'text' as const, content: 'Continuation.' };
     const continuation = await continueResponseAfterNotification({ state, renderer, stream, createMessageId: () => 'continuation' }, original, text);
     await stream.handleStreamChunk(text, continuation);
@@ -349,7 +347,7 @@ it('does not recreate a response after its conversation is cleared during finali
     state.addMessage(original);
     state.currentContentEl = renderer.addMessage(original).querySelector('.claudian-message-content');
     await stream.handleStreamChunk({ type: 'text', content: 'Earlier text.' }, original);
-    renderSessionTaskNotification({ state, renderer, isConnected: () => true, createMessageId: () => 'notification' }, 'Task finished.');
+    renderSessionTaskNotification({ state, renderer, createMessageId: () => 'notification' }, 'Task finished.');
     const pending = continueResponseAfterNotification({ state, renderer, stream, createMessageId: () => 'continuation' }, original, { type: 'text', content: 'Later text.' });
     state.clearMessages();
     messagesEl.replaceChildren();
@@ -372,7 +370,7 @@ it.each(['background', 'user'] as const)('groups only the requested response acr
   const stream = new StreamController({ plugin, state, renderer, subagentManager: subagents,
     getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined });
   let nextId = 0;
-  const host = { state, renderer, stream, isConnected: () => true, createMessageId: () => `part-${++nextId}` };
+  const host = { state, renderer, stream, createMessageId: () => `part-${++nextId}` };
   let response: ChatMessage = { id: 'response', role: 'assistant', timestamp: testDate().getTime(), content: '', contentBlocks: [] };
   try {
     state.addMessage(response);
@@ -423,7 +421,7 @@ it('keeps a notification consumed by an automatic response outside an admitted r
   const stream = new StreamController({ plugin, state, renderer, subagentManager: subagents,
     getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined });
   let nextId = 0;
-  const host = { state, renderer, stream, isConnected: () => true, createMessageId: () => `part-${++nextId}` };
+  const host = { state, renderer, stream, createMessageId: () => `part-${++nextId}` };
   let response: ChatMessage = { id: 'requested', role: 'assistant', timestamp: testDate().getTime(), content: '', contentBlocks: [] };
   const scope = { kind: 'background' as const, sessionInstanceId: 'session', turnId: 'automatic', sequence: 1 };
   const assertOwnership = () => {
@@ -442,13 +440,11 @@ it('keeps a notification consumed by an automatic response outside an admitted r
     state.addMessage(response);
     state.currentContentEl = renderer.addMessage(response).querySelector('.claudian-message-content');
     renderSessionTaskNotification(host, 'Background task finished.');
-    await renderAutoTriggeredTurn(host, {
-      metadata: {}, events: [
+    await renderAutoTriggeredTurn(host, { spans: [{ events: [
         { type: 'tool_started', scope, toolCallId: 'background-read', toolScope: { kind: 'main' }, name: 'Read', input: { file_path: 'background.md' } },
         { type: 'tool_completed', scope: { ...scope, sequence: 2 }, toolCallId: 'background-read', toolScope: { kind: 'main' }, content: 'Background content.' },
         { type: 'text_delta', scope: { ...scope, sequence: 3 }, text: 'Automatic answer.' },
-      ],
-    }, () => true);
+      ] }], metadata: {} }, () => true);
     const text = { type: 'text' as const, content: 'Requested answer.' };
     response = await continueResponseAfterNotification(host, response, text);
     await stream.handleStreamChunk(text, response);

@@ -1,10 +1,20 @@
-import { existsSync } from 'fs';
+import { runInNewContext } from 'node:vm';
+
+import { useClaudeSessionFiles } from '@test/helpers/providers/claudeHistory';
+import type * as fsType from 'fs';
+import { createReadStream, existsSync } from 'fs';
 import * as fsPromises from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
+import type * as streamType from 'stream';
 
 import { extractToolResultContent } from '@/core/tools/toolResultContent';
-import { getSDKSessionPath, isValidSessionId, readSDKSession } from '@/providers/claude/history/ClaudeHistoryPathResolver';
+import {
+  getSDKSessionPath,
+  isValidSessionId,
+  readSDKSession,
+  readSDKSessionFile,
+} from '@/providers/claude/history/ClaudeHistoryPathResolver';
 import {
   encodeVaultPathForSDK,
   getLastSDKSessionModel,
@@ -20,10 +30,18 @@ import type { SDKNativeMessage } from '@/providers/claude/history/sdkHistoryType
 import { collectAsyncSubagentResults, parseSDKMessageToChat } from '@/providers/claude/history/sdkMessageParsing';
 import { parseClaudeTaskNotification } from '@/providers/claude/normalization/claudeTaskNotification';
 
-// Mock fs, fs/promises, and os modules
-jest.mock('fs', () => ({
-  existsSync: jest.fn(),
-}));
+// Mock fs, fs/promises, and os modules. The mocked filesystem serves each file's
+// `readFile` content to streaming readers as well, so history reads run the real line reader.
+jest.mock('fs', () => {
+  const { Readable } = jest.requireActual<typeof streamType>('stream');
+  const mockedFsPromises = jest.requireMock<typeof fsPromises>('fs/promises');
+  return {
+    existsSync: jest.fn(),
+    createReadStream: jest.fn((filePath: string) => Readable.from((async function* () {
+      yield String(await mockedFsPromises.readFile(filePath, 'utf-8'));
+    })())),
+  };
+});
 jest.mock('fs/promises');
 jest.mock('os');
 
@@ -34,6 +52,8 @@ const vaultPath = fixturePath('/Users/test/vault');
 const encodedDrive = process.platform === 'win32' ? 'C-' : '';
 
 const mockExistsSync = existsSync as jest.MockedFunction<typeof existsSync>;
+const mockCreateReadStream = jest.mocked(createReadStream);
+const writeSessionFile = useClaudeSessionFiles();
 const mockFsPromises = fsPromises as jest.Mocked<typeof fsPromises>;
 const mockOs = os as jest.Mocked<typeof os>;
 
@@ -424,29 +444,37 @@ describe('sdkSession', () => {
       expect(result.skippedLines).toBe(0);
     });
 
-    it('yields during large transcript parsing and retains both sides of compaction', async () => {
-      mockExistsSync.mockReturnValue(true);
+    it('streams a multi-chunk transcript between UI tasks and retains both sides of compaction', async () => {
+      mockCreateReadStream.mockImplementationOnce(jest.requireActual<typeof fsType>('fs').createReadStream);
       const entries = Array.from({ length: 300 }, (_, index) => ({
         type: 'user', uuid: `u${index}`, message: { content: '汉字🙂'.repeat(4096) },
       }));
       const boundary = { type: 'system', subtype: 'compact_boundary', uuid: 'compact', parentUuid: null };
       const records = [...entries.slice(0, 150), boundary, ...entries.slice(150)];
-      mockFsPromises.readFile.mockResolvedValue(records.map(record => JSON.stringify(record)).join('\r\n'));
+      const lines = records.map(record => JSON.stringify(record));
+      // About 12 MiB with CRLF endings, blank lines, and one malformed record.
+      const sessionPath = writeSessionFile([...lines.slice(0, 150), '', 'not json', '   ', ...lines.slice(150)].join('\r\n'));
       const parse = jest.spyOn(JSON, 'parse');
-      let parsedAtHeartbeat = 0;
-      const heartbeat = new Promise<void>(resolve => setTimeout(() => {
-        parsedAtHeartbeat = parse.mock.calls.length;
-        resolve();
-      }, 0));
+      const parsedAtTicks: number[] = [];
+      const ticker = setInterval(() => parsedAtTicks.push(parse.mock.calls.length), 0);
       try {
-        const result = await readSDKSession(vaultPath, 'long-session');
-        await heartbeat;
-        expect(result).toEqual({ messages: records, skippedLines: 0 });
-        expect(parsedAtHeartbeat).toBeGreaterThan(0);
-        expect(parsedAtHeartbeat).toBeLessThan(records.length);
+        const result = await readSDKSessionFile(sessionPath);
+        expect(result).toEqual({ messages: records, skippedLines: 1 });
+        expect(parsedAtTicks.some(count => count > 0 && count < records.length)).toBe(true);
       } finally {
+        clearInterval(ticker);
         parse.mockRestore();
       }
+    });
+
+    it('reports a native read failure from the real file stream', async () => {
+      mockCreateReadStream.mockImplementationOnce(jest.requireActual<typeof fsType>('fs').createReadStream);
+      const directory = path.dirname(writeSessionFile(''));
+
+      const result = await readSDKSessionFile(directory);
+
+      expect(result).toMatchObject({ messages: [], skippedLines: 0 });
+      expect(result.error).toEqual(expect.stringContaining('EISDIR'));
     });
 
     it('reads from the effective Claude config directory', async () => {
@@ -461,9 +489,9 @@ describe('sdkSession', () => {
       });
 
       expect(result.messages).toHaveLength(1);
-      expect(mockFsPromises.readFile).toHaveBeenCalledWith(
+      expect(mockCreateReadStream).toHaveBeenCalledWith(
         fixturePath(`/custom/claude/projects/${encodedDrive}-Users-test-vault/session-custom.jsonl`),
-        'utf-8',
+        expect.anything(),
       );
     });
 
@@ -520,9 +548,9 @@ describe('sdkSession', () => {
         'a123'
       );
 
-      expect(mockFsPromises.readFile).toHaveBeenCalledWith(
+      expect(mockCreateReadStream).toHaveBeenCalledWith(
         fixturePath(`/Users/test/.claude/projects/${encodedDrive}-Users-test-vault/session-abc/subagents/agent-a123.jsonl`),
-        'utf-8'
+        expect.anything()
       );
       expect(toolCalls).toHaveLength(1);
       expect(toolCalls[0]).toEqual(
@@ -559,7 +587,7 @@ describe('sdkSession', () => {
       );
 
       expect(toolCalls).toEqual([]);
-      expect(mockFsPromises.readFile).not.toHaveBeenCalled();
+      expect(mockCreateReadStream).not.toHaveBeenCalled();
     });
   });
 
@@ -568,7 +596,11 @@ describe('sdkSession', () => {
       mockExistsSync.mockReturnValue(true);
       mockFsPromises.readFile.mockResolvedValue([
         '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"First"}]}}',
-        '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Final answer"}]}}',
+        JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [
+          { type: 'text', text: 'Report heading' },
+          { type: 'thinking', thinking: 'Private reasoning' },
+          { type: 'text', text: 'Final answer' },
+        ] } }),
       ].join('\n'));
 
       const result = await loadSubagentFinalResult(
@@ -577,10 +609,10 @@ describe('sdkSession', () => {
         'a123'
       );
 
-      expect(result).toBe('Final answer');
-      expect(mockFsPromises.readFile).toHaveBeenCalledWith(
+      expect(result).toBe('Report heading\nFinal answer');
+      expect(mockCreateReadStream).toHaveBeenCalledWith(
         fixturePath(`/Users/test/.claude/projects/${encodedDrive}-Users-test-vault/session-abc/subagents/agent-a123.jsonl`),
-        'utf-8'
+        expect.anything()
       );
     });
 
@@ -616,7 +648,7 @@ describe('sdkSession', () => {
         '../bad-agent'
       );
       expect(invalid).toBeNull();
-      expect(mockFsPromises.readFile).not.toHaveBeenCalled();
+      expect(mockCreateReadStream).not.toHaveBeenCalled();
     });
   });
 
@@ -1462,7 +1494,7 @@ describe('sdkSession', () => {
       mockFsPromises.readFile.mockResolvedValue([
         '{"type":"user","uuid":"u1","timestamp":"2024-01-15T10:00:00Z","message":{"content":"Hello"}}',
         '{"type":"assistant","uuid":"a1","timestamp":"2024-01-15T10:01:00Z","message":{"content":[{"type":"text","text":"Hi!"}]}}',
-        '{"type":"user","uuid":"u2","timestamp":"2024-01-15T10:02:00Z","message":{"content":"<command-message>md2docx</command-message>\\n<command-name>/md2docx</command-name>"}}',
+        '{"type":"user","uuid":"u2","timestamp":"2024-01-15T10:02:00Z","message":{"content":"<command-message>md2docx</command-message>\\n<command-name>/md2docx</command-name>\\n<command-args>report.md --toc</command-args>"}}',
         '{"type":"user","uuid":"u3","timestamp":"2024-01-15T10:02:00Z","isMeta":true,"message":{"content":"Use bash command md2word..."}}',
         '{"type":"assistant","uuid":"a2","timestamp":"2024-01-15T10:03:00Z","message":{"content":[{"type":"text","text":"(no content)"}]}}',
         '{"type":"assistant","uuid":"a3","timestamp":"2024-01-15T10:03:01Z","message":{"content":[{"type":"tool_use","id":"t1","name":"Skill","input":{"skill":"md2docx"}}]}}',
@@ -1474,7 +1506,7 @@ describe('sdkSession', () => {
       // META (u3) should be skipped; "(no content)" text should be filtered
       expect(result.messages).toHaveLength(4);
       expect(result.messages[2].role).toBe('user');
-      expect(result.messages[2].displayContent).toBe('/md2docx');
+      expect(result.messages[2].displayContent).toBe('/md2docx report.md --toc');
       expect(result.messages[3].role).toBe('assistant');
       expect(result.messages[3].content).toBe('');
       expect(result.messages[3].toolCalls).toHaveLength(1);
@@ -1939,6 +1971,71 @@ describe('sdkSession', () => {
   });
 
   describe('filterActiveBranch', () => {
+    // A Jest timeout cannot interrupt a synchronous infinite loop.
+    function filterCyclicBranch(entries: SDKNativeMessage[], resumeAtMessageId?: string): SDKNativeMessage[] {
+      return runInNewContext('filterActiveBranch(entries, resumeAtMessageId)', {
+        filterActiveBranch, entries, resumeAtMessageId,
+      }, { timeout: 1000 });
+    }
+
+    it.each([undefined, 'after', 'tail'])('retains history across a compaction cycle when resuming at %s', resumeAt => {
+      // Issue #1672: the preserved segment descends from the boundary, whose
+      // logical parent points forward to the tail of that same segment.
+      const entries: SDKNativeMessage[] = [
+        { type: 'system', subtype: 'compact_boundary', uuid: 'compact', parentUuid: null, logicalParentUuid: 'tail' },
+        { type: 'user', uuid: 'summary', parentUuid: 'compact', isMeta: true },
+        { type: 'assistant', uuid: 'head', parentUuid: 'summary' },
+        { type: 'assistant', uuid: 'middle', parentUuid: 'head' },
+        { type: 'assistant', uuid: 'last', parentUuid: 'middle' },
+        { type: 'user', uuid: 'tool-result', parentUuid: 'last', toolUseResult: {} },
+        { type: 'attachment', uuid: 'tail', parentUuid: 'tool-result' },
+        { type: 'assistant', uuid: 'after', parentUuid: 'tail' },
+      ];
+
+      expect(filterCyclicBranch(entries, resumeAt).map(e => e.uuid)).toEqual([
+        'compact', 'summary', 'head', 'middle', 'last', 'tool-result', 'tail',
+        ...(resumeAt === 'tail' ? [] : ['after']),
+      ]);
+    });
+
+    it.each([
+      [undefined, ['loop', 'u-new', 'a-new']],
+      ['a-old', ['loop', 'u-new', 'a-new']],
+      ['u-new', ['loop', 'u-new']],
+    ])('selects the latest branch through a self-parent cycle when resuming at %s', (resumeAt, expected) => {
+      const entries: SDKNativeMessage[] = [
+        { type: 'assistant', uuid: 'loop', parentUuid: 'loop' },
+        { type: 'user', uuid: 'u-old', parentUuid: 'loop' },
+        { type: 'assistant', uuid: 'a-old', parentUuid: 'u-old' },
+        { type: 'user', uuid: 'u-new', parentUuid: 'loop' },
+        { type: 'assistant', uuid: 'a-new', parentUuid: 'u-new' },
+      ];
+
+      expect(filterCyclicBranch(entries, resumeAt).map(e => e.uuid)).toEqual(expected);
+    });
+
+    it.each([undefined, 'one'])('handles a parent cycle with no leaf when resuming at %s', resumeAt => {
+      const entries: SDKNativeMessage[] = [
+        { type: 'assistant', uuid: 'one', parentUuid: 'two' },
+        { type: 'assistant', uuid: 'two', parentUuid: 'one' },
+      ];
+
+      expect(filterCyclicBranch(entries, resumeAt)).toEqual(entries);
+    });
+
+    it('selects the latest branch through a cycle of non-conversation children', () => {
+      const entries: SDKNativeMessage[] = [
+        { type: 'system', uuid: 'one', parentUuid: 'two' },
+        { type: 'attachment', uuid: 'two', parentUuid: 'one' },
+        { type: 'user', uuid: 'u-old', parentUuid: 'one' },
+        { type: 'assistant', uuid: 'a-old', parentUuid: 'u-old' },
+        { type: 'user', uuid: 'u-new', parentUuid: 'one' },
+        { type: 'assistant', uuid: 'a-new', parentUuid: 'u-new' },
+      ];
+
+      expect(filterCyclicBranch(entries).map(e => e.uuid)).toEqual(['one', 'two', 'u-new', 'a-new']);
+    });
+
     it('returns all entries for linear chain without resumeAtMessageId', () => {
       const entries: SDKNativeMessage[] = [
         { type: 'user', uuid: 'u1', parentUuid: null },
@@ -2097,6 +2194,25 @@ describe('sdkSession', () => {
       const result = filterActiveBranch(entries, 'a1');
 
       expect(result.map(e => e.uuid)).toEqual(['u1', 'a1']);
+    });
+
+    it.each([
+      ['a branch after the compaction', undefined, ['u1', 'a1', 'c1', 's1', 'u3', 'a3']],
+      ['a rewind after the compaction', 's1', ['u1', 'a1', 'c1', 's1']],
+    ])('keeps history before a compact boundary when resolving %s', (_case, resumeAt, expected) => {
+      // Native /compact restarts the parent chain; only logicalParentUuid links the boundary back.
+      const entries: SDKNativeMessage[] = [
+        { type: 'user', uuid: 'u1', parentUuid: null },
+        { type: 'assistant', uuid: 'a1', parentUuid: 'u1' },
+        { type: 'system', subtype: 'compact_boundary', uuid: 'c1', parentUuid: null, logicalParentUuid: 'a1' },
+        { type: 'user', uuid: 's1', parentUuid: 'c1', isMeta: true },
+        { type: 'user', uuid: 'u2', parentUuid: 's1' },        // old branch
+        { type: 'assistant', uuid: 'a2', parentUuid: 'u2' },   // old branch
+        { type: 'user', uuid: 'u3', parentUuid: 's1' },        // new branch
+        { type: 'assistant', uuid: 'a3', parentUuid: 'u3' },   // new branch
+      ];
+
+      expect(filterActiveBranch(entries, resumeAt).map(e => e.uuid)).toEqual(expected);
     });
 
     it('truncates at resumeAtMessageId mid-branch when branching exists', () => {
@@ -2513,16 +2629,16 @@ describe('sdkSession', () => {
       ];
 
       expect(collectAsyncSubagentResults(entries).get('has-id'))
-        .toEqual({ result: 'Background task completed.', status: 'completed' });
+        .toEqual({ result: 'Background task completed.', status: 'completed', summaryOnly: true });
     });
 
     it('reads a summary-only notification as the live notification parser does', () => {
       const content = '<task-notification><task-id>failed-agent</task-id><status>failed</status>'
         + '<summary>Agent "Review code" failed</summary></task-notification>';
 
-      expect(parseClaudeTaskNotification(content)).toEqual({ taskId: 'failed-agent', content: 'Agent "Review code" failed' });
+      expect(parseClaudeTaskNotification(content)).toEqual({ taskId: 'failed-agent', content: 'Agent "Review code" failed', hasResult: false });
       expect(collectAsyncSubagentResults([{ type: 'queue-operation', operation: 'enqueue', content }]).get('failed-agent'))
-        .toEqual({ result: 'Agent "Review code" failed', status: 'failed' });
+        .toEqual({ result: 'Agent "Review code" failed', status: 'failed', summaryOnly: true });
     });
 
     it('ignores non-queue-operation messages', () => {
@@ -2786,9 +2902,9 @@ describe('sdkSession', () => {
 
       const assistantMsg = result.messages.find(m => m.toolCalls?.some(tc => tc.name === 'Agent'));
       const taskToolCall = assistantMsg!.toolCalls!.find(tc => tc.name === 'Agent')!;
-      expect(mockFsPromises.readFile).toHaveBeenCalledWith(
+      expect(mockCreateReadStream).toHaveBeenCalledWith(
         fixturePath('/old-project/session-sidecar/subagents/agent-ae5eb9a.jsonl'),
-        'utf-8',
+        expect.anything(),
       );
       expect(taskToolCall.subagent!.toolCalls).toEqual([
         expect.objectContaining({ name: 'Grep', result: '3 matches found' }),

@@ -1,4 +1,10 @@
-import { resolveCommandDiscoveryTimeoutMs } from '@/core/providers/commands/catalogCommandDiscovery';
+import {
+  listDiscoveredCommandEntries,
+  loadProviderCommands,
+  type ProviderCommandLoaderDiscovery,
+  resolveCommandDiscoveryTimeoutMs,
+  toLoaderDiscovery,
+} from '@/core/providers/commands/catalogCommandDiscovery';
 import type { ProviderCommandDiscoveryResult } from '@/core/providers/commands/ProviderCommandDiscoveryResult';
 import { normalizeProviderCommandDiscoveryItems } from '@/core/providers/commands/ProviderCommandDiscoveryResult';
 import { ProviderCommandDiscoveryStore } from '@/core/providers/commands/ProviderCommandDiscoveryStore';
@@ -8,10 +14,11 @@ import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceReg
 import type { ProviderId } from '@/core/providers/types';
 import type { Conversation, SlashCommand } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
-import type { TabId, TabProviderCatalogContext } from '@/features/chat/tabs/ChatTab';
-import { getTabProviderId } from '@/features/chat/tabs/providerResolution';
+import { getSessionProviderId } from '@/features/chat/sessions/sessionProvider';
+import type { TabId } from '@/features/chat/tabs/ChatTab';
+import type { TabIdentity } from '@/features/chat/tabs/TabIdentity';
 import type { AssembledTabRuntime, ProviderCatalogInfo, TabMembershipView } from '@/features/chat/tabs/types';
-import { throwIfAborted, toAbortError } from '@/utils/abort';
+import { throwIfAborted } from '@/utils/abort';
 
 type ProviderRuntimeCommandCacheEntry = {
   result: ProviderCommandDiscoveryResult<SlashCommand>;
@@ -34,16 +41,7 @@ type ProviderCommandContext = ProviderCommandLookup & {
   resourceGeneration: number;
 };
 
-type ProviderCommandLoadEntry = {
-  abortController: AbortController;
-  key: string;
-  promise: Promise<ProviderCommandDiscoveryResult<SlashCommand>>;
-};
-
-type SDKCommandDiscovery = {
-  result: ProviderCommandDiscoveryResult<SlashCommand>;
-  commandSnapshot?: readonly SlashCommand[];
-};
+type SDKCommandDiscovery = ProviderCommandLoaderDiscovery;
 
 const ABORT_MESSAGE = 'Provider command discovery aborted';
 
@@ -53,7 +51,6 @@ const ABORT_MESSAGE = 'Provider command discovery aborted';
  * it never runs eagerly and never creates chat sessions.
  */
 export class TabCommandDiscovery {
-  private readonly providerRuntimeCommandLoads = new Map<TabId, ProviderCommandLoadEntry>();
   private readonly providerRuntimeCommandCache = new Map<TabId, ProviderRuntimeCommandCacheEntry>();
   private readonly providerCommandDiscoveryStores = new Map<
     TabId,
@@ -86,7 +83,7 @@ export class TabCommandDiscovery {
       : null;
     for (const tab of this.membership.getAllTabs()) {
       if (!this.membership.isTabAlive(tab)) continue;
-      const providerId = getTabProviderId(tab, this.plugin);
+      const providerId = getSessionProviderId(tab, this.plugin);
       if (!providerId || (filter && !filter.has(providerId))) continue;
       this.invalidateTab(tab.id);
     }
@@ -102,22 +99,21 @@ export class TabCommandDiscovery {
         providerId,
         Math.max(this.#getProviderResourceGeneration(providerId), generation),
       );
-      ProviderWorkspaceRegistry.getCommandCatalog(providerId)?.setCommandSnapshot([]);
     }
 
     const filter = new Set(ids);
     for (const tab of this.membership.getAllTabs()) {
-      const providerId = getTabProviderId(tab, this.plugin);
+      const providerId = getSessionProviderId(tab, this.plugin);
       if (!providerId || !filter.has(providerId)) continue;
       this.invalidateTab(tab.id);
     }
   }
 
   /** Resolves the command dropdown config and discovery source for a live tab. */
-  getProviderCatalogConfig(tab: TabProviderCatalogContext): ProviderCatalogInfo {
+  getProviderCatalogConfig(tab: Readonly<TabIdentity>): ProviderCatalogInfo {
     if (this.membership.isDestroyed() || tab.lifecycleState === 'closing') return null;
 
-    const providerId = getTabProviderId(tab, this.plugin);
+    const providerId = getSessionProviderId(tab, this.plugin);
     if (!providerId) return null;
     const catalog = ProviderWorkspaceRegistry.getCommandCatalog(providerId);
     if (!catalog) return null;
@@ -136,70 +132,45 @@ export class TabCommandDiscovery {
     const targetTab = this.membership.getTab(tabId);
     if (!targetTab || !this.membership.isTabAlive(targetTab)) return { status: 'empty' };
 
-    const providerId = getTabProviderId(targetTab, this.plugin);
+    const providerId = getSessionProviderId(targetTab, this.plugin);
     if (!providerId) return { status: 'empty' };
     const discovery = await this.#getSdkCommandDiscovery(targetTab.id, signal);
     throwIfAborted(signal, ABORT_MESSAGE);
     if (!this.#isTabProviderCurrent(targetTab, providerId)) return { status: 'empty' };
-    const { result } = discovery;
-    if (result.status === 'error' || result.status === 'requires-session') {
-      return result;
-    }
-
     const catalog = ProviderWorkspaceRegistry.getCommandCatalog(providerId);
-    if (!catalog) return { status: 'empty' };
-    const entries = await catalog.listDropdownEntries({
-      includeBuiltIns: false,
-      signal,
-      allowCachedCommandSnapshot: discovery.commandSnapshot !== undefined,
-      ...(discovery.commandSnapshot !== undefined
-        ? { commandSnapshot: discovery.commandSnapshot }
-        : {}),
-    });
+    if (!catalog) {
+      const { result } = discovery;
+      return result.status === 'error' || result.status === 'requires-session' ? result : { status: 'empty' };
+    }
+    const entries = await listDiscoveredCommandEntries(catalog, discovery, signal);
     if (!this.#isTabProviderCurrent(targetTab, providerId)) return { status: 'empty' };
-    return normalizeProviderCommandDiscoveryItems(entries);
+    return entries;
   }
 
-  /** Cancels and forgets a tab's discovery state, collecting failures for the caller. */
-  releaseTab(tabId: TabId): unknown[] {
-    const errors: unknown[] = [];
-    try {
-      this.#cancelRuntimeCommandLoad(tabId);
-    } catch (error) {
-      errors.push(error);
-    }
-    try {
-      this.providerCommandDiscoveryStores.get(tabId)?.invalidate();
-    } catch (error) {
-      errors.push(error);
-    } finally {
-      this.providerRuntimeCommandLoads.delete(tabId);
-      this.providerRuntimeCommandCache.delete(tabId);
-      this.providerCommandDiscoveryStores.delete(tabId);
-      this.tabCommandContextRevisions.delete(tabId);
-    }
-    return errors;
+  /** Cancels and forgets a tab's discovery state. */
+  releaseTab(tabId: TabId): void {
+    this.providerCommandDiscoveryStores.get(tabId)?.invalidate();
+    this.providerRuntimeCommandCache.delete(tabId);
+    this.providerCommandDiscoveryStores.delete(tabId);
+    this.tabCommandContextRevisions.delete(tabId);
   }
 
   /** Tab IDs that still own any discovery state, including state outliving membership. */
   getTrackedTabIds(): TabId[] {
     return [...new Set<TabId>([
-      ...this.providerRuntimeCommandLoads.keys(),
       ...this.providerRuntimeCommandCache.keys(),
       ...this.providerCommandDiscoveryStores.keys(),
       ...this.tabCommandContextRevisions.keys(),
     ])];
   }
 
-  clear(): void {
-    this.providerRuntimeCommandLoads.clear();
-    this.providerRuntimeCommandCache.clear();
-    this.providerCommandDiscoveryStores.clear();
-    this.tabCommandContextRevisions.clear();
+  /** Releases every tab's discovery state. */
+  releaseAll(): void {
+    for (const tabId of this.getTrackedTabIds()) this.releaseTab(tabId);
   }
 
   #isTabProviderCurrent(tab: AssembledTabRuntime, providerId: ProviderId): boolean {
-    return this.membership.isTabAlive(tab) && getTabProviderId(tab, this.plugin) === providerId;
+    return this.membership.isTabAlive(tab) && getSessionProviderId(tab, this.plugin) === providerId;
   }
 
   async #getSdkCommandDiscovery(
@@ -212,7 +183,7 @@ export class TabCommandDiscovery {
       return { result: { status: 'empty' } };
     }
 
-    const providerId = getTabProviderId(targetTab, this.plugin);
+    const providerId = getSessionProviderId(targetTab, this.plugin);
     if (!providerId) return { result: { status: 'empty' } };
     await ProviderWorkspaceRegistry.ensureInitialized(this.plugin.providerHost, providerId, 'command-picker');
     throwIfAborted(signal, ABORT_MESSAGE);
@@ -233,7 +204,6 @@ export class TabCommandDiscovery {
       };
     }
 
-    const catalog = ProviderWorkspaceRegistry.getCommandCatalog(providerId);
     const commandLoader = ProviderWorkspaceRegistry.getCommandLoader(providerId);
     const lookup = await this.#buildLookup(targetTab, providerId);
     throwIfAborted(signal, ABORT_MESSAGE);
@@ -248,95 +218,39 @@ export class TabCommandDiscovery {
     ) {
       return { result: { status: 'empty' }, commandSnapshot: [] };
     }
-    let result: ProviderCommandDiscoveryResult<SlashCommand> = { status: 'empty' };
-    let hasCommandSnapshot = false;
-
-    if (commandLoader) {
-      hasCommandSnapshot = true;
-      result = await this.#ensureRuntimeCommands(targetTab, providerId, lookup, signal);
-    }
-
+    // Without a loader the catalog discovers on its own.
+    if (!commandLoader) return { result: { status: 'empty' } };
+    const result = await this.#ensureRuntimeCommands(targetTab, providerId, commandContext, signal);
     if (!this.#isTabProviderCurrent(targetTab, providerId)) {
       return { result: { status: 'empty' } };
     }
-
-    if (
-      catalog
-      && hasCommandSnapshot
-      && targetTab.id === this.membership.getActiveTabId()
-      && this.#isContextCurrent(targetTab, providerId, commandContext)
-      && (result.status === 'ready' || result.status === 'empty')
-    ) {
-      catalog.setCommandSnapshot(result.status === 'ready' ? [...result.items] : []);
-    }
-    return {
-      result,
-      ...(hasCommandSnapshot && (result.status === 'ready' || result.status === 'empty')
-        ? { commandSnapshot: result.status === 'ready' ? result.items : [] }
-        : {}),
-    };
+    return toLoaderDiscovery(result);
   }
 
+  /** Returns the cached loader answer for this context, or loads it under the store's signal. */
   async #ensureRuntimeCommands(
     tab: AssembledTabRuntime,
     providerId: ProviderId,
-    lookup: ProviderCommandLookup,
+    context: ProviderCommandContext,
     signal: AbortSignal,
   ): Promise<ProviderCommandDiscoveryResult<SlashCommand>> {
-    throwIfAborted(signal, ABORT_MESSAGE);
-    if (
-      !this.membership.isTabAlive(tab)
-      || !this.#isCommandLoaderAvailable(providerId)
-    ) {
-      return { status: 'empty' };
-    }
-
-    const context = this.#buildContext(tab, providerId, lookup);
-    if (!this.#isContextCurrent(tab, providerId, context)) {
-      return { status: 'empty' };
-    }
     const cached = this.providerRuntimeCommandCache.get(tab.id);
-    if (cached && cached.key === context.cacheKey) {
-      return cached.result.status === 'ready'
-        ? { status: 'ready', items: cached.result.items.map(command => ({ ...command })) as [SlashCommand, ...SlashCommand[]] }
-        : cached.result;
-    }
+    if (cached?.key === context.cacheKey) return cached.result;
 
-    const existing = this.providerRuntimeCommandLoads.get(tab.id);
-    if (existing?.key === context.cacheKey) {
-      const result = await this.#awaitLoad(existing, signal);
-      return this.#isTabProviderCurrent(tab, providerId) ? result : { status: 'empty' };
-    }
-    this.#cancelRuntimeCommandLoad(tab.id);
-    if (!this.#isContextCurrent(tab, providerId, context)) {
-      return { status: 'empty' };
-    }
-
-    const abortController = new AbortController();
-    const load = this.#loadRuntimeCommands(
-      tab,
-      providerId,
-      context,
-      abortController.signal,
-    ).finally(() => {
-      if (this.providerRuntimeCommandLoads.get(tab.id)?.promise === load) {
-        this.providerRuntimeCommandLoads.delete(tab.id);
-      }
+    const result = await loadProviderCommands(providerId, {
+      allowIsolatedMetadataCreation: context.allowIsolatedMetadataCreation,
+      conversation: context.conversation,
+      plugin: this.plugin.providerHost,
+      signal,
     });
-    const entry: ProviderCommandLoadEntry = {
-      abortController,
-      key: context.cacheKey,
-      promise: load,
-    };
-    this.providerRuntimeCommandLoads.set(tab.id, entry);
-    const result = await this.#awaitLoad(entry, signal);
-    return this.#isTabProviderCurrent(tab, providerId) ? result : { status: 'empty' };
-  }
-
-  #isCommandLoaderAvailable(providerId: ProviderId): boolean {
-    const loader = ProviderWorkspaceRegistry.getCommandLoader(providerId);
-    if (!loader) return false;
-    return loader.isAvailable(this.plugin.settings);
+    if (this.#isContextCurrent(tab, providerId, context)) {
+      if (result.status === 'ready' || result.status === 'empty') {
+        this.providerRuntimeCommandCache.set(tab.id, { key: context.cacheKey, result });
+      } else {
+        this.providerRuntimeCommandCache.delete(tab.id);
+      }
+    }
+    return result;
   }
 
   async #buildLookup(
@@ -372,45 +286,8 @@ export class TabCommandDiscovery {
       tabId,
       (this.tabCommandContextRevisions.get(tabId) ?? 0) + 1,
     );
-    this.#cancelRuntimeCommandLoad(tabId);
     this.providerRuntimeCommandCache.delete(tabId);
     return true;
-  }
-
-  #cancelRuntimeCommandLoad(tabId: TabId): void {
-    const load = this.providerRuntimeCommandLoads.get(tabId);
-    if (!load) {
-      return;
-    }
-    load.abortController.abort();
-    this.providerRuntimeCommandLoads.delete(tabId);
-  }
-
-  async #awaitLoad(
-    load: ProviderCommandLoadEntry,
-    signal: AbortSignal,
-  ): Promise<ProviderCommandDiscoveryResult<SlashCommand>> {
-    if (signal.aborted) {
-      load.abortController.abort();
-      throwIfAborted(signal, ABORT_MESSAGE);
-    }
-
-    let onAbort: (() => void) | null = null;
-    const aborted = new Promise<never>((_resolve, reject) => {
-      onAbort = () => {
-        load.abortController.abort();
-        reject(toAbortError(signal, ABORT_MESSAGE));
-      };
-      signal.addEventListener('abort', onAbort, { once: true });
-    });
-
-    try {
-      return await Promise.race([load.promise, aborted]);
-    } finally {
-      if (onAbort) {
-        signal.removeEventListener('abort', onAbort);
-      }
-    }
   }
 
   #isContextCurrent(
@@ -457,39 +334,6 @@ export class TabCommandDiscovery {
     };
   }
 
-  async #loadRuntimeCommands(
-    tab: AssembledTabRuntime,
-    providerId: ProviderId,
-    context: ProviderCommandContext,
-    signal: AbortSignal,
-  ): Promise<ProviderCommandDiscoveryResult<SlashCommand>> {
-    const loader = ProviderWorkspaceRegistry.getCommandLoader(providerId);
-    if (!loader) {
-      return { status: 'empty' };
-    }
-    const result = await loader.loadCommands({
-      allowIsolatedMetadataCreation: context.allowIsolatedMetadataCreation,
-      conversation: context.conversation,
-      plugin: this.plugin.providerHost,
-      signal,
-    });
-
-    if (
-      this.#isContextCurrent(tab, providerId, context)
-      && (result.status === 'ready' || result.status === 'empty')
-    ) {
-      this.providerRuntimeCommandCache.set(tab.id, {
-        key: context.cacheKey,
-        result: result.status === 'ready'
-          ? { status: 'ready', items: result.items.map(command => ({ ...command })) as [SlashCommand, ...SlashCommand[]] }
-          : result,
-      });
-    } else if (this.#isContextCurrent(tab, providerId, context)) {
-      this.providerRuntimeCommandCache.delete(tab.id);
-    }
-    return result;
-  }
-
   #ensureDiscoveryStore(
     tabId: TabId,
   ): ProviderCommandDiscoveryStore<ProviderCommandEntry> {
@@ -507,7 +351,7 @@ export class TabCommandDiscovery {
         resolveTimeoutMs: () => {
           const tab = this.membership.getTab(tabId);
           if (!tab || !this.membership.isTabAlive(tab)) return undefined;
-          const providerId = getTabProviderId(tab, this.plugin);
+          const providerId = getSessionProviderId(tab, this.plugin);
           if (!providerId) return undefined;
           const catalog = ProviderWorkspaceRegistry.getCommandCatalog(providerId);
           return catalog

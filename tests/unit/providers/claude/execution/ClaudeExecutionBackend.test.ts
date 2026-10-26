@@ -8,6 +8,7 @@ import * as sdkModule from '@anthropic-ai/claude-agent-sdk';
 import { capturedSelectionPrompt, capturedSelections } from '@test/helpers/capturedSelections';
 import { claudeCatalogFixture } from '@test/helpers/claudeModels';
 import { createProviderRecoveryTestHarness } from '@test/helpers/features/chat/ProviderRecoveryTestHarness';
+import { runtimeHostFor, withRuntimeHosts } from '@test/helpers/providerRuntimeHost';
 import { testDate, testTime } from '@test/helpers/testClock';
 
 import {
@@ -21,6 +22,7 @@ import {
 } from '@/core/execution';
 import { ProviderModelUnavailableError } from '@/core/providers/models/ProviderModelUnavailableError';
 import type { ProviderHost } from '@/core/providers/ProviderHost';
+import type { ProviderRuntimeHost } from '@/core/providers/ProviderRuntimeHost';
 import type { ClaudianSettings } from '@/core/types';
 type MutableTestHost = ProviderHost & { settings: ClaudianSettings };
 import * as env from '@/core/process/env';
@@ -92,7 +94,7 @@ function createInteractionPort(): jest.Mocked<ProviderInteractionPort> {
 }
 
 function createHost(): MutableTestHost {
-  return {
+  return withRuntimeHosts({
     app: {
       vault: {
         adapter: {
@@ -112,8 +114,24 @@ function createHost(): MutableTestHost {
     },
     storage: {} as ProviderHost['storage'],
     getResolvedProviderCliPath: jest.fn().mockResolvedValue('/bin/claude'),
-    getActiveEnvironmentVariables: jest.fn().mockReturnValue(''),
-  } as unknown as MutableTestHost;
+  });
+}
+
+/** Counts the configuration transactions Claude's runtime commits through the host. */
+function countConfigWrites(host: MutableTestHost): { readonly count: number } {
+  const runtimeHost = runtimeHostFor(host, 'claude');
+  const counter = { count: 0 };
+  const counted: ProviderRuntimeHost = Object.create(runtimeHost, {
+    updateConfig: {
+      value: async (mutation: Parameters<ProviderRuntimeHost['updateConfig']>[0]) => {
+        const written = await runtimeHost.updateConfig(mutation);
+        if (written) counter.count += 1;
+        return written;
+      },
+    },
+  });
+  host.getRuntimeHost = () => counted;
+  return counter;
 }
 
 function createConfig(
@@ -122,7 +140,7 @@ function createConfig(
   return {
     lifecycle: 'persistent',
     nativePersistence: 'enabled',
-    vaultWorkingDirectory: '/vault',
+    workingDirectory: '/vault',
     interactionPort: createInteractionPort(),
     ...overrides,
   };
@@ -134,7 +152,7 @@ function createRequest(
   return {
     input: [{ type: 'text', text: 'Hello' }],
     configuration: {
-      systemInstructions: { kind: 'provider-default' },
+      systemInstructions: { kind: 'main-agent' as const, instructions: 'Main Agent prompt.' },
       model: 'claude-sonnet-4-5',
       reasoning: 'medium',
       permissionMode: 'ask',
@@ -169,11 +187,30 @@ describe('ClaudeExecutionBackend', () => {
     jest.restoreAllMocks();
   });
 
+  it('restarts the query when session-tool attachment presence changes', async () => {
+    let sessionTools: ProviderSessionConfig['sessionTools'];
+    const config = createConfig();
+    Object.defineProperty(config, 'sessionTools', { get: () => sessionTools });
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude')).createSession(config);
+    try {
+      await collectEvents(session.execute(createRequest()).events);
+      expect(sdkMock.getLastOptions()?.mcpServers).toBeUndefined();
+      sessionTools = { list: async () => ({ sessions: [] }), send: jest.fn(), read: jest.fn() };
+      await collectEvents(session.execute(createRequest()).events);
+      expect(sdkMock.getQueryCallCount()).toBe(2);
+      expect(sdkMock.getLastOptions()?.mcpServers).toHaveProperty('claudian_sessions');
+      sessionTools = undefined;
+      await collectEvents(session.execute(createRequest()).events);
+      expect(sdkMock.getQueryCallCount()).toBe(3);
+      expect(sdkMock.getLastOptions()?.mcpServers).toBeUndefined();
+    } finally { await session.dispose(); }
+  });
+
   it('passes Node-backed CLI paths to the SDK even when Node discovery misses', async () => {
     jest.spyOn(env, 'findNodeExecutable').mockReturnValue(null);
     const host = createHost();
     jest.mocked(host.getResolvedProviderCliPath).mockResolvedValue('/npm/claude/cli-wrapper.cjs');
-    const session = new ClaudeExecutionBackend(host).createSession(createConfig());
+    const session = new ClaudeExecutionBackend(host.getRuntimeHost('claude')).createSession(createConfig());
 
     try {
       await collectEvents(session.execute(createRequest()).events);
@@ -194,7 +231,7 @@ describe('ClaudeExecutionBackend', () => {
       ],
       visibleModels: ['claude-fable-5-10'],
     } };
-    const session = new ClaudeExecutionBackend(host).createSession(createConfig());
+    const session = new ClaudeExecutionBackend(host.getRuntimeHost('claude')).createSession(createConfig());
     const request = createRequest();
     try {
       const events = await collectEvents(session.execute({
@@ -203,6 +240,37 @@ describe('ClaudeExecutionBackend', () => {
       expect(events).not.toContainEqual(expect.objectContaining({ type: 'execution_error' }));
       expect(sdkMock.getLastOptions()?.model).toBe('claude-fable-5-10');
       expect(sdkMock.getLastOptions()?.effort).toBe('high');
+    } finally {
+      await session.dispose();
+    }
+  });
+
+  // The availability guard reads the stored model before encoding, so the request names its model.
+  it('falls back to Claude\'s own saved effort and permission while another provider owns the current ones', async () => {
+    const host = createHost();
+    Object.assign(host.settings, {
+      settingsProvider: 'codex',
+      providerConfigs: { ...host.settings.providerConfigs, codex: { enabled: true } },
+      model: 'gpt-5.4',
+      effortLevel: 'xhigh',
+      permissionMode: 'yolo',
+      savedProviderModel: { claude: 'claude-opus-4-6' },
+      savedProviderEffort: { claude: 'low' },
+      savedProviderPermissionMode: { claude: 'acceptEdits' },
+    });
+    const session = new ClaudeExecutionBackend(host.getRuntimeHost('claude')).createSession(createConfig());
+    const request = createRequest();
+    try {
+      const events = await collectEvents(session.execute({
+        ...request,
+        configuration: { ...request.configuration, model: 'claude-opus-4-6', reasoning: undefined, permissionMode: undefined },
+      }).events);
+      expect(events).not.toContainEqual(expect.objectContaining({ type: 'execution_error' }));
+      expect(sdkMock.getLastOptions()).toMatchObject({
+        model: 'claude-opus-4-6',
+        effort: 'low',
+        permissionMode: 'acceptEdits',
+      });
     } finally {
       await session.dispose();
     }
@@ -217,8 +285,8 @@ describe('ClaudeExecutionBackend', () => {
       ],
       visibleModels: ['opus[1m]'],
     } };
-    expect(() => assertClaudeModelAvailable(host.settings, 'opus')).toThrow(ProviderModelUnavailableError);
-    const session = new ClaudeExecutionBackend(host).createSession(createConfig());
+    expect(() => assertClaudeModelAvailable(host.getRuntimeHost('claude'), 'opus')).toThrow(ProviderModelUnavailableError);
+    const session = new ClaudeExecutionBackend(host.getRuntimeHost('claude')).createSession(createConfig());
     const request = createRequest();
     const events = await collectEvents(session.execute({
       ...request, configuration: { ...request.configuration, model: 'opus' },
@@ -234,7 +302,7 @@ describe('ClaudeExecutionBackend', () => {
       discoveredModels: ['sonnet', 'opus'].map(value => ({ value, label: value, description: '', resolvedModel: 'gateway-model' })),
       visibleModels: ['sonnet'],
     } };
-    const session = new ClaudeExecutionBackend(host).createSession(createConfig());
+    const session = new ClaudeExecutionBackend(host.getRuntimeHost('claude')).createSession(createConfig());
     const request = createRequest();
     const events = await collectEvents(session.execute({
       ...request, configuration: { ...request.configuration, model: 'gateway-model' },
@@ -248,7 +316,8 @@ describe('ClaudeExecutionBackend', () => {
 
   it('keeps native success when cancellation arrives during stats loading', async () => {
     const home = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-throughput-'));
-    const directory = path.join(home, 'projects', '-vault');
+    const vaultPath = path.resolve('/vault');
+    const directory = path.join(home, 'projects', vaultPath.replace(/[^a-zA-Z0-9]/g, '-'));
     await fs.mkdir(directory, { recursive: true });
     const sessionFile = path.join(directory, 'session-1.jsonl');
     await fs.writeFile(sessionFile, [
@@ -257,13 +326,13 @@ describe('ClaudeExecutionBackend', () => {
         message: { id: 'response', stop_reason: 'end_turn', usage: { output_tokens: 125 }, content: [{ type: 'text', text: 'Done' }] } },
     ].map(record => JSON.stringify(record)).join('\n'));
     const host = createHost();
-    jest.mocked(host.getActiveEnvironmentVariables).mockReturnValue(`CLAUDE_CONFIG_DIR=${home}`);
+    updateClaudeProviderSettings(host.settings, { environmentVariables: `CLAUDE_CONFIG_DIR=${home}` });
     sdkMock.setMockMessages([
       { type: 'system', subtype: 'init', session_id: 'session-1' },
       { type: 'assistant', uuid: 'a', parent_tool_use_id: null, message: { content: [{ type: 'text', text: 'Done' }] } },
       { type: 'result', subtype: 'success', duration_ms: 3000, usage: { output_tokens: 125 } },
     ], { appendResult: false });
-    const session = new ClaudeExecutionBackend(host).createSession(createConfig());
+    const session = new ClaudeExecutionBackend(host.getRuntimeHost('claude')).createSession(createConfig());
     const readStarted = createDeferred<void>();
     const releaseRead = createDeferred<void>();
     const nativeRead = fs.readFile;
@@ -305,7 +374,7 @@ describe('ClaudeExecutionBackend', () => {
       { type: 'system', subtype: 'init', session_id: 'session-1' },
       { type: 'result', subtype: 'success' },
     ], { appendResult: false });
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig());
 
     await collectEvents(session.execute(createRequest()).events);
@@ -332,7 +401,7 @@ describe('ClaudeExecutionBackend', () => {
       { type: 'system', subtype: 'init', session_id: 'session-1', permissionMode: nativeMode },
       { type: 'result', subtype: 'success' },
     ], { appendResult: false });
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig());
 
     const events = await collectEvents(session.execute(createRequest()).events);
@@ -352,7 +421,7 @@ describe('ClaudeExecutionBackend', () => {
         { type: 'system', subtype: 'init', session_id: 'session-1', permissionMode: nativeMode },
         { type: 'result', subtype: 'success' },
       ], { appendResult: false });
-      const session = new ClaudeExecutionBackend(createHost())
+      const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
         .createSession(createConfig());
 
       const events = await collectEvents(session.execute(createRequest()).events);
@@ -378,7 +447,7 @@ describe('ClaudeExecutionBackend', () => {
       jest.spyOn(await import('@/providers/claude/loadClaudeAgentSDK'), 'loadClaudeAgentQuery')
         .mockResolvedValueOnce((() => query) as unknown as typeof sdkModule.query);
       const host = createHost();
-      const session = new ClaudeExecutionBackend(host)
+      const session = new ClaudeExecutionBackend(host.getRuntimeHost('claude'))
         .createSession(createConfig({ lifecycle }));
       const events = collectEvents(session.execute(createRequest()).events);
       try {
@@ -401,17 +470,14 @@ describe('ClaudeExecutionBackend', () => {
   it('writes a live session model list back once and leaves unchanged catalogs alone', async () => {
     const host = createHost();
     const registry = new ProviderExecutionLifecycleRegistry();
-    let writes = 0;
     Object.assign(host, {
       executionLifecycleRegistry: registry,
-      mutateSettingsConditionally: jest.fn(async (mutation: (settings: ClaudianSettings) => Promise<boolean> | boolean) => {
-        if (await mutation(host.settings)) writes += 1;
-      }),
       notifyProviderChatOptionsChanged: jest.fn(),
     });
+    const writes = countConfigWrites(host);
     const services = await createClaudeWorkspaceServices(host, { commandProbe: async () => [], catalogProbe: jest.fn() });
     const publications: Array<Promise<void>> = [];
-    const backend = new ClaudeExecutionBackend(host, {
+    const backend = new ClaudeExecutionBackend(host.getRuntimeHost('claude'), {
       publishSessionCatalog: catalog => {
         const publication = services.publishSessionCatalog(catalog);
         publications.push(publication);
@@ -434,7 +500,7 @@ describe('ClaudeExecutionBackend', () => {
         await waitFor(() => publications.length === sessionIndex);
         await Promise.all(publications);
         await session.dispose();
-        expect(writes).toBe(1);
+        expect(writes.count).toBe(1);
       }
       expect(getClaudeProviderSettings(host.settings).discoveredModels).toContainEqual({
         value: 'claude-fable-6-0',
@@ -454,17 +520,14 @@ describe('ClaudeExecutionBackend', () => {
   it('writes live session output styles back once while keeping the stored model list', async () => {
     const host = createHost();
     const registry = new ProviderExecutionLifecycleRegistry();
-    let writes = 0;
     Object.assign(host, {
       executionLifecycleRegistry: registry,
-      mutateSettingsConditionally: jest.fn(async (mutation: (settings: ClaudianSettings) => Promise<boolean> | boolean) => {
-        if (await mutation(host.settings)) writes += 1;
-      }),
       notifyProviderChatOptionsChanged: jest.fn(),
     });
+    const writes = countConfigWrites(host);
     const services = await createClaudeWorkspaceServices(host, { commandProbe: async () => [], catalogProbe: jest.fn() });
     const publications: Array<Promise<void>> = [];
-    const backend = new ClaudeExecutionBackend(host, {
+    const backend = new ClaudeExecutionBackend(host.getRuntimeHost('claude'), {
       publishSessionCatalog: catalog => {
         const publication = services.publishSessionCatalog(catalog);
         publications.push(publication);
@@ -481,7 +544,7 @@ describe('ClaudeExecutionBackend', () => {
         await waitFor(() => publications.length === sessionIndex);
         await Promise.all(publications);
         await session.dispose();
-        expect(writes).toBe(1);
+        expect(writes.count).toBe(1);
       }
       expect(getClaudeProviderSettings(host.settings)).toMatchObject({
         discoveredOutputStyles: ['default', 'Concise', 'My Style'],
@@ -523,7 +586,7 @@ describe('ClaudeExecutionBackend', () => {
       },
       { type: 'result', subtype: 'success' },
     ], { appendResult: false });
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig());
 
     const commandSnapshots: unknown[] = [];
@@ -595,12 +658,34 @@ describe('ClaudeExecutionBackend', () => {
     ]);
   });
 
+  it('starts fresh without a rewind checkpoint once the resume binding was cleared', async () => {
+    // Cleared resume state (#1651): the rewind checkpoint survives, but there is no session to resume.
+    sdkMock.setMockMessages([
+      { type: 'system', subtype: 'init', session_id: 'fresh-session' },
+      { type: 'result', subtype: 'success' },
+    ], { appendResult: false });
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
+      .createSession(createConfig({
+        resumeSeed: {
+          resumeCheckpoint: 'assistant-checkpoint',
+          providerState: { previousProviderSessionIds: ['retired-session'] },
+        },
+      }));
+
+    await collectEvents(session.execute(createRequest()).events);
+
+    const options = sdkMock.getLastOptions();
+    expect(options).not.toHaveProperty('resume');
+    expect(options).not.toHaveProperty('resumeSessionAt');
+    expect(session.getSnapshot().providerSessionId).toBe('fresh-session');
+  });
+
   it('resumes and materializes a pending fork without losing opaque provider state', async () => {
     sdkMock.setMockMessages([
       { type: 'system', subtype: 'init', session_id: 'forked-session' },
       { type: 'result', subtype: 'success' },
     ], { appendResult: false });
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig({
         resumeSeed: {
           providerState: {
@@ -644,7 +729,7 @@ describe('ClaudeExecutionBackend', () => {
   });
 
   it('uses resumable ephemeral turns and honors passive non-persistent policy', async () => {
-    const backend = new ClaudeExecutionBackend(createHost());
+    const backend = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'));
     const resumable = backend.createSession(createConfig({
       lifecycle: 'ephemeral',
       nativePersistence: 'enabled',
@@ -719,7 +804,7 @@ describe('ClaudeExecutionBackend', () => {
       } else {
         sdkMock.setMockMessages(messages, { appendResult: false });
       }
-      const session = new ClaudeExecutionBackend(createHost())
+      const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
         .createSession(createConfig({
           lifecycle: 'ephemeral',
           nativePersistence: 'disabled-if-supported',
@@ -777,7 +862,7 @@ describe('ClaudeExecutionBackend', () => {
           .mockResolvedValueOnce((() => closedQuery) as never);
       }
       sdkMock.setMockMessages(messages, { appendResult: false });
-      const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig({
+      const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude')).createSession(createConfig({
         lifecycle: 'ephemeral', nativePersistence: 'disabled-if-supported',
       }));
       try {
@@ -811,7 +896,7 @@ describe('ClaudeExecutionBackend', () => {
     ['/compact', '/compact'],
     [' \t/CoMpAcT keep recent edits\nFocus on tests  ', '/compact keep recent edits\nFocus on tests'],
   ])('compacts with only explicit instructions from %j', async (text, command) => {
-    const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude')).createSession(createConfig());
     try {
       const events = await collectEvents(session.execute(createRequest({
         input: [{ type: 'text', text }, { type: 'image', image: {
@@ -819,7 +904,7 @@ describe('ClaudeExecutionBackend', () => {
           mediaType: 'image/png', size: 5, source: 'paste',
         } }],
         context: { ...capturedSelections, linkedContent: { path: 'note.md' },
-          sessionReferences: [{ id: 'ref', title: 'Review', providerId: 'claude', updatedAt: 'updated', snapshotPath: '/tmp/ref.md' }],
+          sessionReferences: [{ id: 'ref', title: 'Review', providerId: 'claude', updatedAt: 'updated' }],
         },
       })).events);
       expect(mockBuildClaudeSDKUserMessage.mock.results[0]?.value.message.content).toBe(command);
@@ -828,7 +913,7 @@ describe('ClaudeExecutionBackend', () => {
   });
 
   it('rejects compact without consuming history that still needs recovery', async () => {
-    const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude')).createSession(createConfig());
     const conversationHistory = [{ id: 'prior', role: 'user' as const, content: 'Remember prior context', timestamp: testDate().getTime() }];
     try {
       const events = await collectEvents(session.execute(createRequest({
@@ -846,7 +931,7 @@ describe('ClaudeExecutionBackend', () => {
     sdkMock.setMockMessages([
       { type: 'result', subtype: 'success' },
     ], { appendResult: false });
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig({ lifecycle: 'ephemeral' }));
 
     await collectEvents(session.execute(createRequest({
@@ -866,12 +951,11 @@ describe('ClaudeExecutionBackend', () => {
       ],
       context: {
         ...capturedSelections,
-        sessionReferences: [{ id: 'conv-1-ref', title: 'Review', providerId: 'codex', updatedAt: 'updated', snapshotPath: '/tmp/claudian-sessions/ref.md' }],
+        sessionReferences: [{ id: 'conv-1-ref', title: 'Review', providerId: 'codex', updatedAt: 'updated' }],
         linkedContent: { path: 'note.md' },
       },
       configuration: {
-        readableRoots: ['/tmp/claudian-sessions'],
-        systemInstructions: { kind: 'provider-default' },
+        systemInstructions: { kind: 'main-agent' as const, instructions: 'Main Agent prompt.' },
       },
       toolPolicy: { kind: 'allow-list', names: ['Read', 'Grep'] },
     })).events);
@@ -882,61 +966,78 @@ describe('ClaudeExecutionBackend', () => {
         type: 'image',
         source: { type: 'base64', media_type: 'image/png', data: 'aW1hZ2U=' },
       },
-      { type: 'text', text: '@mentioned Explain this\n\n<linked_content path="note.md" />\n\n' + capturedSelectionPrompt + '\n\n<context_sessions>\n<context_session title="Review" id="conv-1-ref" provider="codex" updated="updated" path="/tmp/claudian-sessions/ref.md" />\n</context_sessions>' },
+      { type: 'text', text: '@mentioned Explain this\n\n<linked_content path="note.md" />\n\n' + capturedSelectionPrompt + '\n\n<context_sessions>\n<context_session title="Review" id="conv-1-ref" provider="codex" updated="updated" />\n</context_sessions>' },
     ]);
     expect(getEncodedPrompts()).toEqual([
-      '@mentioned Explain this\n\n<linked_content path="note.md" />\n\n' + capturedSelectionPrompt + '\n\n<context_sessions>\n<context_session title="Review" id="conv-1-ref" provider="codex" updated="updated" path="/tmp/claudian-sessions/ref.md" />\n</context_sessions>',
+      '@mentioned Explain this\n\n<linked_content path="note.md" />\n\n' + capturedSelectionPrompt + '\n\n<context_sessions>\n<context_session title="Review" id="conv-1-ref" provider="codex" updated="updated" />\n</context_sessions>',
     ]);
     expect(sdkMock.getLastOptions()).toEqual(expect.objectContaining({
       cwd: '/vault',
-      additionalDirectories: ['/tmp/claudian-sessions'],
       tools: ['Read', 'Grep'],
     }));
     expect(sdkMock.getLastOptions()?.mcpServers).toBeUndefined();
   });
 
-  it('sends the provider-default prompt as a non-snapshotted custom system prompt', async () => {
+  it('sends the caller-resolved Main Agent prompt verbatim as a non-snapshotted custom system prompt', async () => {
     sdkMock.setMockMessages([
       { type: 'result', subtype: 'success' },
     ], { appendResult: false });
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig({ lifecycle: 'ephemeral' }));
 
     await collectEvents(session.execute(createRequest({
-      configuration: { systemInstructions: { kind: 'provider-default' } },
-    })).events);
+      configuration: { systemInstructions: { kind: 'main-agent', instructions: 'Caller-resolved Main Agent prompt.' } },
+    } as never)).events);
 
     expect(sdkMock.getLastOptions()?.systemPrompt).toEqual({
       type: 'custom',
-      prompt: expect.stringContaining('## Runtime Context'),
+      prompt: 'Caller-resolved Main Agent prompt.',
       snapshot: false,
     });
   });
 
-  it('encodes structured context with escaped XML paths and bodies', async () => {
+  it('restarts the query when the Main Agent instructions change', async () => {
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude')).createSession(createConfig());
+    const withInstructions = (instructions: string) => createRequest({
+      configuration: {
+        ...createRequest().configuration,
+        systemInstructions: { kind: 'main-agent', instructions },
+      },
+    });
+    try {
+      await collectEvents(session.execute(withInstructions('Main Agent prompt Alpha')).events);
+      expect((sdkMock.getLastOptions()?.systemPrompt as { prompt: string }).prompt).toBe('Main Agent prompt Alpha');
+
+      await collectEvents(session.execute(withInstructions('Main Agent prompt Alpha')).events);
+      expect(sdkMock.getQueryCallCount()).toBe(1);
+
+      await collectEvents(session.execute(withInstructions('Main Agent prompt Beta')).events);
+      expect(sdkMock.getQueryCallCount()).toBe(2);
+      expect((sdkMock.getLastOptions()?.systemPrompt as { prompt: string }).prompt).toBe('Main Agent prompt Beta');
+    } finally { await session.dispose(); }
+  });
+
+  it('encodes structured context with escaped XML paths', async () => {
     sdkMock.setMockMessages([
       { type: 'result', subtype: 'success' },
     ], { appendResult: false });
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig({ lifecycle: 'ephemeral' }));
 
     await collectEvents(session.execute(createRequest({
       context: {
-        linkedContent: {
-          path: 'notes/"draft" & review.md',
-          content: 'Before\n]]>\nAfter',
-        },
-        editorSelection: {
+        linkedContent: { path: 'notes/"draft" & review.md' },
+        selections: [{ kind: 'editor', selection: {
           mode: 'selection',
           notePath: 'notes/"draft" & review.md',
           selectedText: 'Selected',
-        },
+        } }],
       },
     })).events);
 
     const prompt = getEncodedPrompts()[0] ?? '';
     expect(prompt).toContain(
-      '<linked_content path="notes/&quot;draft&quot; &amp; review.md">\n<![CDATA[Before\n]]]]><![CDATA[>\nAfter]]>\n</linked_content>',
+      '<linked_content path="notes/&quot;draft&quot; &amp; review.md" />',
     );
     expect(prompt).not.toContain('<linked_note');
     expect(prompt).not.toContain('<current_note');
@@ -976,7 +1077,7 @@ describe('ClaudeExecutionBackend', () => {
       { type: 'system', subtype: 'compact_boundary' },
       { type: 'result', subtype: 'success' },
     ], { appendResult: false });
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig());
 
     const events = await collectEvents(session.execute(createRequest()).events);
@@ -1027,12 +1128,12 @@ describe('ClaudeExecutionBackend', () => {
         },
       },
     ], { appendResult: false });
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig());
 
     const events = await collectEvents(session.execute(createRequest({
       configuration: {
-        systemInstructions: { kind: 'provider-default' },
+        systemInstructions: { kind: 'main-agent' as const, instructions: 'Main Agent prompt.' },
         model: 'custom-model',
         reasoning: 'medium',
         permissionMode: 'ask',
@@ -1064,12 +1165,12 @@ describe('ClaudeExecutionBackend', () => {
       ]));
     jest.spyOn(await import('@/providers/claude/loadClaudeAgentSDK'), 'loadClaudeAgentQuery')
       .mockResolvedValueOnce(queryFactory as never);
-    const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude')).createSession(createConfig());
     const execute = async (model: string, text: string) => {
       const events = await collectEvents(session.execute(createRequest({
         input: [{ type: 'text', text }],
         configuration: {
-          systemInstructions: { kind: 'provider-default' }, model, reasoning: 'medium', permissionMode: 'ask',
+          systemInstructions: { kind: 'main-agent' as const, instructions: 'Main Agent prompt.' }, model, reasoning: 'medium', permissionMode: 'ask',
         },
       })).events);
       return events.filter(event => event.type === 'usage_updated').map(event => event.usage.contextWindow);
@@ -1103,12 +1204,12 @@ describe('ClaudeExecutionBackend', () => {
         },
       },
     ], { appendResult: false });
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig());
 
     const events = await collectEvents(session.execute(createRequest({
       configuration: {
-        systemInstructions: { kind: 'provider-default' },
+        systemInstructions: { kind: 'main-agent' as const, instructions: 'Main Agent prompt.' },
         model: 'custom-model',
         reasoning: 'medium',
         permissionMode: 'ask',
@@ -1146,12 +1247,12 @@ describe('ClaudeExecutionBackend', () => {
         },
       },
     ], { appendResult: false });
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig());
 
     const events = await collectEvents(session.execute(createRequest({
       configuration: {
-        systemInstructions: { kind: 'provider-default' },
+        systemInstructions: { kind: 'main-agent' as const, instructions: 'Main Agent prompt.' },
         model: 'custom-model',
         reasoning: 'medium',
         permissionMode: 'ask',
@@ -1176,7 +1277,7 @@ describe('ClaudeExecutionBackend', () => {
       { type: 'result', subtype: 'success' },
     ], { appendResult: false });
     const interactionPort = createInteractionPort();
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig({
         lifecycle: 'ephemeral',
         interactionPort,
@@ -1231,7 +1332,7 @@ describe('ClaudeExecutionBackend', () => {
       claude: { ...claudeCatalogFixture(['claude-sonnet-4-5'], ['low', 'medium', 'high']), outputStyle },
     });
     host.settings.providerConfigs = withStyle('Concise');
-    const session = new ClaudeExecutionBackend(host).createSession(createConfig());
+    const session = new ClaudeExecutionBackend(host.getRuntimeHost('claude')).createSession(createConfig());
 
     await collectEvents(session.execute(createRequest()).events);
     expect(sdkMock.getLastOptions()?.settings).toEqual({ outputStyle: 'Concise' });
@@ -1250,7 +1351,7 @@ describe('ClaudeExecutionBackend', () => {
     host.settings.providerConfigs = {
       claude: { ...claudeCatalogFixture(['claude-sonnet-4-5'], ['low', 'medium', 'high']), outputStyle: null },
     };
-    const session = new ClaudeExecutionBackend(host).createSession(createConfig());
+    const session = new ClaudeExecutionBackend(host.getRuntimeHost('claude')).createSession(createConfig());
     await collectEvents(session.execute(createRequest()).events);
     expect(sdkMock.getLastOptions()).not.toHaveProperty('settings');
     await session.dispose();
@@ -1266,14 +1367,14 @@ describe('ClaudeExecutionBackend', () => {
       ['claude-sonnet-4-5', 'claude-opus-4-6'],
       ['low', 'medium', 'high'],
     ) };
-    const session = new ClaudeExecutionBackend(host)
+    const session = new ClaudeExecutionBackend(host.getRuntimeHost('claude'))
       .createSession(createConfig());
 
     await collectEvents(session.execute(createRequest()).events);
     const query = sdkMock.getLastResponse();
     await collectEvents(session.execute(createRequest({
       configuration: {
-        systemInstructions: { kind: 'provider-default' },
+        systemInstructions: { kind: 'main-agent' as const, instructions: 'Main Agent prompt.' },
         model: 'claude-opus-4-6',
         reasoning: 'high',
         permissionMode: 'yolo',
@@ -1294,7 +1395,7 @@ describe('ClaudeExecutionBackend', () => {
     ], { appendResult: false });
     const host = createHost();
     host.settings.providerConfigs = { claude: claudeCatalogFixture(['claude-sonnet-4-5'], ['low', 'medium']) };
-    const session = new ClaudeExecutionBackend(host).createSession(createConfig());
+    const session = new ClaudeExecutionBackend(host.getRuntimeHost('claude')).createSession(createConfig());
     const request = createRequest();
 
     const events = await collectEvents(session.execute({
@@ -1313,7 +1414,7 @@ describe('ClaudeExecutionBackend', () => {
     ], { appendResult: false });
     const host = createHost();
     host.settings.providerConfigs = { claude: claudeCatalogFixture(['claude-sonnet-4-5']) };
-    const session = new ClaudeExecutionBackend(host).createSession(createConfig());
+    const session = new ClaudeExecutionBackend(host.getRuntimeHost('claude')).createSession(createConfig());
 
     const request = createRequest();
     await collectEvents(session.execute({ ...request, configuration: { ...request.configuration, reasoning: null } }).events);
@@ -1336,7 +1437,7 @@ describe('ClaudeExecutionBackend', () => {
         { value: 'claude-opus-4-6', label: 'claude-opus-4-6', description: 'SDK model' },
       ],
     } };
-    const session = new ClaudeExecutionBackend(host).createSession(createConfig());
+    const session = new ClaudeExecutionBackend(host.getRuntimeHost('claude')).createSession(createConfig());
 
     await collectEvents(session.execute(createRequest()).events);
     expect(sdkMock.getLastOptions()?.effort).toBe('medium');
@@ -1358,7 +1459,7 @@ describe('ClaudeExecutionBackend', () => {
     ], { appendResult: false });
     const host = createHost();
     host.settings.providerConfigs = { claude: claudeCatalogFixture(['claude-sonnet-4-5'], ['low', 'medium', 'high']) };
-    const session = new ClaudeExecutionBackend(host)
+    const session = new ClaudeExecutionBackend(host.getRuntimeHost('claude'))
       .createSession(createConfig());
     const request = createRequest();
     const execute = (permissionMode: string) => collectEvents(session.execute({
@@ -1384,7 +1485,7 @@ describe('ClaudeExecutionBackend', () => {
       { type: 'system', subtype: 'init', session_id: 'session-1' },
       { type: 'result', subtype: 'success' },
     ], { appendResult: false });
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig());
     const conversationHistory = [
       { id: 'history-user', role: 'user' as const, content: 'prior question', timestamp: 1 },
@@ -1410,7 +1511,7 @@ describe('ClaudeExecutionBackend', () => {
       { type: 'system', subtype: 'init', session_id: 'replacement-session' },
       { type: 'result', subtype: 'success' },
     ], { appendResult: false });
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig({
         resumeSeed: {
           providerSessionId: 'expected-session',
@@ -1446,7 +1547,7 @@ describe('ClaudeExecutionBackend', () => {
       { type: 'result', subtype: 'success' },
     ], { appendResult: false });
     const host = createHost();
-    const session = new ClaudeExecutionBackend(host)
+    const session = new ClaudeExecutionBackend(host.getRuntimeHost('claude'))
       .createSession(createConfig({
         resumeSeed: {
           providerSessionId: 'expected-session',
@@ -1499,7 +1600,7 @@ describe('ClaudeExecutionBackend', () => {
     )
       .mockResolvedValueOnce(failedFactory as never)
       .mockResolvedValueOnce((() => retryQuery) as never);
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig({
         resumeSeed: {
           providerSessionId: 'replacement-session',
@@ -1570,7 +1671,7 @@ describe('ClaudeExecutionBackend', () => {
       'loadClaudeAgentQuery',
     ).mockResolvedValueOnce(queryFactory as never);
     const requestAbortController = new AbortController();
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig({
         resumeSeed: {
           providerSessionId: 'replacement-session',
@@ -1632,7 +1733,7 @@ describe('ClaudeExecutionBackend', () => {
     )
       .mockResolvedValueOnce(firstFactory as never)
       .mockResolvedValueOnce(retryFactory as never);
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig({
         resumeSeed: {
           providerState: {
@@ -1661,7 +1762,7 @@ describe('ClaudeExecutionBackend', () => {
     }));
     await session.dispose();
 
-    const replacement = new ClaudeExecutionBackend(createHost())
+    const replacement = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig({
         resumeSeed: {
           ...(pendingForkSnapshot.providerSessionId
@@ -1693,7 +1794,7 @@ describe('ClaudeExecutionBackend', () => {
       { type: 'system', subtype: 'init', session_id: 'replacement-session' },
       { type: 'result', subtype: 'success' },
     ], { appendResult: false });
-    const backend = new ClaudeExecutionBackend(createHost());
+    const backend = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'));
     const session = backend.createSession(createConfig({
       resumeSeed: {
         providerSessionId: 'expected-session',
@@ -1736,6 +1837,45 @@ describe('ClaudeExecutionBackend', () => {
     );
   });
 
+  it('does not replay history again when the replaying turn reports another session', async () => {
+    sdkMock.setMockMessages([
+      { type: 'system', subtype: 'init', session_id: 'second-replacement-session' },
+      { type: 'result', subtype: 'success' },
+    ], { appendResult: false });
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
+      .createSession(createConfig({
+        resumeSeed: {
+          providerSessionId: 'replacement-session',
+          providerState: {
+            historyReplayPending: true,
+            providerSessionId: 'replacement-session',
+          },
+        },
+      }));
+    const conversationHistory = [
+      { id: 'history-user', role: 'user' as const, content: 'single replay question', timestamp: 1 },
+      { id: 'history-assistant', role: 'assistant' as const, content: 'single replay answer', timestamp: 2 },
+    ];
+
+    await collectEvents(session.execute(createRequest({
+      conversationHistory,
+      input: [{ type: 'text', text: 'Replay into new session' }],
+    })).events);
+    await collectEvents(session.execute(createRequest({
+      conversationHistory,
+      input: [{ type: 'text', text: 'Continue without replay' }],
+    })).events);
+
+    const prompts = getEncodedPrompts();
+    expect(prompts.at(-2)).toContain('single replay question');
+    expect(prompts.at(-1)).toBe('Continue without replay');
+    expect(session.getSnapshot().providerState).toEqual(expect.objectContaining({
+      providerSessionId: 'second-replacement-session',
+    }));
+    expect(session.getSnapshot().providerState).not.toHaveProperty('historyReplayPending');
+    await session.dispose();
+  });
+
   it('invalidates a missing native session and reports the missing ID as a terminal event', async () => {
     const query = createThrowingPersistentQuery(
       new Error('No conversation found with session ID: missing-session'),
@@ -1744,7 +1884,7 @@ describe('ClaudeExecutionBackend', () => {
       await import('@/providers/claude/loadClaudeAgentSDK'),
       'loadClaudeAgentQuery',
     ).mockResolvedValueOnce((() => query) as never);
-    const backend = new ClaudeExecutionBackend(createHost());
+    const backend = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'));
     const initialProviderState = {
       providerSessionId: 'missing-session',
       unknownFutureField: { keep: true },
@@ -1804,7 +1944,7 @@ describe('ClaudeExecutionBackend', () => {
       ['previous-session', { availability: 'unknown' }],
       ['missing-session', { availability: 'missing' }],
     ]));
-    const backend = new ClaudeExecutionBackend(createHost());
+    const backend = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'));
     const conversation: Conversation = {
       id: 'claude-recovery',
       providerId: 'claude',
@@ -1822,7 +1962,7 @@ describe('ClaudeExecutionBackend', () => {
     const harness = createProviderRecoveryTestHarness({
       backend,
       conversation,
-      vaultWorkingDirectory: '/vault',
+      workingDirectory: '/vault',
       configuration: createRequest().configuration,
       resolveMissingProviderSession: async (current, missingSessionId) => {
         const resolution = await historyService.resolveMissingConversationSession(
@@ -1843,6 +1983,7 @@ describe('ClaudeExecutionBackend', () => {
     });
     expect(conversation.sessionId).toBeNull();
     expect(conversation.providerState).toEqual({
+      bindingRetired: true,
       previousProviderSessionIds: ['previous-session'],
     });
 
@@ -1867,7 +2008,7 @@ describe('ClaudeExecutionBackend', () => {
     )
       .mockResolvedValueOnce((() => failedQuery) as never)
       .mockResolvedValueOnce((() => recoveredQuery) as never);
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig({
         resumeSeed: {
           providerSessionId: 'stale-session',
@@ -1930,7 +2071,7 @@ describe('ClaudeExecutionBackend', () => {
       await import('@/providers/claude/loadClaudeAgentSDK'),
       'loadClaudeAgentQuery',
     ).mockResolvedValueOnce((() => query) as never);
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig({
         resumeSeed: { providerSessionId: 'session-1' },
       }));
@@ -1954,7 +2095,7 @@ describe('ClaudeExecutionBackend', () => {
       { dryRun: true },
     );
 
-    const withoutSeed = new ClaudeExecutionBackend(createHost())
+    const withoutSeed = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig());
     await expect(withoutSeed.previewRewind(
       'user-1',
@@ -1996,7 +2137,7 @@ describe('ClaudeExecutionBackend', () => {
     ]]);
     jest.spyOn(await import('@/providers/claude/loadClaudeAgentSDK'), 'loadClaudeAgentQuery')
       .mockResolvedValueOnce((() => query) as never);
-    const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude')).createSession(createConfig());
     const background: ProviderSessionEvent[] = [];
     session.onEvent(event => background.push(event));
     let next: Promise<ProviderExecutionEvent[]> | undefined;
@@ -2035,7 +2176,7 @@ describe('ClaudeExecutionBackend', () => {
       ]]);
       jest.spyOn(await import('@/providers/claude/loadClaudeAgentSDK'), 'loadClaudeAgentQuery')
         .mockResolvedValueOnce((() => query) as never);
-      const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+      const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude')).createSession(createConfig());
       const events: ProviderSessionEvent[] = [];
       session.onEvent(event => events.push(event));
       const requested = collectEvents(session.execute(createRequest()).events);
@@ -2071,7 +2212,7 @@ describe('ClaudeExecutionBackend', () => {
         launchOptions = params.options;
         return query;
       }) as never);
-    const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude')).createSession(createConfig());
     const events: ProviderSessionEvent[] = [];
     session.onEvent(event => events.push(event));
     const requested = collectEvents(session.execute(createRequest()).events);
@@ -2144,7 +2285,7 @@ describe('ClaudeExecutionBackend', () => {
       ]]);
       jest.spyOn(await import('@/providers/claude/loadClaudeAgentSDK'), 'loadClaudeAgentQuery')
         .mockResolvedValueOnce((() => query) as never);
-      const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+      const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude')).createSession(createConfig());
       const background: ProviderSessionEvent[] = [];
       session.onEvent(event => background.push(event));
       await collectEvents(session.execute(createRequest()).events);
@@ -2216,7 +2357,7 @@ describe('ClaudeExecutionBackend', () => {
       .mockResolvedValueOnce(((params: { options: sdkModule.Options }) => { options = params.options; return query; }) as never);
     const interactionPort = createInteractionPort();
     interactionPort.requestApproval.mockImplementation(async request => ({ interactionId: request.interactionId, decision: 'deny' }));
-    const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig({ interactionPort }));
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude')).createSession(createConfig({ interactionPort }));
     const background: ProviderSessionEvent[] = [];
     session.onEvent(event => background.push(event));
     await collectEvents(session.execute(createRequest()).events);
@@ -2277,7 +2418,7 @@ describe('ClaudeExecutionBackend', () => {
     ]]);
     jest.spyOn(await import('@/providers/claude/loadClaudeAgentSDK'), 'loadClaudeAgentQuery')
       .mockResolvedValueOnce((() => query) as never);
-    const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude')).createSession(createConfig());
     const background: ProviderSessionEvent[] = [];
     session.onEvent(event => background.push(event));
     await collectEvents(session.execute(createRequest()).events);
@@ -2315,7 +2456,7 @@ describe('ClaudeExecutionBackend', () => {
       : createScriptedPersistentQuery([messages]);
     jest.spyOn(await import('@/providers/claude/loadClaudeAgentSDK'), 'loadClaudeAgentQuery')
       .mockResolvedValueOnce((() => query) as never);
-    const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude')).createSession(createConfig());
     const background: ProviderSessionEvent[] = [];
     session.onEvent(event => background.push(event));
     await collectEvents(session.execute(createRequest()).events);
@@ -2351,7 +2492,7 @@ describe('ClaudeExecutionBackend', () => {
     ]]);
     jest.spyOn(await import('@/providers/claude/loadClaudeAgentSDK'), 'loadClaudeAgentQuery')
       .mockResolvedValueOnce((() => query) as never);
-    const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude')).createSession(createConfig());
     const events: ProviderSessionEvent[] = [];
     session.onEvent(event => events.push(event));
     await collectEvents(session.execute(createRequest()).events);
@@ -2397,7 +2538,7 @@ describe('ClaudeExecutionBackend', () => {
       await import('@/providers/claude/loadClaudeAgentSDK'),
       'loadClaudeAgentQuery',
     ).mockResolvedValueOnce((() => query) as never);
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig());
     const sessionEvents: ProviderSessionEvent[] = [];
     session.onEvent(() => {
@@ -2439,7 +2580,7 @@ describe('ClaudeExecutionBackend', () => {
       await import('@/providers/claude/loadClaudeAgentSDK'),
       'loadClaudeAgentQuery',
     ).mockResolvedValueOnce((() => query) as never);
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession({ ...createConfig(), lifecycle, nativePersistence });
     const events: ProviderSessionEvent[] = [];
     session.onEvent(event => events.push(event));
@@ -2451,7 +2592,10 @@ describe('ClaudeExecutionBackend', () => {
     releaseDeferredMessage();
     await query.finished;
     expect(events).not.toContainEqual(expect.objectContaining({ type: 'text_delta', text: 'Cancelled late output' }));
-    expect(events.filter(event => event.type === 'background_turn_completed')).toHaveLength(1);
+    // Native interrupt records `[Request interrupted by user]` after the reply, which history replays as interrupted.
+    expect(events.filter(event => event.type === 'background_turn_completed')).toEqual([
+      expect.objectContaining({ reason: 'interrupted' }),
+    ]);
     await session.dispose();
   });
 
@@ -2465,7 +2609,7 @@ describe('ClaudeExecutionBackend', () => {
       await import('@/providers/claude/loadClaudeAgentSDK'),
       'loadClaudeAgentQuery',
     ).mockResolvedValueOnce((() => query) as never);
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig());
     const run = session.execute(createRequest());
     await waitFor(() => query.supportedCommands.mock.calls.length > 0);
@@ -2490,7 +2634,7 @@ describe('ClaudeExecutionBackend', () => {
       await import('@/providers/claude/loadClaudeAgentSDK'),
       'loadClaudeAgentQuery',
     ).mockResolvedValueOnce((() => query) as never);
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig());
     const events: ProviderSessionEvent[] = [];
     session.onEvent(event => events.push(event));
@@ -2523,7 +2667,7 @@ describe('ClaudeExecutionBackend', () => {
       await import('@/providers/claude/loadClaudeAgentSDK'),
       'loadClaudeAgentQuery',
     ).mockResolvedValueOnce((() => query) as never);
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig());
     const run = session.execute(createRequest());
     const eventsPromise = collectEvents(run.events);
@@ -2570,7 +2714,7 @@ describe('ClaudeExecutionBackend', () => {
       await import('@/providers/claude/loadClaudeAgentSDK'),
       'loadClaudeAgentQuery',
     ).mockResolvedValueOnce((() => query) as never);
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig({ lifecycle, nativePersistence }));
     const cancelledRun = session.execute(createRequest());
     const cancelledEventsPromise = collectEvents(cancelledRun.events);
@@ -2622,7 +2766,7 @@ describe('ClaudeExecutionBackend', () => {
     )
       .mockResolvedValueOnce((() => cancelledQuery) as never)
       .mockResolvedValueOnce((() => retryQuery) as never);
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig());
     const cancelledRun = session.execute(createRequest());
     const cancelledEventsPromise = collectEvents(cancelledRun.events);
@@ -2702,7 +2846,7 @@ describe('ClaudeExecutionBackend', () => {
       await import('@/providers/claude/loadClaudeAgentSDK'),
       'loadClaudeAgentQuery',
     ).mockResolvedValueOnce(queryFactory as never);
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig());
     const sessionEvents: ProviderSessionEvent[] = [];
     session.onEvent(event => sessionEvents.push(event));
@@ -2766,7 +2910,7 @@ describe('ClaudeExecutionBackend', () => {
     )
       .mockResolvedValueOnce((() => cancelledQuery) as never)
       .mockResolvedValueOnce((() => retryQuery) as never);
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig({ lifecycle: 'ephemeral' }));
     const cancelledRun = session.execute(createRequest());
     const cancelledEventsPromise = collectEvents(cancelledRun.events);
@@ -2817,7 +2961,7 @@ describe('ClaudeExecutionBackend', () => {
     resolveCliPath
       .mockImplementationOnce(() => encodingBarrier.promise.then(() => '/bin/claude'))
       .mockResolvedValue('/bin/claude');
-    const session = new ClaudeExecutionBackend(host)
+    const session = new ClaudeExecutionBackend(host.getRuntimeHost('claude'))
       .createSession(createConfig());
     const cancelledRun = session.execute(createRequest());
     const cancelledEventsPromise = collectEvents(cancelledRun.events);
@@ -2875,13 +3019,13 @@ describe('ClaudeExecutionBackend', () => {
       .mockResolvedValueOnce((() => retryQuery) as never);
     const host = createHost();
     const resolveCliPath = host.getResolvedProviderCliPath as jest.Mock;
-    const session = new ClaudeExecutionBackend(host)
+    const session = new ClaudeExecutionBackend(host.getRuntimeHost('claude'))
       .createSession(createConfig());
 
     await collectEvents(session.execute(createRequest()).events);
     const cancelledRun = session.execute(createRequest({
       configuration: {
-        systemInstructions: { kind: 'provider-default' },
+        systemInstructions: { kind: 'main-agent' as const, instructions: 'Main Agent prompt.' },
         model: 'claude-opus-4-6',
       },
     }));
@@ -2935,7 +3079,7 @@ describe('ClaudeExecutionBackend', () => {
     )
       .mockImplementationOnce(() => staleLoader.promise as never)
       .mockImplementationOnce(() => retryLoader.promise as never);
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig());
     const cancelledRun = session.execute(createRequest());
     const cancelledEventsPromise = collectEvents(cancelledRun.events);
@@ -2978,7 +3122,7 @@ describe('ClaudeExecutionBackend', () => {
       await import('@/providers/claude/loadClaudeAgentSDK'),
       'loadClaudeAgentQuery',
     ).mockResolvedValueOnce((() => query) as never);
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig());
     const cancelledRun = session.execute(createRequest());
     const cancelledEventsPromise = collectEvents(cancelledRun.events);
@@ -3018,7 +3162,7 @@ describe('ClaudeExecutionBackend', () => {
       await import('@/providers/claude/loadClaudeAgentSDK'),
       'loadClaudeAgentQuery',
     ).mockResolvedValueOnce((() => query) as never);
-    const session = new ClaudeExecutionBackend(createHost())
+    const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude'))
       .createSession(createConfig());
     const cancelledRun = session.execute(createRequest());
     const cancelledEventsPromise = collectEvents(cancelledRun.events);
@@ -3069,7 +3213,7 @@ describe('ClaudeExecutionSession steering', () => {
         query = createInputDrivenQuery(prompt, nextInput => script(nextInput, keepOpen.promise));
         return query;
       }) as never);
-    const backendSession = new ClaudeExecutionBackend(createHost()).createSession(createConfig(config));
+    const backendSession = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude')).createSession(createConfig(config));
     const session = Object.assign(backendSession, {
       dispose: async () => {
         keepOpen.resolve(null);
@@ -3084,6 +3228,10 @@ describe('ClaudeExecutionSession steering', () => {
       for await (const event of run.events) events.push(event);
     })();
     return { session, run, events, done, sessionEvents, loadQuery, getQuery: () => query };
+  }
+
+  function sessionState(state: 'idle' | 'running') {
+    return { type: 'system', subtype: 'session_state_changed', state, session_id: 'session-1' };
   }
 
   function steerRequest(text: string): ProviderExecutionRequest {
@@ -3129,19 +3277,23 @@ describe('ClaudeExecutionSession steering', () => {
     }
   });
 
-  it('keeps the run open when Claude runs a late steer as its next native turn', async () => {
+  // Claude Code 2.1.302 reports no queued turns while a steer waits, and signals turn-over by going idle.
+  it.each(['queued-count', 'session-state'] as const)('keeps the run open when Claude runs a late steer as its next native turn (%s)', async wire => {
     const { session, events, done, sessionEvents } = await startSteerableSession(async function* (nextInput, keepOpen) {
       const prompt = await nextInput();
+      if (wire === 'session-state') yield sessionState('running');
       yield { type: 'system', subtype: 'init', session_id: 'session-1' };
       yield replayOf(prompt);
       yield assistantText('assistant-1', 'Parser refactored.');
       const steer = await nextInput();
-      yield { type: 'result', subtype: 'success', user_message_uuids: [prompt.uuid], queued_turn_count: 1 };
+      yield { type: 'result', subtype: 'success', user_message_uuids: [prompt.uuid], queued_turn_count: wire === 'queued-count' ? 1 : 0 };
+      if (wire === 'session-state') yield { type: 'system', subtype: 'init', session_id: 'session-1' };
       yield replayOf(steer);
       yield { type: 'stream_event', parent_tool_use_id: null, user_message_uuid: steer.uuid,
         event: { type: 'message_start', message: { id: 'message-2', usage: {} } } };
       yield assistantText('assistant-2', 'Also added tests.');
       yield { type: 'result', subtype: 'success', user_message_uuids: [steer.uuid], queued_turn_count: 0 };
+      if (wire === 'session-state') yield sessionState('idle');
       await keepOpen;
     });
     try {
@@ -3151,6 +3303,7 @@ describe('ClaudeExecutionSession steering', () => {
 
       expect(events.filter(event => event.type === 'text_delta').map(event => event.text))
         .toEqual(['Parser refactored.', 'Also added tests.']);
+      expect(events).toContainEqual(expect.objectContaining({ type: 'user_message_started', content: 'Add tests too' }));
       expect(events.filter(event => event.type === 'turn_completed')).toEqual([
         expect.objectContaining({ nativeAssistantId: 'assistant-2' }),
       ]);
@@ -3180,13 +3333,15 @@ describe('ClaudeExecutionSession steering', () => {
     }
   });
 
-  it('rejects a handed-off steer whose delivery ends unknown', async () => {
+  it.each(['queued-count', 'session-state'] as const)('rejects a handed-off steer whose delivery ends unknown (%s)', async wire => {
     const { session, events, done } = await startSteerableSession(async function* (nextInput, keepOpen) {
       const prompt = await nextInput();
+      if (wire === 'session-state') yield sessionState('running');
       yield { type: 'system', subtype: 'init', session_id: 'session-1' };
       yield assistantText('assistant-1', 'Working.');
       await nextInput();
       yield { type: 'result', subtype: 'success', user_message_uuids: [prompt.uuid], queued_turn_count: 0 };
+      if (wire === 'session-state') yield sessionState('idle');
       await keepOpen;
     });
     try {
@@ -3194,6 +3349,29 @@ describe('ClaudeExecutionSession steering', () => {
       await expect(session.steer(steerRequest('Be brief'))).rejects.toThrow('before the steer was delivered');
       await done;
       expect(events.at(-1)?.type).toBe('turn_completed');
+    } finally {
+      await session.dispose();
+    }
+  });
+
+  // Failed-delivery and session-scoped error results omit or narrow consumption echoes.
+  it.each(['no-echo', 'single-echo'] as const)('does not confirm a queued steer from an error result (%s)', async echo => {
+    const { session, events, done } = await startSteerableSession(async function* (nextInput, keepOpen) {
+      await nextInput();
+      yield { type: 'system', subtype: 'init', session_id: 'session-1' };
+      yield assistantText('assistant-1', 'Working.');
+      const steer = await nextInput();
+      yield {
+        type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['Worker crashed'],
+        ...(echo === 'single-echo' ? { user_message_uuid: steer.uuid } : {}),
+      };
+      await keepOpen;
+    });
+    try {
+      await waitFor(() => events.some(event => event.type === 'text_delta'));
+      await expect(session.steer(steerRequest('Be brief'))).rejects.toThrow('before the steer was delivered');
+      await done;
+      expect(events.at(-1)?.type).not.toBe('turn_completed');
     } finally {
       await session.dispose();
     }
@@ -3234,7 +3412,7 @@ describe('ClaudeExecutionSession steering', () => {
   });
 
   it('declines steering without a live persistent native turn', async () => {
-    const idle = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+    const idle = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude')).createSession(createConfig());
     await expect(idle.steer(steerRequest('Too early'))).resolves.toBe(false);
     await idle.dispose();
 
@@ -3489,7 +3667,7 @@ it('preserves the main checkpoint when an async child finishes during automatic 
   ]]);
   jest.spyOn(await import('@/providers/claude/loadClaudeAgentSDK'), 'loadClaudeAgentQuery')
     .mockResolvedValueOnce((() => query) as never);
-  const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+  const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude')).createSession(createConfig());
   const background: ProviderSessionEvent[] = [];
   session.onEvent(event => background.push(event));
   try {
@@ -3517,7 +3695,7 @@ it.each([false, true])('anchors session notifications after emitted events with 
   ]]);
   jest.spyOn(await import('@/providers/claude/loadClaudeAgentSDK'), 'loadClaudeAgentQuery')
     .mockResolvedValueOnce((() => query) as never);
-  const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+  const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude')).createSession(createConfig());
   const sessionEvents: ProviderSessionEvent[] = [];
   session.onEvent(event => sessionEvents.push(event));
   try {
@@ -3548,7 +3726,7 @@ it.each([false, true])('anchors notifications after automatic events with native
   ]]);
   jest.spyOn(await import('@/providers/claude/loadClaudeAgentSDK'), 'loadClaudeAgentQuery')
     .mockResolvedValueOnce((() => query) as never);
-  const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+  const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude')).createSession(createConfig());
   const events: ProviderSessionEvent[] = [];
   session.onEvent(event => events.push(event));
   try {
@@ -3591,7 +3769,7 @@ it.each(['mid-turn', 'next-turn-echo', 'next-turn-no-echo'])('places a consumed 
   ]]);
   jest.spyOn(await import('@/providers/claude/loadClaudeAgentSDK'), 'loadClaudeAgentQuery')
     .mockResolvedValueOnce((() => query) as never);
-  const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+  const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude')).createSession(createConfig());
   const sessionEvents: ProviderSessionEvent[] = [];
   const order: string[] = [];
   session.onEvent(event => {
@@ -3654,7 +3832,7 @@ it.each([
   { name: 'replacement query', background: true, replacement: true, expected: false },
   { name: 'interrupt with a surviving queue', background: true, cancel: true, expected: true },
 ])('filters queued completion presentation for $name', async scenario => {
-  const session = new ClaudeExecutionSession(createHost(), createConfig());
+  const session = new ClaudeExecutionSession(createHost().getRuntimeHost('claude'), createConfig());
   const events: ProviderSessionEvent[] = [];
   session.onEvent(event => events.push(event));
   try {
@@ -3696,7 +3874,7 @@ it('keeps task notification state across requested turns of one persistent query
         { type: 'assistant', message: { id: 'automatic', content: [{ type: 'text', text: 'Automatic answer' }] } },
         { type: 'result', subtype: 'success' },
       ])) as never);
-  const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+  const session = new ClaudeExecutionBackend(createHost().getRuntimeHost('claude')).createSession(createConfig());
   const events: ProviderSessionEvent[] = [];
   session.onEvent(event => events.push(event));
   try {
@@ -3710,7 +3888,7 @@ it('keeps task notification state across requested turns of one persistent query
 });
 
 it('keeps a completion during automatic request startup for the following turn', async () => {
-  const session = new ClaudeExecutionSession(createHost(), createConfig());
+  const session = new ClaudeExecutionSession(createHost().getRuntimeHost('claude'), createConfig());
   const order: string[] = [];
   session.onEvent(event => {
     if (event.type === 'task_notification') order.push(event.content);
@@ -3739,7 +3917,7 @@ describe('Claude prompt suggestions', () => {
 
   it('opts in only for requested main turns and restarts when the setting changes', async () => {
     const host = createHost();
-    const session = new ClaudeExecutionBackend(host).createSession(createConfig());
+    const session = new ClaudeExecutionBackend(host.getRuntimeHost('claude')).createSession(createConfig());
     const request = createRequest();
     Object.assign(request.configuration, { promptSuggestions: true });
     const launch = () => sdkMock.getLastOptions();
@@ -3774,7 +3952,7 @@ describe('Claude prompt suggestions', () => {
   it('delivers a trailing suggestion as a transient event owned by the completed turn', async () => {
     const host = createHost();
     updateClaudeProviderSettings(host.settings, { promptSuggestions: true });
-    const session = new ClaudeExecutionBackend(host).createSession(createConfig());
+    const session = new ClaudeExecutionBackend(host.getRuntimeHost('claude')).createSession(createConfig());
     const events: ProviderSessionEvent[] = [];
     session.onEvent(event => events.push(event));
     const request = createRequest();

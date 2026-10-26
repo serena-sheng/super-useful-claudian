@@ -58,6 +58,13 @@ export function filterActiveBranch(
     return current;
   }
 
+  // A compact boundary restarts the native parent chain; its logical parent keeps earlier history on the branch.
+  function parentOf(entry: SDKNativeMessage): string | null | undefined {
+    return resolveParent(entry.type === 'system' && entry.subtype === 'compact_boundary'
+      ? entry.parentUuid ?? entry.logicalParentUuid
+      : entry.parentUuid);
+  }
+
   const conversationEntries = deduped.filter(entry => entry.type !== 'progress');
   const byUuid = new Map<string, SDKNativeMessage>();
   const childrenOf = new Map<string, Set<string>>();
@@ -67,7 +74,7 @@ export function filterActiveBranch(
       byUuid.set(entry.uuid, entry);
     }
 
-    const effectiveParent = resolveParent(entry.parentUuid) ?? null;
+    const effectiveParent = parentOf(entry) ?? null;
     if (effectiveParent && entry.uuid) {
       let children = childrenOf.get(effectiveParent);
       if (!children) {
@@ -93,9 +100,10 @@ export function filterActiveBranch(
   const activeChildOf = new Map<string, string>();
 
   let latestCurrent = latestLeaf;
-  while (latestCurrent?.uuid) {
+  // Compaction can link a preserved segment back to its own boundary.
+  while (latestCurrent?.uuid && !latestBranchUuids.has(latestCurrent.uuid)) {
     latestBranchUuids.add(latestCurrent.uuid);
-    const parent = resolveParent(latestCurrent.parentUuid);
+    const parent = parentOf(latestCurrent);
     if (parent) {
       activeChildOf.set(parent, latestCurrent.uuid);
     }
@@ -162,12 +170,14 @@ export function filterActiveBranch(
     leaf = latestLeaf;
     if (resumeAtMessageId && leaf?.uuid && byUuid.has(resumeAtMessageId)) {
       let current: SDKNativeMessage | undefined = leaf;
-      while (current?.uuid) {
+      const visited = new Set<string>();
+      while (current?.uuid && !visited.has(current.uuid)) {
+        visited.add(current.uuid);
         if (current.uuid === resumeAtMessageId) {
           leaf = current;
           break;
         }
-        const parent = resolveParent(current.parentUuid);
+        const parent = parentOf(current);
         current = parent ? byUuid.get(parent) : undefined;
       }
     }
@@ -183,9 +193,9 @@ export function filterActiveBranch(
 
   const activeUuids = new Set<string>();
   let current: SDKNativeMessage | undefined = leaf;
-  while (current?.uuid) {
+  while (current?.uuid && !activeUuids.has(current.uuid)) {
     activeUuids.add(current.uuid);
-    const parent = resolveParent(current.parentUuid);
+    const parent = parentOf(current);
     current = parent ? byUuid.get(parent) : undefined;
   }
 

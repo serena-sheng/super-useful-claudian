@@ -49,7 +49,7 @@ This is a maintenance and product-quality boundary:
 1. I am the sole maintainer of this project and remain responsible for every integration after it is merged. If I do not use a provider myself, I cannot test and maintain its integration responsibly over time.
 2. Integrated providers must offer a broadly consistent feature set and user experience. Past attempts have shown that partial integrations are difficult to bring to parity and keep reliable.
 3. Some provider CLIs do not currently expose the capabilities required for a complete integration. For example, Antigravity CLI does not expose ACP or a comparable integration protocol, and Cursor CLI does not allow the system prompt to be customized fully.
-4. Integrating a separate CLI from every model vendor is not sustainable. OpenCode and Pi already support multiple model vendors through API configuration. Codex CLI and Claude Code can also use alternative model endpoints through configuration. Inside an Obsidian vault, switching the underlying harness usually provides limited additional value compared with the ongoing integration and maintenance cost.
+4. Integrating a separate CLI from every model vendor is not sustainable. OpenCode and Pi already support multiple model vendors through API configuration. Codex and Claude Code can also use alternative model endpoints through configuration. Inside an Obsidian vault, switching the underlying harness usually provides limited additional value compared with the ongoing integration and maintenance cost.
 
 You may open an issue to describe an unmet provider-related use case, but please do not submit a new-provider implementation. An issue does not imply that the provider will be added.
 
@@ -64,7 +64,7 @@ npm install
 npm run dev
 ```
 
-For a bug fix or new behavior, add or update a failing test first, then make the narrowest implementation change that passes it. Use focused checks while iterating. Before submitting a pull request, run the full verification suite:
+For a bug fix or new behavior, add or update a failing test first, then make the narrowest implementation change that passes it. Use focused checks while iterating. Before submitting a pull request with code or test changes, run the full verification suite:
 
 ```bash
 npm run typecheck
@@ -78,8 +78,11 @@ For local iteration, `npm run test:affected -- --base origin/main` selects tests
 committed, staged, unstaged and untracked changes using the CI dependency graph.
 It prints the selection and runs the selected Jest and script checks.
 Use `--list` to inspect without running, `--full` for all tests, and `-- --runInBand` to forward Jest
-options. Unknown inputs or an unavailable base retain full coverage. This does not
-replace typecheck, lint, build/performance checks or native checks on other platforms.
+options. Unknown inputs or an unavailable base retain full coverage. For code or test
+changes, this does not replace typecheck, lint, build/performance checks or native
+checks on other platforms.
+
+For documentation-only changes, a production build is not required. Follow the authoritative rules in [AGENTS.md](AGENTS.md): run `git diff --check` and the affected documentation tests.
 
 Full Linux CI verification uses two Jest shards, with script checks on the first
 shard. Affected selections use one job. Each Linux test job uses three workers.
@@ -94,7 +97,7 @@ npm run test:cross-platform -- --maxWorkers=2 --json --outputFile=.context/nativ
 node scripts/summarize-jest-results.mjs .context/native.json .context/native-timings
 ```
 
-CI runs native smoke with three workers on both macOS and Windows. The local wrapper
+CI runs native smoke with three workers on macOS and one on Windows. The local wrapper
 remains serial unless a worker count is supplied. Compare the same selection and
 commit, including fixture setup/teardown, and report elapsed time separately from
 summed suite durations. Recheck timings on the actual CI runners before increasing

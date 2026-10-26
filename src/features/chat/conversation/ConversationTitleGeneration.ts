@@ -1,6 +1,6 @@
 import { Notice } from 'obsidian';
 
-import { extractUserDisplayContent } from '@/core/prompt/promptContext';
+import { getUserDisplayText } from '@/core/prompt/promptContext';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { TitleGenerationService } from '@/core/providers/types';
 import type { ChatMessage } from '@/core/types';
@@ -8,7 +8,8 @@ import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { t } from '@/i18n/i18n';
 
 export interface ConversationTitleGenerationDeps {
-  host: Pick<ChatFeatureHost, 'settings' | 'getConversationById' | 'renameConversation' | 'updateConversation'>;
+  host: Pick<ChatFeatureHost,
+    'settings' | 'getConversationById' | 'renameConversation' | 'updateConversation' | 'completeConversationTitleGeneration'>;
   getService: () => TitleGenerationService | null;
   /** Observes stored title status changes, such as a session list that renders them. */
   onChanged?: () => void;
@@ -17,13 +18,12 @@ export interface ConversationTitleGenerationDeps {
 /** The first sentence of the first message, kept when generation is off or fails. */
 export function fallbackConversationTitle(firstMessage: string): string {
   const firstSentence = firstMessage.split(/[.!?\n]/)[0].trim();
-  const autoTitle = firstSentence.substring(0, 50);
+  let autoTitle = firstSentence.substring(0, 50);
+  if (/[\uD800-\uDBFF]$/.test(autoTitle) && /^[\uDC00-\uDFFF]/.test(firstSentence.slice(50))) {
+    autoTitle = autoTitle.slice(0, -1);
+  }
   const suffix = firstSentence.length > 50 ? '...' : '';
   return `${autoTitle}${suffix}`;
-}
-
-function userContentOf(message: ChatMessage): string {
-  return message.displayContent ?? extractUserDisplayContent(message.content) ?? message.content;
 }
 
 /**
@@ -36,7 +36,7 @@ export class ConversationTitleGeneration {
   /** Names a new Conversation from its first user message, then generates a title in the background. */
   async titleFirstTurn(conversationId: string, firstUserMessage: ChatMessage): Promise<void> {
     const { host } = this.deps;
-    const userContent = userContentOf(firstUserMessage);
+    const userContent = getUserDisplayText(firstUserMessage);
     const fallbackTitle = fallbackConversationTitle(userContent);
     await host.renameConversation(conversationId, fallbackTitle);
 
@@ -69,7 +69,7 @@ export class ConversationTitleGeneration {
     if (!firstUserMessage) return;
 
     await this.#markPending(conversationId);
-    await this.#generate(service, conversationId, userContentOf(firstUserMessage), conversation.title);
+    await this.#generate(service, conversationId, getUserDisplayText(firstUserMessage), conversation.title);
   }
 
   async #markPending(conversationId: string): Promise<void> {
@@ -85,19 +85,7 @@ export class ConversationTitleGeneration {
   ): Promise<void> {
     const { host } = this.deps;
     return service.generateTitle(conversationId, userContent, async (id, result) => {
-      const current = await host.getConversationById(id);
-      if (!current) return;
-
-      // A manual rename during generation takes precedence over the generated title.
-      const userRenamed = current.title !== expectedTitle;
-      if (result.success && !userRenamed) {
-        await host.renameConversation(id, result.title);
-        await host.updateConversation(id, { titleGenerationStatus: 'success' });
-      } else if (!userRenamed) {
-        await host.updateConversation(id, { titleGenerationStatus: 'failed' });
-      } else {
-        await host.updateConversation(id, { titleGenerationStatus: undefined });
-      }
+      await host.completeConversationTitleGeneration(id, expectedTitle, result.success ? result.title : null);
       this.deps.onChanged?.();
     });
   }

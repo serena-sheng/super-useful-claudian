@@ -1,5 +1,3 @@
-import * as fs from 'node:fs/promises';
-
 import { copyProviderHistoryState } from '@/core/providers/providerHistory';
 
 import type {
@@ -11,11 +9,13 @@ import type {
   ProviderHistoryUpdate,
 } from '../../../core/providers/types';
 import type { ChatMessage } from '../../../core/types';
+import { decodeCodexConfig } from '../config';
 import { encodeCodexModelSelectionId } from '../modelSelection';
-import type { CodexProviderState } from '../types';
-import { getCodexState } from '../types';
+import type { CodexPreviousSegment, CodexProviderState } from '../types';
+import { clearCodexResumeState, getCodexState } from '../types';
 import {
   CODEX_HISTORY_LOOKUP_TIMEOUT_MS,
+  type CodexHistoryPathContext,
   getCodexArchivedTranscriptRoots,
   resolveCodexSessionFileHint,
   resolveCodexTranscriptRootHint,
@@ -25,25 +25,15 @@ import {
   deriveCodexSessionsRootFromSessionPath,
   findCodexSessionFileAsync,
   parseCodexSessionFileAsync,
-  parseCodexSessionRecords,
   parseCodexSessionTurns,
   readCodexSessionModel,
+  readCodexSessionRecords,
 } from './CodexHistoryStore';
 import { hydrateCodexSubagentHistory } from './CodexSubagentHistory';
 
-async function readSessionContent(sessionFilePath: string): Promise<string> {
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 10_000);
-  try {
-    return await fs.readFile(sessionFilePath, {
-      encoding: 'utf-8',
-      signal: controller.signal,
-    });
-  } catch {
-    return '';
-  } finally {
-    window.clearTimeout(timer);
-  }
+/** Parsed transcript turns; a missing file has none, and other read failures reject. */
+async function readSessionTurns(sessionFilePath: string, throughTurnId?: string): Promise<CodexParsedTurn[]> {
+  return parseCodexSessionTurns(await readCodexSessionRecords(sessionFilePath) ?? [], throughTurnId);
 }
 
 async function readSessionModel(
@@ -58,7 +48,22 @@ async function readSessionModel(
   }
 }
 
+/**
+ * Earlier segments are display-only: unique ids across segments, and no native checkpoint ids,
+ * so fork and rewind are offered only where the live thread can honor them.
+ */
+function toHistoryOnlyMessage(message: ChatMessage, segmentIndex: number): ChatMessage {
+  const { assistantMessageId: _assistant, userMessageId: _user, ...visible } = message;
+  return { ...visible, id: `codex-segment-${segmentIndex}:${message.id}` };
+}
+
 export class CodexConversationHistoryService implements ProviderConversationHistoryService {
+  #pathContext(context: ProviderHistoryPathContext | undefined): CodexHistoryPathContext | undefined {
+    if (!context) return undefined;
+    const { config, environment, hostPlatform, vaultPath } = context;
+    const { installationMethod, wslDistroOverride } = decodeCodexConfig(config);
+    return { environment, hostPlatform, vaultPath, installation: { installationMethod, wslDistroOverride } };
+  }
 
   hasConversationModelRecoverySource(conversation: ProviderHistoryInput): boolean {
     const state = getCodexState(conversation.providerState);
@@ -74,8 +79,9 @@ export class CodexConversationHistoryService implements ProviderConversationHist
   async recoverConversationModelSelection(
     conversation: ProviderHistoryInput,
     _vaultPath: string | null,
-    pathContext?: ProviderHistoryPathContext,
+    historyPathContext?: ProviderHistoryPathContext,
   ): Promise<string | null> {
+    const pathContext = this.#pathContext(historyPathContext);
     const state = getCodexState(conversation.providerState);
     const isPendingFork = this.isPendingForkConversation(conversation);
     const threadId = isPendingFork
@@ -143,39 +149,63 @@ export class CodexConversationHistoryService implements ProviderConversationHist
   async hydrateConversationHistory(
     input: ProviderHistoryInput,
     _vaultPath: string | null,
-    pathContext?: ProviderHistoryPathContext,
+    historyPathContext?: ProviderHistoryPathContext,
   ): Promise<ProviderHistoryUpdate> {
+    const pathContext = this.#pathContext(historyPathContext);
     const conversation = copyProviderHistoryState(input);
     const lookupDeadline = Date.now() + CODEX_HISTORY_LOOKUP_TIMEOUT_MS;
     const state = getCodexState(conversation.providerState);
-    const transcriptRootPath = resolveCodexTranscriptRootHint(
-      state.transcriptRootPath ?? deriveCodexSessionsRootFromSessionPath(state.sessionFilePath),
-      pathContext,
-    );
 
     // Pending fork with existing in-memory messages: keep them as-is
     if (this.isPendingForkConversation(conversation) && conversation.messages.length > 0) {
       return conversation;
     }
 
+    // The live thread is read first so unavailable earlier segments cannot exhaust its lookup budget.
+    const currentMessages = await this.#hydrateCurrentSegment(
+      conversation,
+      state,
+      pathContext,
+      lookupDeadline,
+    );
+    const previousDeadline = Date.now() + CODEX_HISTORY_LOOKUP_TIMEOUT_MS;
+    const previousMessages: ChatMessage[] = [];
+    const liveThreadId = state.threadId ?? conversation.sessionId;
+    for (const [index, segment] of (state.previousSegments ?? []).entries()) {
+      // The live thread already contains a segment that was rebound; render it once.
+      if (segment.threadId && segment.threadId === liveThreadId) continue;
+      const messages = await this.#readPreviousSegment(segment, pathContext, previousDeadline);
+      previousMessages.push(...messages.map(message => toHistoryOnlyMessage(message, index)));
+    }
+    if (previousMessages.length === 0 && !currentMessages) {
+      return conversation;
+    }
+
+    conversation.messages = [...previousMessages, ...(currentMessages ?? [])];
+    if (currentMessages && !this.isPendingForkConversation(conversation)) {
+      this.#markNativeConversationContextEstablished(conversation);
+    }
+    return conversation;
+  }
+
+  /**
+   * Visible history of the live binding; null when it has no readable transcript. Path
+   * corrections for the live thread are written back to the conversation's provider state.
+   */
+  async #hydrateCurrentSegment(
+    conversation: ProviderHistoryState,
+    state: CodexProviderState,
+    pathContext: CodexHistoryPathContext | undefined,
+    lookupDeadline: number,
+  ): Promise<ChatMessage[] | null> {
+    const transcriptRootPath = resolveCodexTranscriptRootHint(
+      state.transcriptRootPath ?? deriveCodexSessionsRootFromSessionPath(state.sessionFilePath),
+      pathContext,
+    );
+
     // Pending fork without messages: hydrate from source transcript truncated at resumeAt
     if (this.isPendingForkConversation(conversation)) {
-      const sourceSessionFile = await this.#resolveSourceSessionFile(
-        state,
-        pathContext,
-        lookupDeadline,
-      );
-      if (!sourceSessionFile) return conversation;
-
-      const turns = parseCodexSessionTurns(await readSessionContent(sourceSessionFile), state.forkSource!.resumeAt);
-      const resumeAt = state.forkSource!.resumeAt;
-      const truncated = this.#truncateTurnsAtCheckpoint(turns, resumeAt);
-      if (!truncated) {
-        return conversation;
-      }
-      conversation.messages = truncated.flatMap(t => t.messages);
-      await this.#hydrateSubagents(conversation.messages, sourceSessionFile, state.forkSourceTranscriptRootPath, pathContext);
-      return conversation;
+      return await this.#readPendingForkSegment(state, pathContext, lookupDeadline);
     }
 
     // Established fork: source prefix + fork-only turns
@@ -185,70 +215,42 @@ export class CodexConversationHistoryService implements ProviderConversationHist
         pathContext,
         lookupDeadline,
       );
-      const forkSessionFile = await resolveCodexSessionFileHint(
+      const forkSessionFile = await this.#resolveThreadSessionFile(
         state.sessionFilePath,
         state.threadId,
+        transcriptRootPath,
         pathContext,
         lookupDeadline,
-      ) ?? (state.threadId && transcriptRootPath
-        ? await findCodexSessionFileAsync(
-            state.threadId,
-            transcriptRootPath,
-            Math.max(0, lookupDeadline - Date.now()),
-          )
-        : null);
+      );
 
       if (sourceSessionFile && forkSessionFile) {
-        const sourceContent = parseCodexSessionRecords(await readSessionContent(sourceSessionFile));
-        const sourceTurns = parseCodexSessionTurns(sourceContent);
-        const forkTurns = parseCodexSessionTurns(await readSessionContent(forkSessionFile));
-
-        const resumeAt = state.forkSource.resumeAt;
-        const sourcePrefix = this.#truncateTurnsAtCheckpoint(parseCodexSessionTurns(sourceContent, resumeAt), resumeAt);
-        if (!sourcePrefix) {
-          return conversation;
-        }
-        const sourceTurnIds = new Set(sourceTurns.map(t => t.turnId).filter(Boolean));
-        const forkOnlyTurns = forkTurns.filter(t => !t.turnId || !sourceTurnIds.has(t.turnId));
-
-        const sourceMessages = sourcePrefix.flatMap(t => t.messages);
-        const forkMessages = forkOnlyTurns.flatMap(t => t.messages);
-        const messages = [...sourceMessages, ...forkMessages];
-
-        if (messages.length === 0) {
-          return conversation;
-        }
-
-        await this.#hydrateSubagents(sourceMessages, sourceSessionFile, state.forkSourceTranscriptRootPath, pathContext);
-        await this.#hydrateSubagents(forkMessages, forkSessionFile, transcriptRootPath, pathContext);
-        conversation.messages = messages;
-        this.#markNativeConversationContextEstablished(conversation);
-        return conversation;
+        const messages = await this.#readEstablishedForkMessages(
+          state,
+          sourceSessionFile,
+          forkSessionFile,
+          await readSessionTurns(forkSessionFile),
+          transcriptRootPath,
+          pathContext,
+        );
+        return messages && messages.length > 0 ? messages : null;
       }
     }
 
     // Normal hydration
     const threadId = state.threadId ?? conversation.sessionId ?? null;
-    const sessionFilePath = await resolveCodexSessionFileHint(
+    const sessionFilePath = await this.#resolveThreadSessionFile(
       state.sessionFilePath,
       threadId,
+      transcriptRootPath,
       pathContext,
       lookupDeadline,
-    ) ?? (threadId && transcriptRootPath
-      ? await findCodexSessionFileAsync(
-          threadId,
-          transcriptRootPath,
-          Math.max(0, lookupDeadline - Date.now()),
-        )
-      : null);
+    );
     const resolvedTranscriptRootPath = transcriptRootPath
       ?? deriveCodexSessionsRootFromSessionPath(sessionFilePath);
 
     if (!sessionFilePath) {
-      return conversation;
+      return null;
     }
-
-
 
     if (sessionFilePath !== state.sessionFilePath) {
       conversation.providerState = {
@@ -267,18 +269,178 @@ export class CodexConversationHistoryService implements ProviderConversationHist
 
     const sdkMessages = await parseCodexSessionFileAsync(sessionFilePath);
     if (sdkMessages.length === 0) {
-      return conversation;
+      return null;
     }
 
     await this.#hydrateSubagents(sdkMessages, sessionFilePath, resolvedTranscriptRootPath, pathContext);
-    conversation.messages = sdkMessages;
-    this.#markNativeConversationContextEstablished(conversation);
-    return conversation;
+    return sdkMessages;
+  }
+
+  /**
+   * Rebuilds an invalidated segment as its live hydration would have shown it. Previous
+   * segments are best-effort: a missing or unreadable transcript contributes nothing.
+   */
+  async #readPreviousSegment(
+    segment: CodexPreviousSegment,
+    pathContext: CodexHistoryPathContext | undefined,
+    lookupDeadline: number,
+  ): Promise<ChatMessage[]> {
+    try {
+      if (segment.forkSource && !segment.threadId) {
+        return await this.#readPendingForkSegment(segment, pathContext, lookupDeadline) ?? [];
+      }
+      const transcriptRootPath = resolveCodexTranscriptRootHint(
+        segment.transcriptRootPath ?? deriveCodexSessionsRootFromSessionPath(segment.sessionFilePath),
+        pathContext,
+      );
+      const thread = await this.#readPreviousSegmentThread(
+        segment,
+        transcriptRootPath,
+        pathContext,
+        lookupDeadline,
+      );
+      if (!thread) {
+        // A fork whose own transcript is gone still shows its source prefix, as live hydration did.
+        return segment.forkSource
+          ? await this.#readPendingForkSegment(segment, pathContext, lookupDeadline) ?? []
+          : [];
+      }
+      const { sessionFile, turns } = thread;
+      if (segment.forkSource) {
+        const sourceSessionFile = await this.#resolveSourceSessionFile(
+          segment,
+          pathContext,
+          lookupDeadline,
+        );
+        if (sourceSessionFile) {
+          return await this.#readEstablishedForkMessages(
+            segment,
+            sourceSessionFile,
+            sessionFile,
+            turns,
+            transcriptRootPath,
+            pathContext,
+          ) ?? [];
+        }
+      }
+      const messages = turns.flatMap(turn => turn.messages);
+      await this.#hydrateSubagents(messages, sessionFile, transcriptRootPath, pathContext);
+      return messages;
+    } catch {
+      return [];
+    }
+  }
+
+  async #readPendingForkSegment(
+    state: CodexPreviousSegment,
+    pathContext: CodexHistoryPathContext | undefined,
+    lookupDeadline: number,
+  ): Promise<ChatMessage[] | null> {
+    const sourceSessionFile = await this.#resolveSourceSessionFile(
+      state,
+      pathContext,
+      lookupDeadline,
+    );
+    if (!sourceSessionFile) return null;
+
+    const resumeAt = state.forkSource!.resumeAt;
+    const turns = await readSessionTurns(sourceSessionFile, resumeAt);
+    const truncated = this.#truncateTurnsAtCheckpoint(turns, resumeAt);
+    if (!truncated) {
+      return null;
+    }
+    const messages = truncated.flatMap(t => t.messages);
+    await this.#hydrateSubagents(messages, sourceSessionFile, state.forkSourceTranscriptRootPath, pathContext);
+    return messages;
+  }
+
+  /** Source prefix through the checkpoint plus fork-only turns; null when the checkpoint is missing. */
+  async #readEstablishedForkMessages(
+    state: CodexPreviousSegment,
+    sourceSessionFile: string,
+    forkSessionFile: string,
+    forkTurns: CodexParsedTurn[],
+    transcriptRootPath: string | null,
+    pathContext: CodexHistoryPathContext | undefined,
+  ): Promise<ChatMessage[] | null> {
+    const sourceRecords = await readCodexSessionRecords(sourceSessionFile) ?? [];
+    const sourceTurns = parseCodexSessionTurns(sourceRecords);
+
+    const resumeAt = state.forkSource!.resumeAt;
+    const sourcePrefix = this.#truncateTurnsAtCheckpoint(parseCodexSessionTurns(sourceRecords, resumeAt), resumeAt);
+    if (!sourcePrefix) {
+      return null;
+    }
+    const sourceTurnIds = new Set(sourceTurns.map(t => t.turnId).filter(Boolean));
+    const forkOnlyTurns = forkTurns.filter(t => !t.turnId || !sourceTurnIds.has(t.turnId));
+
+    const sourceMessages = sourcePrefix.flatMap(t => t.messages);
+    const forkMessages = forkOnlyTurns.flatMap(t => t.messages);
+
+    await this.#hydrateSubagents(sourceMessages, sourceSessionFile, state.forkSourceTranscriptRootPath, pathContext);
+    await this.#hydrateSubagents(forkMessages, forkSessionFile, transcriptRootPath, pathContext);
+    return [...sourceMessages, ...forkMessages];
+  }
+
+  async #resolveThreadSessionFile(
+    persistedPath: string | undefined,
+    threadId: string | null,
+    transcriptRootPath: string | null,
+    pathContext: CodexHistoryPathContext | undefined,
+    lookupDeadline: number,
+  ): Promise<string | null> {
+    return await resolveCodexSessionFileHint(
+      persistedPath,
+      threadId,
+      pathContext,
+      lookupDeadline,
+    ) ?? (threadId && transcriptRootPath
+      ? await findCodexSessionFileAsync(
+          threadId,
+          transcriptRootPath,
+          Math.max(0, lookupDeadline - Date.now()),
+        )
+      : null);
+  }
+
+  /**
+   * The segment's own thread turns. A saved path can go stale when Codex archives the rollout,
+   * so a missing or empty transcript falls back to the archived roots.
+   */
+  async #readPreviousSegmentThread(
+    segment: CodexPreviousSegment,
+    transcriptRootPath: string | null,
+    pathContext: CodexHistoryPathContext | undefined,
+    lookupDeadline: number,
+  ): Promise<{ sessionFile: string; turns: CodexParsedTurn[] } | null> {
+    const resolved = await this.#resolveThreadSessionFile(
+      segment.sessionFilePath,
+      segment.threadId ?? null,
+      transcriptRootPath,
+      pathContext,
+      lookupDeadline,
+    );
+    const resolvedTurns = resolved ? await readSessionTurns(resolved) : [];
+    if (resolved && resolvedTurns.length > 0) return { sessionFile: resolved, turns: resolvedTurns };
+    if (!segment.threadId) return null;
+
+    for (const root of getCodexArchivedTranscriptRoots(
+      pathContext,
+      transcriptRootPath ? [transcriptRootPath] : [],
+    )) {
+      const remainingMs = Math.max(0, lookupDeadline - Date.now());
+      if (remainingMs === 0) break;
+      const archived = await findCodexSessionFileAsync(segment.threadId, root, remainingMs);
+      if (!archived || archived === resolved) continue;
+      const turns = await readSessionTurns(archived);
+      if (turns.length > 0) return { sessionFile: archived, turns };
+    }
+    return null;
   }
 
   async #hydrateSubagents(
     messages: ChatMessage[], sessionFilePath: string, rootHint: string | null | undefined,
-    pathContext?: ProviderHistoryPathContext,
+    pathContext?: CodexHistoryPathContext,
   ): Promise<void> {
     const root = resolveCodexTranscriptRootHint(rootHint ?? deriveCodexSessionsRootFromSessionPath(sessionFilePath), pathContext);
     await hydrateCodexSubagentHistory(messages, [
@@ -318,14 +480,7 @@ export class CodexConversationHistoryService implements ProviderConversationHist
       return { outcome: 'preserve' };
     }
 
-    const providerState = { ...(conversation.providerState ?? {}) };
-    delete providerState.threadId;
-    delete providerState.nativeConversationContextEstablished;
-    delete providerState.pendingForkTarget;
-    conversation.sessionId = null;
-    conversation.providerState = Object.keys(providerState).length > 0
-      ? providerState
-      : undefined;
+    clearCodexResumeState(conversation);
     return { outcome: 'reset', changes: conversation };
   }
 
@@ -350,13 +505,19 @@ export class CodexConversationHistoryService implements ProviderConversationHist
     resumeAt: string,
     sourceProviderState?: Record<string, unknown>,
     _vaultPath?: string | null,
-    pathContext?: ProviderHistoryPathContext,
+    historyPathContext?: ProviderHistoryPathContext,
   ): Promise<Record<string, unknown>> {
+    const pathContext = this.#pathContext(historyPathContext);
     const sourceState = getCodexState(sourceProviderState);
     const sourceTranscriptRootPath = sourceState.transcriptRootPath
       ?? deriveCodexSessionsRootFromSessionPath(sourceState.sessionFilePath);
     const providerState: CodexProviderState = {
       forkSource: { sessionId: sourceSessionId, resumeAt },
+      // Earlier segments stay history-only; the fork shows them before its source prefix.
+      ...(sourceState.previousSegments?.length
+        ? { previousSegments: sourceState.previousSegments.map(segment => ({ ...segment })) }
+        : {}),
+      ...(sourceState.sessionToolVersion !== undefined ? { sessionToolVersion: sourceState.sessionToolVersion } : {}),
       ...(
         sourceState.workspaceDependencyToolVersion !== undefined
           ? { workspaceDependencyToolVersion: sourceState.workspaceDependencyToolVersion }
@@ -371,7 +532,7 @@ export class CodexConversationHistoryService implements ProviderConversationHist
     };
     const deadline = Date.now() + CODEX_HISTORY_LOOKUP_TIMEOUT_MS;
     let sourcePath = await this.#resolveSourceSessionFile(providerState, pathContext, deadline);
-    let turns = sourcePath ? parseCodexSessionTurns(await readSessionContent(sourcePath)) : [];
+    let turns = sourcePath ? await readSessionTurns(sourcePath) : [];
     if (turns.length === 0) {
       const trustedRoot = resolveCodexTranscriptRootHint(sourceTranscriptRootPath, pathContext);
       const roots = [
@@ -384,7 +545,7 @@ export class CodexConversationHistoryService implements ProviderConversationHist
         );
         if (!candidate || candidate === sourcePath) continue;
         sourcePath = candidate;
-        turns = parseCodexSessionTurns(await readSessionContent(candidate));
+        turns = await readSessionTurns(candidate);
         if (turns.length > 0) break;
       }
     }
@@ -408,8 +569,8 @@ export class CodexConversationHistoryService implements ProviderConversationHist
   // ---------------------------------------------------------------------------
 
   async #resolveSourceSessionFile(
-    state: CodexProviderState,
-    pathContext?: ProviderHistoryPathContext,
+    state: CodexPreviousSegment,
+    pathContext?: CodexHistoryPathContext,
     lookupDeadline = Date.now() + CODEX_HISTORY_LOOKUP_TIMEOUT_MS,
   ): Promise<string | null> {
     if (!state.forkSource) return null;

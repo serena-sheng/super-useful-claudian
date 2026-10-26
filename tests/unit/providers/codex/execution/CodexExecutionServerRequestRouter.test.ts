@@ -1,10 +1,14 @@
 import type {
+  ProviderApprovalInteractionRequest,
   ProviderInteractionPort,
   ProviderQuestionInteractionRequest,
   ProviderQuestionInteractionResponse,
   ProviderToolPolicy,
 } from '@/core/execution';
+import { setLocale } from '@/i18n/i18n';
 import { CodexExecutionServerRequestRouter } from '@/providers/codex/execution/CodexExecutionServerRequestRouter';
+import { CodexDynamicToolRegistry } from '@/providers/codex/runtime/CodexDynamicToolRegistry';
+import { createCodexSessionTools } from '@/providers/codex/runtime/CodexSessionTools';
 
 const confirmationRequest = {
   threadId: 'thread-confirmation',
@@ -32,6 +36,7 @@ function createRouter(
     (threadId, turnId) => threadId === 'thread-confirmation' && turnId === 'turn-confirmation',
   );
   router.setActiveTurn({
+    cancellation: new AbortController(),
     localTurnId: 'local-turn',
     nativeThreadId: 'thread-confirmation',
     nativeTurnId: 'turn-confirmation',
@@ -50,6 +55,23 @@ function createPendingQuestion() {
 }
 
 describe('CodexExecutionServerRequestRouter', () => {
+  afterEach(() => setLocale('en'));
+
+  it.each(['claudian_list_destinations', 'claudian_sessions.claudian_list_destinations'])(
+    'denies session tools even when the allow-list names %s, while ordinary named tools still work', async name => {
+      const port = { list: jest.fn(async () => ({ sessions: [] })), send: jest.fn(), read: jest.fn() };
+      const router = createRouter(jest.fn(), { kind: 'allow-list', names: [name, 'ordinary'] });
+      const registry = new CodexDynamicToolRegistry();
+      for (const registration of createCodexSessionTools(port)) registry.register(registration);
+      registry.register({ includeInThreadStart: true, tool: { type: 'function', name: 'ordinary', description: '', inputSchema: {} }, handler: async () => ({ success: true, contentItems: [] }) });
+      router.setDynamicToolRegistry(registry);
+      const params = { threadId: 'thread-confirmation', turnId: 'turn-confirmation', callId: 'call', arguments: {} };
+      await expect(router.handleServerRequest('session', 'item/tool/call', { ...params, namespace: 'claudian_sessions', tool: 'claudian_list_destinations' })).resolves.toMatchObject({ success: false });
+      expect(port.list).not.toHaveBeenCalled();
+      await expect(router.handleServerRequest('ordinary', 'item/tool/call', { ...params, namespace: null, tool: 'ordinary' })).resolves.toMatchObject({ success: true });
+    },
+  );
+
   it('requires an explicit answer for the captured Computer Use confirmation, even with unrestricted tools', async () => {
     const askUserQuestion = jest.fn(async (request: ProviderQuestionInteractionRequest) => ({
       interactionId: request.interactionId,
@@ -68,6 +90,7 @@ describe('CodexExecutionServerRequestRouter', () => {
       (threadId, turnId) => threadId === 'thread-confirmation' && turnId === 'turn-confirmation',
     );
     router.setActiveTurn({
+    cancellation: new AbortController(),
       localTurnId: 'local-turn',
       nativeThreadId: 'thread-confirmation',
       nativeTurnId: 'turn-confirmation',
@@ -110,7 +133,8 @@ describe('CodexExecutionServerRequestRouter', () => {
     );
   });
 
-  it('leaves confirmation pending until the user explicitly submits a choice', async () => {
+  it.each(['en', 'zh-CN'] as const)('leaves localized confirmation pending until the user explicitly submits a choice (%s)', async locale => {
+    setLocale(locale);
     const question = createPendingQuestion();
     const router = createRouter(question.askUserQuestion, { kind: 'unrestricted' });
     const result = router.handleServerRequest('pending', 'mcpServer/elicitation/request', confirmationRequest);
@@ -121,13 +145,13 @@ describe('CodexExecutionServerRequestRouter', () => {
     expect(settled).toBe(false);
     expect(request.input).toMatchObject({
       questions: [{
-        question: 'MCP server: cua_repl\n\nAllow Computer Use to use "Obsidian"?',
+        question: `${locale === 'en' ? 'MCP server:' : 'MCP 服务器：'} cua_repl\n\nAllow Computer Use to use "Obsidian"?`,
         multiSelect: false,
         isOther: false,
         options: [
-          expect.objectContaining({ value: 'cancel' }),
-          expect.objectContaining({ value: 'decline' }),
-          expect.objectContaining({ value: 'accept' }),
+          expect.objectContaining({ value: 'cancel', label: locale === 'en' ? 'Cancel' : '取消' }),
+          expect.objectContaining({ value: 'decline', label: locale === 'en' ? 'Decline' : '拒绝' }),
+          expect.objectContaining({ value: 'accept', label: locale === 'en' ? 'Allow' : '允许' }),
         ],
       }],
     });
@@ -203,6 +227,7 @@ describe('CodexExecutionServerRequestRouter', () => {
     if (invalidation === 'abort') router.abortAll('cancelled');
     else if (invalidation === 'native resolution') router.resolveNativeRequest('stale', 'thread-confirmation');
     else router.setActiveTurn({
+    cancellation: new AbortController(),
       localTurnId: 'different-local-turn',
       nativeThreadId: 'thread-confirmation',
       nativeTurnId: 'different-native-turn',
@@ -287,4 +312,93 @@ describe('CodexExecutionServerRequestRouter', () => {
       .resolves.toEqual({ action: 'cancel', content: null });
     expect(router.resolveNativeRequest('failed', 'thread-confirmation')).toBe(false);
   });
+
+  it('wraps a literal own __proto__ user-input answer as an own key through serialization', async () => {
+    const router = createRouter(async request => ({
+      interactionId: request.interactionId,
+      answers: JSON.parse('{"__proto__":"Blue"}') as ProviderQuestionInteractionResponse['answers'],
+    }));
+    await expect(router.handleServerRequest('own-proto', 'item/tool/requestUserInput', {
+      threadId: 'thread-confirmation',
+      turnId: 'turn-confirmation',
+      itemId: 'question-item',
+      questions: JSON.parse('[{"id":"__proto__","header":"Color?","question":"Color?","options":null,"isOther":false,"isSecret":false}]'),
+    })).resolves.toEqual(JSON.parse('{"answers":{"__proto__":{"answers":["Blue"]}}}'));
+
+    const wrapped = createRouter(async request => ({
+      interactionId: request.interactionId,
+      answers: JSON.parse('{"__proto__":["Blue",""]}') as ProviderQuestionInteractionResponse['answers'],
+    }));
+    const result = await wrapped.handleServerRequest('own-proto-array', 'item/tool/requestUserInput', {
+      threadId: 'thread-confirmation',
+      turnId: 'turn-confirmation',
+      itemId: 'question-item',
+      questions: [],
+    });
+    expect(Object.hasOwn((result as { answers: object }).answers, '__proto__')).toBe(true);
+    expect(JSON.stringify(result)).toBe('{"answers":{"__proto__":{"answers":["Blue"]}}}');
+  });
+
+  it('keeps user-input blank filtering and empty envelopes while rejecting mismatched interactions', async () => {
+    const router = createRouter(async request => ({
+      interactionId: request.interactionId,
+      answers: JSON.parse('{"color":["","  ","Blue"],"blank":"   "}') as ProviderQuestionInteractionResponse['answers'],
+    }));
+    await expect(router.handleServerRequest('filtered', 'item/tool/requestUserInput', {
+      threadId: 'thread-confirmation',
+      turnId: 'turn-confirmation',
+      itemId: 'question-item',
+      questions: [],
+    })).resolves.toEqual(JSON.parse('{"answers":{"color":{"answers":["Blue"]},"blank":{"answers":[]}}}'));
+
+    const empty = createRouter(async request => ({ interactionId: request.interactionId, answers: {} }));
+    await expect(empty.handleServerRequest('empty', 'item/tool/requestUserInput', {
+      threadId: 'thread-confirmation',
+      turnId: 'turn-confirmation',
+      itemId: 'question-item',
+      questions: [],
+    })).resolves.toEqual({ answers: {} });
+
+    const mismatched = createRouter(async () => ({ interactionId: 'another-interaction', answers: JSON.parse('{"color":"Blue"}') as ProviderQuestionInteractionResponse['answers'] }));
+    await expect(mismatched.handleServerRequest('mismatch', 'item/tool/requestUserInput', {
+      threadId: 'thread-confirmation',
+      turnId: 'turn-confirmation',
+      itemId: 'question-item',
+      questions: [],
+    })).resolves.toEqual({ answers: {} });
+
+    const dismissed = createRouter(async request => ({ interactionId: request.interactionId, answers: null }));
+    await expect(dismissed.handleServerRequest('dismissed', 'item/tool/requestUserInput', {
+      threadId: 'thread-confirmation',
+      turnId: 'turn-confirmation',
+      itemId: 'question-item',
+      questions: [],
+    })).resolves.toEqual({ answers: {} });
+  });
+});
+
+
+it('localizes Codex command approval labels without changing native decisions', async () => {
+  setLocale('zh-CN');
+  const requestApproval = jest.fn(async (request: ProviderApprovalInteractionRequest) => ({
+    interactionId: request.interactionId, decision: 'allow' as const,
+  }));
+  const router = new CodexExecutionServerRequestRouter('session-confirmation', {
+    requestApproval,
+    askUserQuestion: async request => ({ interactionId: request.interactionId, answers: {} }),
+    dismissInteraction: () => undefined,
+  }, () => true);
+  router.setActiveTurn({ localTurnId: 'local-turn', nativeThreadId: 'thread-confirmation', nativeTurnId: 'turn-confirmation', toolPolicy: { kind: 'provider-default' }, cancellation: new AbortController() });
+  try {
+    await expect(router.handleServerRequest('command', 'item/commandExecution/requestApproval', {
+      threadId: 'thread-confirmation', turnId: 'turn-confirmation', itemId: 'command-item', command: 'npm test',
+    })).resolves.toEqual({ decision: 'accept' });
+    const [request] = requestApproval.mock.calls[0];
+    expect(request.description).toBe('执行：npm test');
+    expect(request.decisionOptions?.map(option => [option.label, option.value])).toEqual([
+      ['允许一次', 'allow-once'], ['始终允许', 'allow-always'], ['拒绝', 'deny'],
+    ]);
+  } finally {
+    setLocale('en');
+  }
 });

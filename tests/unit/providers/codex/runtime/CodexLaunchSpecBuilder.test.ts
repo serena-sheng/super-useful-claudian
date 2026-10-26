@@ -2,6 +2,7 @@ import type * as ChildProcess from 'child_process';
 
 import { getInstallationKey as getHostnameKey } from '@/core/device/InstallationKey';
 import { buildCodexLaunchSpec } from '@/providers/codex/runtime/CodexLaunchSpecBuilder';
+import { getCodexProviderSettings } from '@/providers/codex/settings';
 
 const childProcess = jest.requireActual<typeof ChildProcess>('child_process');
 
@@ -20,7 +21,7 @@ describe('buildCodexLaunchSpec', () => {
 
   it.each(['default', 'low', 'medium', 'high'])('applies %s verbosity only to app-server launches', (responseVerbosity) => {
     const options = {
-      settings: { providerConfigs: { codex: { responseVerbosity } } },
+      codexSettings: getCodexProviderSettings({ providerConfigs: { codex: { responseVerbosity } } }),
       resolvedCliCommand: 'codex',
       hostVaultPath: '/vault',
       env: {},
@@ -35,13 +36,13 @@ describe('buildCodexLaunchSpec', () => {
 
   it('builds a native Windows launch spec with a direct codex executable', () => {
     const spec = buildCodexLaunchSpec({
-      settings: {
+      codexSettings: getCodexProviderSettings({
         providerConfigs: {
           codex: {
             installationMethodsByHost: { [getHostnameKey()]: 'native-windows' },
           },
         },
-      },
+      }),
       resolvedCliCommand: 'C:\\Users\\user\\AppData\\Roaming\\npm\\codex.exe',
       hostVaultPath: 'C:\\repo',
       env: { OPENAI_API_KEY: 'sk-test' },
@@ -61,7 +62,7 @@ describe('buildCodexLaunchSpec', () => {
 
   it('uses the same WSL shell and working directory for an auxiliary CLI command', () => {
     const spec = buildCodexLaunchSpec({
-      settings: {},
+      codexSettings: getCodexProviderSettings({}),
       resolvedCliCommand: 'codex',
       cliArgs: ['--version'],
       hostVaultPath: 'C:\\repo',
@@ -74,14 +75,14 @@ describe('buildCodexLaunchSpec', () => {
 
   it('builds a WSL launch spec with translated cwd and distro targeting', () => {
     const spec = buildCodexLaunchSpec({
-      settings: {
+      codexSettings: getCodexProviderSettings({
         providerConfigs: {
           codex: {
             installationMethodsByHost: { [getHostnameKey()]: 'wsl' },
             wslDistroOverridesByHost: { [getHostnameKey()]: 'Ubuntu' },
           },
         },
-      },
+      }),
       resolvedCliCommand: 'codex',
       hostVaultPath: 'C:\\repo',
       env: { OPENAI_API_KEY: 'sk-test' },
@@ -108,15 +109,30 @@ describe('buildCodexLaunchSpec', () => {
     });
   });
 
+  it.each(['wsl$', 'wsl.localhost'])('launches vaults in the %s namespace using their own distro', (server) => {
+    const vault = `\\\\${server}\\Ubuntu\\home\\user\\vault`;
+    const options = {
+      codexSettings: getCodexProviderSettings({ providerConfigs: { codex: { installationMethodsByHost: { [getHostnameKey()]: 'wsl' } } } }),
+      resolvedCliCommand: 'codex', hostVaultPath: vault, env: {}, hostPlatform: 'win32' as const,
+      resolveDefaultWslDistro: () => 'Debian',
+    };
+    const spec = buildCodexLaunchSpec(options);
+    expect(spec.args).toEqual(['--distribution', 'Ubuntu', '--cd', '/home/user/vault', 'codex', 'app-server', '--listen', 'stdio://']);
+    expect(spec.pathMapper.toTargetPath(`${vault}\\note.md`)).toBe('/home/user/vault/note.md');
+    expect(() => buildCodexLaunchSpec({ ...options, executionTarget: {
+      method: 'wsl', platformFamily: 'unix', platformOs: 'linux', distroName: 'Debian',
+    } })).toThrow('does not match workspace distro');
+  });
+
   it('uses the default WSL distro when no override is configured', () => {
     const spec = buildCodexLaunchSpec({
-      settings: {
+      codexSettings: getCodexProviderSettings({
         providerConfigs: {
           codex: {
             installationMethodsByHost: { [getHostnameKey()]: 'wsl' },
           },
         },
-      },
+      }),
       resolvedCliCommand: 'codex',
       hostVaultPath: 'C:\\repo',
       env: { OPENAI_API_KEY: 'sk-test' },
@@ -149,13 +165,13 @@ describe('buildCodexLaunchSpec', () => {
     ));
 
     const spec = buildCodexLaunchSpec({
-      settings: {
+      codexSettings: getCodexProviderSettings({
         providerConfigs: {
           codex: {
             installationMethodsByHost: { [getHostnameKey()]: 'wsl' },
           },
         },
-      },
+      }),
       resolvedCliCommand: 'codex',
       hostVaultPath: 'C:\\repo',
       env: {},
@@ -189,13 +205,13 @@ describe('buildCodexLaunchSpec', () => {
     ));
 
     expect(() => buildCodexLaunchSpec({
-      settings: {
+      codexSettings: getCodexProviderSettings({
         providerConfigs: {
           codex: {
             installationMethodsByHost: { [getHostnameKey()]: 'wsl' },
           },
         },
-      },
+      }),
       resolvedCliCommand: 'codex',
       hostVaultPath: 'C:\\repo',
       env: {},
@@ -207,31 +223,31 @@ describe('buildCodexLaunchSpec', () => {
 
   it('fails fast when the workspace path cannot be represented inside WSL', () => {
     expect(() => buildCodexLaunchSpec({
-      settings: {
+      codexSettings: getCodexProviderSettings({
         providerConfigs: {
           codex: {
             installationMethodsByHost: { [getHostnameKey()]: 'wsl' },
             wslDistroOverridesByHost: { [getHostnameKey()]: 'Ubuntu' },
           },
         },
-      },
+      }),
       resolvedCliCommand: 'codex',
       hostVaultPath: '\\\\server\\share\\repo',
       env: {},
       hostPlatform: 'win32',
-    })).toThrow('WSL mode only supports Windows drive paths and \\\\wsl$ workspace paths');
+    })).toThrow('WSL mode only supports Windows drive paths and \\\\wsl$ or \\\\wsl.localhost workspace paths');
   });
 
   it('fails fast when the selected distro does not match a \\\\wsl$ workspace path', () => {
     expect(() => buildCodexLaunchSpec({
-      settings: {
+      codexSettings: getCodexProviderSettings({
         providerConfigs: {
           codex: {
             installationMethodsByHost: { [getHostnameKey()]: 'wsl' },
             wslDistroOverridesByHost: { [getHostnameKey()]: 'Debian' },
           },
         },
-      },
+      }),
       resolvedCliCommand: 'codex',
       hostVaultPath: '\\\\wsl$\\Ubuntu\\home\\user\\repo',
       env: {},
@@ -241,13 +257,13 @@ describe('buildCodexLaunchSpec', () => {
 
   it('fails fast when WSL mode cannot determine a distro for transcript mapping', () => {
     expect(() => buildCodexLaunchSpec({
-      settings: {
+      codexSettings: getCodexProviderSettings({
         providerConfigs: {
           codex: {
             installationMethodsByHost: { [getHostnameKey()]: 'wsl' },
           },
         },
-      },
+      }),
       resolvedCliCommand: 'codex',
       hostVaultPath: 'C:\\repo',
       env: {},

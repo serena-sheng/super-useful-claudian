@@ -6,10 +6,13 @@ import { DatabaseSync } from 'node:sqlite';
 import { testDate } from '@test/helpers/testClock';
 
 import type * as environmentModule from '@/core/process/env';
+import { encodeRecoveryPrompt } from '@/core/prompt/recoveryPrompt';
+import { encodeSessionMessage } from '@/core/session-tools/sessionMessageEnvelope';
 import {
   loadOpencodeSessionMessages,
   loadOpencodeSessionModel,
   mapOpencodeMessages,
+  mapOpencodeV2Messages,
   mapOpencodeV2NativeMessages,
   OPENCODE_MESSAGE_ROW_SQL,
 } from '@/providers/opencode/history/OpencodeHistoryStore';
@@ -588,6 +591,57 @@ it('reconstructs throughput through the v1 SQLite projection without reading raw
 });
 
 
+it.each(['sqlite', 'http'] as const)('marks a v2 turn whose idle outcome is interrupted as interrupted from %s rows', source => {
+  const created = testDate().getTime();
+  const entries = [
+    { id: 'u1', type: 'user', time: { created }, text: 'Run the shell command' },
+    { id: 'a1', type: 'assistant', time: { created: created + 1_000, streamed: created + 2_000, completed: created + 9_000 },
+      content: [
+        { type: 'text', text: 'Running it.' },
+        { type: 'tool', id: 'shell', name: 'shell', state: { status: 'error', input: { command: 'sleep 60' },
+          error: { type: 'aborted', message: 'Tool execution interrupted' } } },
+      ],
+      finish: 'error', rawFinish: 'tool_calls', error: { type: 'aborted', message: 'Step interrupted' },
+      tokens: { output: 5 } },
+    { id: 'idle1', type: 'idle', time: { created: created + 9_500 }, outcome: 'interrupted' },
+    { id: 'u2', type: 'user', time: { created: created + 20_000 }, text: 'Never mind' },
+    { id: 'idle2', type: 'idle', time: { created: created + 20_500 }, outcome: 'interrupted' },
+    { id: 'u3', type: 'user', time: { created: created + 30_000 }, text: 'Say hi' },
+    { id: 'a3', type: 'assistant', time: { created: created + 31_000, completed: created + 33_000 },
+      content: [{ type: 'text', text: 'Hi' }], finish: 'stop' },
+    { id: 'idle3', type: 'idle', time: { created: created + 33_500 }, outcome: 'succeeded' },
+  ];
+  const messages = source === 'http'
+    ? mapOpencodeV2NativeMessages(entries)
+    : mapOpencodeV2Messages(entries.map(({ id, type, ...data }) => ({ id, type, time_created: data.time.created, data: JSON.stringify(data) })));
+
+  expect(messages.map(({ role, content, isInterrupt, durationSeconds, completedAt, turnStats }) => (
+    { role, content, isInterrupt, durationSeconds, completedAt, turnStats }))).toEqual([
+    { role: 'user', content: 'Run the shell command' },
+    { role: 'assistant', content: 'Running it.', isInterrupt: true },
+    { role: 'user', content: 'Never mind' },
+    // Stopped before any output: a bare marker, as the live Stop renders it.
+    { role: 'assistant', content: '', isInterrupt: true },
+    { role: 'user', content: 'Say hi' },
+    { role: 'assistant', content: 'Hi', durationSeconds: 2, completedAt: created + 33_000 },
+  ].map(message => ({ isInterrupt: undefined, durationSeconds: undefined, completedAt: undefined, turnStats: undefined, ...message })));
+  expect(messages[1].toolCalls).toEqual([expect.objectContaining({ id: 'shell', status: 'error' })]);
+});
+
+it.each([true, false])('applies a v2 interruption to the whole turn across compaction (output after compaction: %s)', after => {
+  const created = testDate().getTime();
+  const messages = mapOpencodeV2NativeMessages([
+    { id: 'u1', type: 'user', time: { created }, text: 'Long task' },
+    { id: 'a1', type: 'assistant', time: { created: created + 1_000, completed: created + 5_000 }, content: [{ type: 'text', text: 'Before compaction.' }] },
+    { id: 'compact', type: 'compaction', time: { created: created + 6_000 }, status: 'completed', summary: 'Internal summary' },
+    ...(after ? [{ id: 'a2', type: 'assistant', time: { created: created + 7_000, completed: created + 9_000 }, content: [{ type: 'text', text: 'After compaction.' }] }] : []),
+    { id: 'idle', type: 'idle', time: { created: created + 9_500 }, outcome: 'interrupted' },
+  ]);
+  expect(messages.map(({ id, isInterrupt, durationSeconds, completedAt }) => ({ id, isInterrupt, durationSeconds, completedAt }))).toEqual([
+    { id: 'u1' }, { id: 'a1' }, { id: 'compact', ...(!after ? { isInterrupt: true } : {}) }, ...(after ? [{ id: 'a2', isInterrupt: true }] : []),
+  ].map(message => ({ isInterrupt: undefined, durationSeconds: undefined, completedAt: undefined, ...message })));
+});
+
 describe('OpenCode compaction boundaries', () => {
   const created = testDate().getTime();
   it.each(['completed', 'running', 'failed'])('restores only completed V2 compaction (%s)', status => {
@@ -618,4 +672,29 @@ describe('OpenCode compaction boundaries', () => {
     expect(messages.filter(message => message.id === 'compact')).toMatchObject(status === 'completed'
       ? [{ contentBlocks: [{ type: 'context_compacted' }], timestamp: created + 2 }] : []);
   });
+});
+
+
+it('decodes v2 session-message attribution before stripping prompt tags and preserves neutral tool names', () => {
+  const text = encodeSessionMessage({ from: 'Research', sessionId: 'source', text: 'The result' });
+  const messages = mapOpencodeV2NativeMessages([
+    { id: 'user', type: 'user', text: text + '\n\n<current_note>note.md</current_note>' },
+    { id: 'assistant', type: 'assistant', content: [{ type: 'tool', id: 'call', name: 'claudian_send_message', state: { status: 'completed', input: {text:'Hello'}, content: [{type:'text',text:'{}'}] } }] },
+  ]);
+  expect(messages[0]).toMatchObject({content:'The result',sessionMessage:{from:'Research',sessionId:'source'}});
+  expect(messages[1].toolCalls?.[0]).toMatchObject({name:'claudian_send_message',providerPayload:{rawName:'claudian_send_message'}});
+});
+
+it.each([1, 2] as const)('hides replayed history in v%p user prompts', version => {
+  const replayed = encodeRecoveryPrompt('User: Earlier\n\nAssistant: Reply', 'Follow up\n\n<current_note>note.md</current_note>');
+  const replayOnly = encodeRecoveryPrompt('User: Earlier', null);
+  const messages = version === 1
+    ? mapOpencodeMessages([replayed, replayOnly].map((text, index) => ({
+        info: { id: `user-${index}`, role: 'user', time: { created: 1_000 + index } },
+        parts: [{ id: `part-${index}`, type: 'text', text }],
+      })))
+    : mapOpencodeV2NativeMessages([replayed, replayOnly].map((text, index) => ({
+        id: `user-${index}`, type: 'user', text, time: { created: 1_000 + index },
+      })));
+  expect(messages.map(message => [message.id, message.content])).toEqual([['user-0', 'Follow up']]);
 });

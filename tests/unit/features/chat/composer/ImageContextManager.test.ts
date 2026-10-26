@@ -5,9 +5,7 @@ import { Notice } from 'obsidian';
 import type { ImageAttachment } from '@/core/types';
 import { ImageContextManager } from '@/features/chat/composer/ImageContextManager';
 
-jest.mock('obsidian', () => ({
-  Notice: jest.fn(),
-}));
+const keymap = { pushScope: jest.fn(), popScope: jest.fn() };
 
 // Mock document.createElementNS for SVG elements created in setupDragAndDrop
 const mockSvgElement = () => {
@@ -65,7 +63,7 @@ describe('ImageContextManager', () => {
     container = c;
     inputEl = createMockTextArea();
     callbacks = createMockCallbacks();
-    manager = new ImageContextManager(container, inputEl, callbacks);
+    manager = new ImageContextManager(keymap, container, inputEl, callbacks);
   });
 
   it.each(['replace-draft', 'disable-images', 'clear-draft'] as const)(
@@ -166,7 +164,7 @@ describe('ImageContextManager', () => {
       const input = createMockTextArea();
       const cb = createMockCallbacks();
 
-      new ImageContextManager(c, input, cb, previewContainer);
+      new ImageContextManager(keymap, c, input, cb, previewContainer);
       expect(previewContainer.children).toContain(existingContent);
       expect(previewContainer.querySelector('.claudian-context-row')).not.toBeNull();
     });
@@ -184,7 +182,7 @@ describe('ImageContextManager - Private Helpers', () => {
     const { container } = createContainerWithInputWrapper();
     const inputEl = createMockTextArea();
     callbacks = createMockCallbacks();
-    manager = new ImageContextManager(container, inputEl, callbacks);
+    manager = new ImageContextManager(keymap, container, inputEl, callbacks);
   });
 
   describe('getMediaType', () => {
@@ -364,7 +362,7 @@ describe('ImageContextManager - Private Helpers', () => {
       const callbacks = createMockCallbacks();
       const { container } = createContainerWithInputWrapper();
       const inputEl = createMockTextArea();
-      const mgr: any = new ImageContextManager(container, inputEl, callbacks);
+      const mgr: any = new ImageContextManager(keymap, container, inputEl, callbacks);
 
       await mgr['addImageFromFile'](file, 'paste');
       const images = mgr.getAttachedImages();
@@ -524,6 +522,31 @@ describe('ImageContextManager - Private Helpers', () => {
 
       expect(pasteEvent.preventDefault).toHaveBeenCalled();
       expect(addImageSpy).toHaveBeenCalledWith(mockFile, 'paste');
+      addImageSpy.mockRestore();
+    });
+
+    it('paste handler should attach every pasted image', async () => {
+      const addImageSpy = jest.spyOn(manager as any, 'addImageFromFile').mockResolvedValue(true);
+      const first = { name: 'first.jpg', type: 'image/jpeg', size: 1024 };
+      const second = { name: 'second.png', type: 'image/png', size: 2048 };
+      const pasteEvent = {
+        type: 'paste',
+        preventDefault: jest.fn(),
+        clipboardData: {
+          items: {
+            length: 3,
+            0: { type: 'image/jpeg', getAsFile: () => first },
+            1: { type: 'text/plain', getAsFile: () => null },
+            2: { type: 'image/png', getAsFile: () => second },
+          },
+        },
+      };
+
+      manager['inputEl'].dispatchEvent(pasteEvent);
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      expect(pasteEvent.preventDefault).toHaveBeenCalledTimes(1);
+      expect(addImageSpy.mock.calls).toEqual([[first, 'paste'], [second, 'paste']]);
       addImageSpy.mockRestore();
     });
 
@@ -699,7 +722,7 @@ describe('ImageContextManager - Private Helpers', () => {
       const cb = createMockCallbacks();
       const { container } = createContainerWithInputWrapper();
       const input = createMockTextArea();
-      const mgr: any = new ImageContextManager(container, input, cb);
+      const mgr: any = new ImageContextManager(keymap, container, input, cb);
 
       mgr.setImages([
         createImageAttachment({ id: 'img-1', name: 'a.png' }),

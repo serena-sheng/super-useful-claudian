@@ -23,7 +23,7 @@ function createSession(overrides: Partial<ConstructorParameters<typeof SideChatS
     providerId: 'claude',
     ephemeral: false,
     resolveBackend: () => backend,
-    vaultWorkingDirectory: '/vault',
+    workingDirectory: '/vault',
     ...overrides,
   });
   return { backend, buildChildResumeState, lifecycleRegistry, requestedEvents, session, sessionEvents };
@@ -31,13 +31,26 @@ function createSession(overrides: Partial<ConstructorParameters<typeof SideChatS
 
 function turn(text: string) {
   return {
-    configuration: { systemInstructions: { kind: 'provider-default' as const } },
+    configuration: { systemInstructions: { kind: 'main-agent' as const, instructions: 'Main Agent prompt.' } },
     images: [],
     text,
   };
 }
 
 describe('SideChatSession', () => {
+  it('cancels provider-owned jobs when there is no requested or automatic turn', async () => {
+    const harness = createSession();
+    const running = harness.session.execute(turn('Start a job'));
+    await waitFor(() => harness.backend.sessions.length === 1);
+    const native = harness.backend.latest;
+    native.complete(); await running;
+    Object.assign(native, { hasBackgroundWork: () => true });
+    expect(harness.session.hasBackgroundWork).toBe(true);
+    harness.session.cancel();
+    expect(native.cancelCalls).toBe(1);
+    await harness.session.dispose();
+  });
+
   it('rejects duplicate, out-of-order, foreign, and completed background events before publishing them', async () => {
     const events: ProviderSessionEvent[] = [];
     const harness = createSession({ onSessionEvent: event => { events.push(event); } });
@@ -84,10 +97,8 @@ describe('SideChatSession', () => {
     const next = port.requestApproval(request, new AbortController().signal);
     firstReply.resolve({ interactionId: 'reused', decision: 'allow' });
     await expect(first).rejects.toThrow(/stale/i);
-    expect(harness.session.hasPendingInteractions).toBe(true);
     nextReply.resolve({ interactionId: 'reused', decision: 'allow' });
     await expect(next).resolves.toMatchObject({ decision: 'allow' });
-    expect(harness.session.hasPendingInteractions).toBe(false);
     native.complete();
     await running;
     await harness.session.dispose();
@@ -336,16 +347,16 @@ describe('SideChatSession', () => {
       toolName: 'Write', turnId: native.activeTurnId,
     }, new AbortController().signal);
     await waitFor(() => resolveApproval !== null);
-    expect(harness.session.hasPendingInteractions).toBe(true);
     resolveApproval!({ decision: 'allow', interactionId: 'side-approval-1' });
     await expect(approval).resolves.toMatchObject({ decision: 'allow' });
 
+    resolveApproval = null;
     const pending = port.requestApproval({
       description: 'Write another note', input: {}, interactionId: 'side-approval-2',
       kind: 'approval', sessionInstanceId: native.sessionInstanceId, toolName: 'Write',
       turnId: native.activeTurnId,
     }, new AbortController().signal);
-    await waitFor(() => harness.session.hasPendingInteractions);
+    await waitFor(() => resolveApproval !== null);
     harness.session.cancel();
     await running;
     expect(dismissals).toEqual([{ interactionId: 'side-approval-2', reason: 'cancelled' }]);

@@ -1,13 +1,21 @@
 # Super Useful Claudian
 
 Run Oh My Pi, DeepSeek Harness, Claude Code, Codex, Grok, OpenCode and Pi inside your vault as
-chat collaborators, with provider readiness checks, a capability matrix and a token usage meter.
+chat collaborators, with provider readiness checks, a capability matrix, a token usage meter and
+full local session restore.
 
 An independent fork of [Claudian](https://github.com/YishenTu/claudian) by Yishen Tu.
 It keeps everything Claudian already does — chat tabs, inline editing, session manager,
-Zen mode, dual pane, side chat, agent skills, turn steering, subagent history — and adds
-extra agent harnesses plus a few enhancements borrowed from
+Zen mode, dual pane, side chat, agent skills, turn steering, subagent history, projects,
+cross-session messaging and the experimental plugin API — and adds an extra agent harness,
+a provider-readiness panel, a token meter, and a local archive that can reopen any saved
+conversation with every turn visible. A few enhancements were borrowed from
 [oh-my-claudian](https://github.com/lee259/oh-my-claudian) by Lee.
+
+**1.5.0 is synced to upstream Claudian 2.3.33.** The fork's early `dsh` provider is gone:
+upstream now ships a maintained **DeepSeek Harness** provider (`deepseek`), so the plugin
+migrates your old `dsh` settings and sessions automatically instead of keeping a second
+copy of the same integration.
 
 Both upstream projects are MIT licensed; see NOTICE.md and LICENSE.
 
@@ -44,8 +52,13 @@ that CLI's own documentation.
 
 ## What this fork adds over upstream Claudian
 
-- **Two extra agent harnesses**: Oh My Pi (OMP) and DeepSeek Harness.
-- **Provider readiness panel** at the top of every provider's settings tab: is it enabled,
+- **Oh My Pi (OMP)** as an additional harness.
+- **Full local session restore**: every saved conversation is also archived inside the vault
+  (`<id>.transcript.json`), so reopening it shows all saved turns even when the CLI's native
+  session store was deleted, rotated, or created on another machine. Native history is still
+  preferred whenever it is readable. See [docs/session-restore.md](docs/session-restore.md).
+- **Provider readiness panel** at the top of every provider's settings tab (now including
+  DeepSeek Harness): is it enabled,
   is the CLI installed and which version, was a model catalog discovered, is a model
   selected — each with a hint on what to do next. Install and update commands are shown for
   you to copy; the plugin never runs them.
@@ -82,10 +95,13 @@ Required by the Obsidian developer policies, and true as of this fork:
   yourself, in your vault, through your own shell — the same thing you could do in a
   terminal. It is off by default; output is capped at 1 MiB and commands are killed
   after 30 seconds. Nothing here is model-driven: it only runs what you type after `!`.
-- **What is stored locally.** The plugin keeps its settings, session metadata and token
-  usage log inside your vault, under `.super-useful-claudian/`. The usage log records, per turn, the
-  conversation id, provider, model and token counts — never message content — and is
-  trimmed to 90 days. Nothing is uploaded anywhere by the plugin itself.
+- **What is stored locally.** The plugin keeps its settings, session metadata, a per-conversation
+  transcript archive and a token usage log inside your vault, under `.super-useful-claudian/`.
+  The transcript archive contains the message text and tool output you already see in the chat;
+  it exists only so the conversation can be reopened after the CLI's own history is gone, and it
+  is deleted with the session. The usage log records, per turn, the conversation id, provider,
+  model and token counts — never message content — and is trimmed to 90 days. Nothing is
+  uploaded anywhere by the plugin itself.
 - **Paid services.** Some providers require a paid subscription or API key. The plugin
   does not sell anything and does not install or update any CLI for you.
 - **Desktop only.** `isDesktopOnly` is true: the plugin spawns subprocesses through Node
@@ -114,7 +130,8 @@ npm run build      # produces main.js and styles.css in the repository root
 ```
 
 Requires Node.js 24.x. `npm run test:unit` runs the unit suite; `npm run typecheck` and
-`npm run lint` are also wired up.
+`npm run lint` are also wired up. `npm run build` copies the artifacts to the plugin folder
+when `OBSIDIAN_VAULT` is set in `.env.local`.
 
 ## Configuration
 

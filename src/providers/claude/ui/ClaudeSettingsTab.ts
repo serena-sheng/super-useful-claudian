@@ -22,6 +22,7 @@ import {
   getClaudeModelOptions,
 } from '../modelOptions';
 import {
+  getClaudeModelSource,
   getClaudeProviderSettings,
   updateClaudeProviderSettings,
 } from '../settings';
@@ -74,7 +75,7 @@ export function createClaudeSettingsTabRenderer(
       const installationContainer = container.createDiv({ cls: 'claudian-claude-installation' });
       const lastProviderWarning = renderLastEnabledProviderWarning(container);
       const modelWarning = renderProviderModelEnablementWarning(container, context, {
-        getHasEnabledModels: () => getClaudeModelOptions(settingsBag).length > 0,
+        getHasEnabledModels: () => getClaudeModelOptions(getClaudeModelSource(settingsBag)).length > 0,
         getIsEnabled: () => getClaudeProviderSettings(settingsBag).enabled,
         providerId: 'claude',
         providerName: 'Claude Code',

@@ -1,5 +1,5 @@
+import type { PiProviderSettings } from '@/providers/pi/config';
 import { buildPiLaunchSpec } from '@/providers/pi/runtime/PiLaunchSpecBuilder';
-import type { PiProviderSettings } from '@/providers/pi/settings';
 
 const baseSettings: PiProviderSettings = {
   cliPath: '',
@@ -10,6 +10,7 @@ const baseSettings: PiProviderSettings = {
   environmentVariables: '',
   modelAliases: {},
   preferredThinkingByModel: {},
+  sessionEnvironmentHash: '',
   visibleModels: [],
 };
 

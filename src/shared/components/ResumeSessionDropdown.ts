@@ -2,10 +2,11 @@
  * Claudian - Resume session dropdown
  *
  * Dropup UI for selecting a previous conversation to resume.
- * Shown when the /resume built-in command is executed.
+ * Shown when the /sessions built-in command is executed.
  */
 import { setIcon } from 'obsidian';
 
+import { t } from '@/i18n/i18n';
 import type { ComposerInputElement } from '@/shared/composer-dropdown/types';
 
 import type { ConversationMeta } from '../../core/types';
@@ -52,7 +53,7 @@ export class ResumeSessionDropdown {
     this.previousInputAttributes = new Map(
       INPUT_ACCESSIBILITY_ATTRIBUTES.map(attribute => [
         attribute,
-        this.inputEl.getAttribute(attribute),
+        this.#textbox.getAttribute(attribute),
       ])
     );
 
@@ -106,7 +107,7 @@ export class ResumeSessionDropdown {
 
   #dismiss(): void {
     this.dropdownEl.removeClass('visible');
-    this.inputEl.removeAttribute('aria-activedescendant');
+    this.#textbox.removeAttribute('aria-activedescendant');
     this.callbacks.onDismiss();
   }
 
@@ -138,9 +139,7 @@ export class ResumeSessionDropdown {
         item.addClass('selected');
         item.setAttribute('aria-selected', 'true');
         activeOptionId = item.getAttribute('id');
-        if (scrollSelectedIntoView) {
-          (item as HTMLElement).scrollIntoView({ block: 'nearest' });
-        }
+        if (scrollSelectedIntoView) this.#revealInList(item as HTMLElement);
       } else {
         item.removeClass('selected');
         item.setAttribute('aria-selected', 'false');
@@ -148,9 +147,22 @@ export class ResumeSessionDropdown {
     });
 
     if (activeOptionId) {
-      this.inputEl.setAttribute('aria-activedescendant', activeOptionId);
+      this.#textbox.setAttribute('aria-activedescendant', activeOptionId);
     } else {
-      this.inputEl.removeAttribute('aria-activedescendant');
+      this.#textbox.removeAttribute('aria-activedescendant');
+    }
+  }
+
+  /** Scrolls only the list; scrollIntoView would also scroll the workspace behind a floating composer. */
+  #revealInList(item: HTMLElement): void {
+    const list = item.parentElement;
+    if (!list) return;
+    const listRect = list.getBoundingClientRect();
+    const itemRect = item.getBoundingClientRect();
+    if (itemRect.top < listRect.top) {
+      list.scrollTop -= listRect.top - itemRect.top;
+    } else if (itemRect.bottom > listRect.bottom) {
+      list.scrollTop += itemRect.bottom - listRect.bottom;
     }
   }
 
@@ -164,16 +176,16 @@ export class ResumeSessionDropdown {
     this.dropdownEl.empty();
 
     const header = this.dropdownEl.createDiv({ cls: 'claudian-resume-header' });
-    header.createSpan({ text: 'Resume conversation' });
+    header.createSpan({ text: t('chat.sessions.resume') });
 
     const list = this.dropdownEl.createDiv({ cls: 'claudian-resume-list' });
     list.setAttribute('id', this.listboxId);
     list.setAttribute('role', 'listbox');
-    list.setAttribute('aria-label', 'Resume conversation');
+    list.setAttribute('aria-label', t('chat.sessions.resume'));
 
     if (this.conversations.length === 0) {
-      list.createDiv({ cls: 'claudian-resume-empty', text: 'No conversations' });
-      this.inputEl.removeAttribute('aria-activedescendant');
+      list.createDiv({ cls: 'claudian-resume-empty', text: t('chat.sessions.empty') });
+      this.#textbox.removeAttribute('aria-activedescendant');
       return;
     }
 
@@ -195,7 +207,7 @@ export class ResumeSessionDropdown {
       titleEl.setAttribute('title', conv.title);
       content.createDiv({
         cls: 'claudian-resume-item-date',
-        text: isCurrent ? 'Current session' : this.formatDate(conv.lastActivityAt),
+        text: isCurrent ? t('chat.sessions.current') : this.formatDate(conv.lastActivityAt),
       });
 
       item.addEventListener('click', () => {
@@ -206,29 +218,34 @@ export class ResumeSessionDropdown {
         this.callbacks.onSelect(conv.id);
       });
 
+      // The pointer already shows the item, so hover never scrolls.
       item.addEventListener('mouseenter', () => {
         this.selectedIndex = i;
-        this.#updateSelection();
+        this.#updateSelection(false);
       });
     }
 
     this.#updateSelection(false);
   }
 
+  get #textbox(): HTMLElement {
+    return this.inputEl.getAccessibleTextbox?.() ?? this.inputEl;
+  }
+
   #configureInputAccessibility(): void {
     // Preserve the textarea's native multiline textbox semantics.
-    this.inputEl.setAttribute('aria-haspopup', 'listbox');
-    this.inputEl.setAttribute('aria-controls', this.listboxId);
-    this.inputEl.removeAttribute('aria-expanded');
+    this.#textbox.setAttribute('aria-haspopup', 'listbox');
+    this.#textbox.setAttribute('aria-controls', this.listboxId);
+    this.#textbox.removeAttribute('aria-expanded');
   }
 
   #restoreInputAccessibility(): void {
     for (const attribute of INPUT_ACCESSIBILITY_ATTRIBUTES) {
       const previousValue = this.previousInputAttributes.get(attribute) ?? null;
       if (previousValue === null) {
-        this.inputEl.removeAttribute(attribute);
+        this.#textbox.removeAttribute(attribute);
       } else {
-        this.inputEl.setAttribute(attribute, previousValue);
+        this.#textbox.setAttribute(attribute, previousValue);
       }
     }
   }

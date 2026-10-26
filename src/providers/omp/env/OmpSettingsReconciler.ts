@@ -8,10 +8,15 @@ import {
 } from '../../../core/providers/cli/CLIPathFingerprintInputs';
 import { getRuntimeEnvironmentText } from '../../../core/providers/providerEnvironment';
 import {
+  compareScopedRuntimeInputFingerprints,
   createRuntimeInputFingerprint,
   isVersionedRuntimeInputFingerprint,
+  type ScopedRuntimeInputFingerprints,
 } from '../../../core/providers/settings/RuntimeInputFingerprint';
-import type { ProviderSettingsReconciler } from '../../../core/providers/types';
+import type {
+  ProviderEnvironmentReconciliation,
+  ProviderSettingsReconciler,
+} from '../../../core/providers/types';
 import type { Conversation } from '../../../core/types';
 import {
   getOmpProviderSettings,
@@ -19,30 +24,49 @@ import {
 } from '../settings';
 import { clearOmpResumeState } from '../types';
 
-const LEGACY_OMP_ENV_HASH_KEYS = [
+/**
+ * Select the native config/session store; `PI_PACKAGE_DIR` can rename the default config dir.
+ * Changes invalidate bindings.
+ */
+const OMP_SESSION_ENV_KEYS = [
   'PI_CODING_AGENT_DIR',
   'PI_CODING_AGENT_SESSION_DIR',
   'PI_PACKAGE_DIR',
+] as const;
+
+const LEGACY_OMP_ENV_HASH_KEYS = [
+  ...OMP_SESSION_ENV_KEYS,
   'PI_OFFLINE',
   'PI_SKIP_VERSION_CHECK',
   'PI_TELEMETRY',
   'PI_CACHE_RETENTION',
 ] as const;
 
+/**
+ * Non-session keys and CLI paths only affect the launched process. Resume targets an absolute
+ * session file whose identity is proved before input, so changes restart runtimes and keep bindings.
+ */
 const OMP_ENV_HASH_KEYS = [
   ...LEGACY_OMP_ENV_HASH_KEYS,
   'PATH',
 ] as const;
 
-function computeOmpRuntimeFingerprint(
+function computeOmpFingerprints(
   environmentText: string,
   cliPathInputs: CLIPathFingerprintInputs,
-): string {
-  return createRuntimeInputFingerprint({
-    additionalInputs: cliPathInputs,
-    environmentKeys: OMP_ENV_HASH_KEYS,
-    environmentText,
-  });
+): ScopedRuntimeInputFingerprints {
+  return {
+    runtime: createRuntimeInputFingerprint({
+      additionalInputs: cliPathInputs,
+      environmentKeys: OMP_ENV_HASH_KEYS,
+      environmentText,
+    }),
+    session: computeOmpSessionFingerprint(environmentText),
+  };
+}
+
+function computeOmpSessionFingerprint(environmentText: string): string {
+  return createRuntimeInputFingerprint({ environmentKeys: OMP_SESSION_ENV_KEYS, environmentText });
 }
 
 function invalidateOmpConversationSessions(conversations: Conversation[]): Conversation[] {
@@ -77,18 +101,14 @@ export const ompSettingsReconciler = {
 
   invalidateConversationSessions: invalidateOmpConversationSessions,
 
-  reconcileModelWithEnvironment(
-    settings: Record<string, unknown>,
-    conversations: Conversation[],
-  ): { changed: boolean; invalidatedConversations: Conversation[] } {
+  reconcileModelWithEnvironment(settings: Record<string, unknown>): ProviderEnvironmentReconciliation {
     const envText = getRuntimeEnvironmentText(settings, 'omp');
-    const ompSettings = getOmpProviderSettings(settings);
+    const piSettings = getOmpProviderSettings(settings);
     const cliPathInputs = createCLIPathFingerprintInputs(
-      ompSettings.cliPathsByHost[getInstallationKey()],
-      ompSettings.cliPath,
+      piSettings.cliPathsByHost[getInstallationKey()],
+      piSettings.cliPath,
     );
-    const currentHash = computeOmpRuntimeFingerprint(envText, cliPathInputs);
-    const savedHash = ompSettings.environmentHash;
+    const savedHash = piSettings.environmentHash;
 
     const environment = parseEnvironmentVariables(envText);
     const hasFingerprintInputs = Boolean(
@@ -96,34 +116,43 @@ export const ompSettingsReconciler = {
       || OMP_ENV_HASH_KEYS.some(key => Object.prototype.hasOwnProperty.call(environment, key))
     );
     if (!savedHash && !hasFingerprintInputs) {
-      return { changed: false, invalidatedConversations: [] };
+      return { changed: false };
     }
-    if (currentHash === savedHash) {
-      return { changed: false, invalidatedConversations: [] };
+    const current = computeOmpFingerprints(envText, cliPathInputs);
+    const { changed, sessionPolicy } = compareScopedRuntimeInputFingerprints(
+      { environmentHash: savedHash, sessionEnvironmentHash: piSettings.sessionEnvironmentHash },
+      current,
+      computeOmpSessionFingerprint(''),
+    );
+    if (!changed) {
+      return { changed: false };
     }
 
-    const invalidatedConversations = invalidateOmpConversationSessions(conversations);
-
-    updateOmpProviderSettings(settings, { environmentHash: currentHash });
-    return { changed: true, invalidatedConversations };
+    updateOmpProviderSettings(settings, {
+      environmentHash: current.runtime,
+      sessionEnvironmentHash: current.session,
+    });
+    return { changed: true, sessionPolicy };
   },
 
   normalizeModelVariantSettings(settings: Record<string, unknown>): boolean {
-    const ompSettings = getOmpProviderSettings(settings);
+    const piSettings = getOmpProviderSettings(settings);
     let changed = false;
 
     const envText = getRuntimeEnvironmentText(settings, 'omp');
     const cliPathInputs = createCLIPathFingerprintInputs(
-      ompSettings.cliPathsByHost[getInstallationKey()],
-      ompSettings.cliPath,
+      piSettings.cliPathsByHost[getInstallationKey()],
+      piSettings.cliPath,
     );
     if (isCurrentLegacyOmpFingerprint(
       envText,
-      ompSettings.environmentHash,
+      piSettings.environmentHash,
       cliPathInputs,
     )) {
+      const current = computeOmpFingerprints(envText, cliPathInputs);
       updateOmpProviderSettings(settings, {
-        environmentHash: computeOmpRuntimeFingerprint(envText, cliPathInputs),
+        environmentHash: current.runtime,
+        sessionEnvironmentHash: current.session,
       });
       changed = true;
     }

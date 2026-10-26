@@ -1,22 +1,16 @@
-import { Notice } from 'obsidian';
-
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
-import type { AssembledTabRuntime, TabRuntimeResourceState } from '@/features/chat/tabs/types';
+import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
 
 export interface TabRuntimeCleanupFailure {
   readonly resource: string;
   readonly error: unknown;
 }
 
-export interface TabRuntimeResourceOwner extends TabRuntimeResourceState {
+export interface TabRuntimeResourceOwner {
   dispose(): Promise<readonly TabRuntimeCleanupFailure[]>;
 }
 
 const tabDestructionPromises = new WeakMap<AssembledTabRuntime, Promise<void>>();
-const tabShutdownDrainPromises = new WeakMap<
-  AssembledTabRuntime,
-  Promise<TabShutdownDrainResult>
->();
 const tabRuntimeResourceOwners = new WeakMap<
   AssembledTabRuntime,
   TabRuntimeResourceOwner
@@ -30,12 +24,6 @@ export function registerTabRuntimeResourceOwner(
     throw new Error('Tab runtime already has a registered resource owner');
   }
   tabRuntimeResourceOwners.set(tab, resourceOwner);
-}
-
-export function isClosingLifecycleState(
-  state: AssembledTabRuntime['lifecycleState'],
-): boolean {
-  return state === 'closing';
 }
 
 export function commitProvisionalTab(tab: AssembledTabRuntime): void {
@@ -75,7 +63,6 @@ export class TabRuntimeTeardownError extends Error {
 }
 
 export interface TabShutdownDrainResult {
-  readonly cancelledActiveTurn: boolean;
   readonly cleanupFailures: readonly TabRuntimeCleanupFailure[];
 }
 
@@ -94,39 +81,11 @@ async function captureTeardownFailure(
 export async function drainTabForShutdownSnapshot(
   tab: AssembledTabRuntime,
 ): Promise<TabShutdownDrainResult> {
-  const existingDrain = tabShutdownDrainPromises.get(tab);
-  if (existingDrain) return existingDrain;
-
-  const drain = drainTabForShutdownSnapshotOnce(tab);
-  tabShutdownDrainPromises.set(tab, drain);
-  return drain;
-}
-
-async function drainTabForShutdownSnapshotOnce(
-  tab: AssembledTabRuntime,
-): Promise<TabShutdownDrainResult> {
-  tab.session.pauseIntentAdmission();
-  tab.session.pauseBackgroundWork();
   const cleanupFailures: TabRuntimeCleanupFailure[] = [];
-  const cancelledActiveTurn = tab.session.turns.isActive;
-  await captureTeardownFailure(
-    cleanupFailures,
-    'tab turn cancellation',
-    () => { tab.session.cancelTurn('shutdown', { dismissInteractions: true }); },
-  );
-  if (cancelledActiveTurn) await tab.session.turns.drain().catch(() => undefined);
-  await captureTeardownFailure(
-    cleanupFailures,
-    'tab session mention preparation',
-    () => tab.controllers.inputController.drainSessionMentionPreparations(),
-  );
-  await captureTeardownFailure(
-    cleanupFailures,
-    'tab background work',
-    () => tab.session.awaitBackgroundWork(),
-  );
+  await captureTeardownFailure(cleanupFailures, 'conversation shell creation',
+    () => tab.session.runtime.awaitIdentitySettlement());
 
-  return { cancelledActiveTurn, cleanupFailures };
+  return { cleanupFailures };
 }
 
 export async function destroyTab(tab: AssembledTabRuntime): Promise<void> {
@@ -143,21 +102,7 @@ export async function destroyTab(tab: AssembledTabRuntime): Promise<void> {
 
 async function destroyTabOnce(tab: AssembledTabRuntime): Promise<void> {
   tab.session.beginClose();
-  const drainResult = await drainTabForShutdownSnapshot(tab);
-  tab.session.sealIdentity();
-  const cleanupFailures = [...drainResult.cleanupFailures];
-  const { cancelledActiveTurn } = drainResult;
-
-  await captureTeardownFailure(cleanupFailures, 'tab subagent activity', () => {
-    tab.services.subagentManager.orphanAllActive();
-  });
-  if (tab.state.currentConversationId) {
-    try {
-      await tab.controllers.conversationController.save(cancelledActiveTurn);
-    } catch {
-      new Notice('Background task state could not be saved before closing the tab.');
-    }
-  }
+  const cleanupFailures: TabRuntimeCleanupFailure[] = [];
   await captureTeardownFailure(
     cleanupFailures,
     'tab resume dropdown',

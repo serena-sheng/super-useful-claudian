@@ -4,15 +4,33 @@
  * maintain competing parsers or depend on internal segment state.
  */
 
-interface FenceState {
-  marker: '`' | '~';
-  length: number;
-  containers: ContainerToken[];
+import { parser } from '@lezer/markdown';
+
+interface ProtectedBlock {
+  end: number;
+  infoStart?: number;
 }
 
-interface FenceRun {
-  run: string;
-  containers: ContainerToken[];
+/** The block parser owns code and reference-definition boundaries, including container endings. */
+function getProtectedBlocks(markdown: string, literalLinks?: Array<{ from: number; to: number }>): Map<number, ProtectedBlock> {
+  const blocks = new Map<number, ProtectedBlock>();
+  parser.parse(markdown).iterate({
+    enter(node) {
+      if (literalLinks && (node.name === 'Link' || node.name === 'Image')) {
+        literalLinks.push({ from: node.from, to: node.to });
+        return false;
+      }
+      if (node.name !== 'FencedCode' && node.name !== 'CodeBlock' && node.name !== 'LinkReference') return;
+      const marker = node.name === 'FencedCode' ? node.node.getChild('CodeMark') : null;
+      const lineStart = markdown.lastIndexOf('\n', node.from) + 1;
+      let end = node.to;
+      if (markdown.startsWith('\r\n', end)) end += 2;
+      else if (markdown[end] === '\n') end += 1;
+      blocks.set(lineStart, { end, infoStart: marker ? marker.to - lineStart : undefined });
+      return false;
+    },
+  });
+  return blocks;
 }
 
 type ContainerToken =
@@ -122,44 +140,6 @@ function consumeListContinuation(line: string, indents: number[]): string | null
   return content;
 }
 
-function hasSameParagraphContext(
-  current: ParagraphContext | null,
-  candidate: ParagraphContext,
-): boolean {
-  return current?.blockquoteDepth === candidate.blockquoteDepth
-    && current.listIndents.length === candidate.listIndents.length
-    && current.listIndents.every((indent, index) => indent === candidate.listIndents[index]);
-}
-
-function getFenceRun(line: string): FenceRun | null {
-  const { content, containers } = parseContainerPrefix(line);
-  return getFenceRunFromContent(content, containers);
-}
-
-function getFenceRunFromContent(
-  content: string,
-  containers: ContainerToken[],
-): FenceRun | null {
-  const match = content.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
-  const run = match?.[1] ?? null;
-  if (!run || (run[0] === '`' && match?.[2].includes('`'))) {
-    return null;
-  }
-  return { run, containers };
-}
-
-function getContextContainers(context: ParagraphContext): ContainerToken[] {
-  return [
-    ...Array.from(
-      { length: context.blockquoteDepth },
-      (): ContainerToken => ({ type: 'blockquote' }),
-    ),
-    ...context.listIndents.map(
-      (indent): ContainerToken => ({ type: 'list', indent }),
-    ),
-  ];
-}
-
 function startsNonParagraphBlock(content: string): boolean {
   return /^ {0,3}#{1,6}(?:[ \t]+|$)/.test(content)
     || /^ {0,3}(?:=+|-+)[ \t]*$/.test(content)
@@ -170,29 +150,6 @@ function startsInterruptingHTMLBlock(content: string): boolean {
   return RAW_HTML_TAG_PATTERN.test(content)
     || HTML_BLOCK_TAG_PATTERN.test(content)
     || /^ {0,3}(?:<!--|<\?|<![A-Za-z]|<!\[CDATA\[)/.test(content);
-}
-
-function isClosingFence(line: string, fence: FenceState): boolean {
-  let content = line;
-  for (const container of fence.containers) {
-    if (container.type === 'blockquote') {
-      const quoteMatch = content.match(/^ {0,3}>[ \t]?/);
-      if (!quoteMatch) {
-        return false;
-      }
-      content = content.slice(quoteMatch[0].length);
-    } else {
-      const indentation = content.match(/^ */)?.[0].length ?? 0;
-      if (indentation < container.indent) {
-        return false;
-      }
-      content = content.slice(container.indent);
-    }
-  }
-
-  const match = content.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/);
-  const run = match?.[1];
-  return !!run && run[0] === fence.marker && run.length >= fence.length;
 }
 
 function readBacktickRun(text: string, index: number): number {
@@ -255,10 +212,8 @@ function appendFenceOpeningSegment(
   segments: MarkdownSegment[],
   line: string,
   lineWithoutNewline: string,
-  fenceRun: FenceRun,
+  infoStart: number,
 ): void {
-  const runStart = lineWithoutNewline.indexOf(fenceRun.run);
-  const infoStart = runStart + fenceRun.run.length;
   segments.push({
     text: line,
     transformable: false,
@@ -367,6 +322,7 @@ function findInlineBlockEnd(
   markdown: string,
   start: number,
   context: ParagraphContext,
+  codeBlocks: ReadonlyMap<number, ProtectedBlock>,
 ): number {
   let lineEnd = markdown.indexOf('\n', start);
   while (lineEnd !== -1) {
@@ -380,7 +336,7 @@ function findInlineBlockEnd(
     if (
       blockContent === null
       || /^[ \t\r]*$/.test(blockContent)
-      || getFenceRun(nextLine) !== null
+      || codeBlocks.has(nextLineStart)
       || startsNonParagraphBlock(blockContent)
       || startsInterruptingHTMLBlock(blockContent)
     ) {
@@ -407,15 +363,21 @@ function findLinkDestinationEnd(line: string, start: number): number | null {
 
   let depth = 0;
   let quote: '"' | "'" | null = null;
+  let inAngleDestination = false;
+  const destinationStart = start + 1 + (line.slice(start + 1).match(/^[ \t]*/)?.[0].length ?? 0);
   for (let index = start; index < line.length; index += 1) {
     const char = line[index];
     if (char === '\\' && line[index + 1]) {
       index += 1;
+    } else if (inAngleDestination) {
+      if (char === '>') inAngleDestination = false;
+    } else if (index === destinationStart && char === '<') {
+      inAngleDestination = true;
     } else if (quote) {
       if (char === quote) {
         quote = null;
       }
-    } else if (char === '"' || char === "'") {
+    } else if ((char === '"' || char === "'") && /\s/.test(line[index - 1] ?? '')) {
       quote = char;
     } else if (char === '(') {
       depth += 1;
@@ -506,6 +468,8 @@ function splitInlineMarkdown(
   lineStart: number,
   context: ParagraphContext,
   segments: MarkdownSegment[],
+  codeBlocks: ReadonlyMap<number, ProtectedBlock>,
+  preserveLiterals: boolean,
 ): InlineContinuation {
   let segmentStart = 0;
   let bracketDepth = 0;
@@ -522,7 +486,7 @@ function splitInlineMarkdown(
         segmentStart = end + 1;
         index = end;
       } else {
-        const inlineBlockEnd = findInlineBlockEnd(markdown, lineStart + index, context);
+        const inlineBlockEnd = findInlineBlockEnd(markdown, lineStart + index, context, codeBlocks);
         const sourceEnd = findMatchingBacktickRun(
           markdown,
           lineStart + index,
@@ -545,12 +509,12 @@ function splitInlineMarkdown(
         const end = findMatchingDollarRun(line, index, runLength);
         if (end !== null) {
           appendSegment(segments, line.slice(segmentStart, index), true);
-          appendSegment(segments, line.slice(index, end + 1), true);
+          appendSegment(segments, line.slice(index, end + 1), !preserveLiterals);
           segmentStart = end + 1;
           index = end;
         } else {
           const mathEnd = runLength === 1
-            ? findInlineBlockEnd(markdown, lineStart + index, context)
+            ? findInlineBlockEnd(markdown, lineStart + index, context, codeBlocks)
             : markdown.length;
           const sourceEnd = findMatchingDollarRun(
             markdown,
@@ -560,7 +524,7 @@ function splitInlineMarkdown(
           );
           if (sourceEnd !== null && sourceEnd >= lineStart + line.length) {
             appendSegment(segments, line.slice(segmentStart, index), true);
-            appendSegment(segments, line.slice(index), true);
+            appendSegment(segments, line.slice(index), !preserveLiterals);
             return { mathRunLength: runLength };
           }
           index += runLength - 1;
@@ -571,7 +535,7 @@ function splitInlineMarkdown(
       continue;
     }
 
-    const embeddedWikilink = char === '!' && line.startsWith('![[', index);
+    const embeddedWikilink = char === '!' && !isBackslashEscaped(line, index) && line.startsWith('![[', index);
     if (embeddedWikilink || char === '[') {
       const wikilinkStart = embeddedWikilink ? index + 1 : index;
       const wikilinkEnd = findWikilinkEnd(line, wikilinkStart);
@@ -633,9 +597,10 @@ function splitInlineMarkdown(
   return {};
 }
 
-function splitMarkdown(markdown: string): MarkdownSegment[] {
+function splitMarkdown(markdown: string, literalLinks?: Array<{ from: number; to: number }>): MarkdownSegment[] {
+  const preserveLiterals = literalLinks !== undefined;
   const segments: MarkdownSegment[] = [];
-  let fence: FenceState | null = null;
+  const codeBlocks = getProtectedBlocks(markdown, literalLinks);
   let rawHtmlTag: string | null = null;
   let inlineCodeRunLength: number | null = null;
   let inlineHtmlEnd: number | null = null;
@@ -649,6 +614,12 @@ function splitMarkdown(markdown: string): MarkdownSegment[] {
     const lineEnd = newlineIndex === -1 ? markdown.length : newlineIndex + 1;
     const line = markdown.slice(lineStart, lineEnd);
     const lineWithoutNewline = line.replace(/\r?\n$/, '');
+    const codeBlock = codeBlocks.get(lineStart);
+    // HTML continuation guesses cannot absorb blocks recognized by the parser.
+    if (codeBlock) {
+      inlineHtmlEnd = null;
+      rawHtmlTag = null;
+    }
 
     if (inlineCodeRunLength !== null) {
       const codeEnd = findMatchingBacktickRun(line, -inlineCodeRunLength, inlineCodeRunLength);
@@ -663,6 +634,8 @@ function splitMarkdown(markdown: string): MarkdownSegment[] {
           lineStart + codeEnd + 1,
           paragraphContext ?? { blockquoteDepth: 0, listIndents: [], containers: [] },
           segments,
+          codeBlocks,
+          preserveLiterals,
         );
         inlineCodeRunLength = continuation.codeRunLength ?? null;
         inlineHtmlEnd = continuation.htmlEnd ?? null;
@@ -675,9 +648,9 @@ function splitMarkdown(markdown: string): MarkdownSegment[] {
     if (inlineMathRunLength !== null) {
       const mathEnd = findMatchingDollarRun(line, -inlineMathRunLength, inlineMathRunLength);
       if (mathEnd === null) {
-        appendSegment(segments, line, true);
+        appendSegment(segments, line, !preserveLiterals);
       } else {
-        appendSegment(segments, line.slice(0, mathEnd + 1), true);
+        appendSegment(segments, line.slice(0, mathEnd + 1), !preserveLiterals);
         const remainder = line.slice(mathEnd + 1);
         const continuation = splitInlineMarkdown(
           markdown,
@@ -685,6 +658,8 @@ function splitMarkdown(markdown: string): MarkdownSegment[] {
           lineStart + mathEnd + 1,
           paragraphContext ?? { blockquoteDepth: 0, listIndents: [], containers: [] },
           segments,
+          codeBlocks,
+          preserveLiterals,
         );
         inlineCodeRunLength = continuation.codeRunLength ?? null;
         inlineHtmlEnd = continuation.htmlEnd ?? null;
@@ -707,20 +682,12 @@ function splitMarkdown(markdown: string): MarkdownSegment[] {
           lineStart + localEnd + 1,
           paragraphContext ?? { blockquoteDepth: 0, listIndents: [], containers: [] },
           segments,
+          codeBlocks,
+          preserveLiterals,
         );
         inlineCodeRunLength = continuation.codeRunLength ?? null;
         inlineHtmlEnd = continuation.htmlEnd ?? null;
         inlineMathRunLength = continuation.mathRunLength ?? null;
-      }
-      lineStart = lineEnd;
-      continue;
-    }
-
-    if (fence) {
-      appendSegment(segments, line, false);
-      if (isClosingFence(lineWithoutNewline, fence)) {
-        fence = null;
-        sealLastSegment(segments);
       }
       lineStart = lineEnd;
       continue;
@@ -785,39 +752,16 @@ function splitMarkdown(markdown: string): MarkdownSegment[] {
       continue;
     }
 
-    const contextualFenceRun = listIndents.length > 0 && listPrefix.indents.length === 0
-      ? getFenceRunFromContent(blockContent, getContextContainers(currentContext))
-      : null;
-    const fenceRun = contextualFenceRun ?? getFenceRun(lineWithoutNewline);
-    if (fenceRun) {
+    if (codeBlock) {
       paragraphContext = null;
-      appendFenceOpeningSegment(segments, line, lineWithoutNewline, fenceRun);
-      fence = {
-        marker: fenceRun.run[0] as '`' | '~',
-        length: fenceRun.run.length,
-        containers: fenceRun.containers,
-      };
-      lineStart = lineEnd;
-      continue;
-    }
-
-    if (/^(?: {4}|\t)/.test(blockContent)) {
-      if (hasSameParagraphContext(paragraphContext, currentContext)) {
-        const continuation = splitInlineMarkdown(
-          markdown,
-          line,
-          lineStart,
-          currentContext,
-          segments,
-        );
-        inlineCodeRunLength = continuation.codeRunLength ?? null;
-        inlineHtmlEnd = continuation.htmlEnd ?? null;
-        inlineMathRunLength = continuation.mathRunLength ?? null;
-      } else {
+      if (codeBlock.infoStart === undefined) {
         appendSegment(segments, line, false);
-        sealLastSegment(segments);
+      } else {
+        appendFenceOpeningSegment(segments, line, lineWithoutNewline, codeBlock.infoStart);
       }
-      lineStart = lineEnd;
+      appendSegment(segments, markdown.slice(lineEnd, codeBlock.end), false);
+      sealLastSegment(segments);
+      lineStart = codeBlock.end;
       continue;
     }
 
@@ -841,6 +785,8 @@ function splitMarkdown(markdown: string): MarkdownSegment[] {
       lineStart,
       currentContext,
       segments,
+      codeBlocks,
+      preserveLiterals,
     );
     inlineCodeRunLength = continuation.codeRunLength ?? null;
     inlineHtmlEnd = continuation.htmlEnd ?? null;
@@ -856,6 +802,8 @@ function splitMarkdown(markdown: string): MarkdownSegment[] {
 }
 
 interface MarkdownTransforms {
+  /** Keep recognized math and complete links literal while transforming surrounding prose. */
+  preserveLiterals?: boolean;
   fence?: (opener: string, fence: MarkdownFenceOpening) => string;
   text?: (text: string) => string;
   rawHtml?: (text: string) => string;
@@ -867,8 +815,13 @@ export function transformMarkdownSegments(
   markdown: string,
   transforms: MarkdownTransforms,
 ): string {
-  return splitMarkdown(markdown)
+  const literalLinks = transforms.preserveLiterals ? [] as Array<{ from: number; to: number }> : undefined;
+  let offset = 0;
+  let nextLink = 0;
+  return splitMarkdown(markdown, literalLinks)
     .map(segment => {
+      const start = offset;
+      offset += segment.text.length;
       if (segment.fence) {
         return transforms.fence?.(segment.text, segment.fence) ?? segment.text;
       }
@@ -879,7 +832,23 @@ export function transformMarkdownSegments(
         return transforms.rawHtml?.(segment.text) ?? segment.text;
       }
       if (segment.transformable) {
-        return transforms.text?.(segment.text) ?? segment.text;
+        if (!literalLinks?.length) return transforms.text?.(segment.text) ?? segment.text;
+        while (nextLink < literalLinks.length && literalLinks[nextLink].to <= start) nextLink++;
+        let cursor = start;
+        const parts: string[] = [];
+        while (nextLink < literalLinks.length && literalLinks[nextLink].from < offset) {
+          const link = literalLinks[nextLink];
+          const before = markdown.slice(cursor, Math.max(cursor, link.from));
+          parts.push(transforms.text?.(before) ?? before);
+          const end = Math.min(offset, link.to);
+          parts.push(markdown.slice(Math.max(cursor, link.from), end));
+          cursor = end;
+          if (link.to > offset) break;
+          nextLink++;
+        }
+        const tail = markdown.slice(cursor, offset);
+        parts.push(transforms.text?.(tail) ?? tail);
+        return parts.join('');
       }
       return segment.text;
     })

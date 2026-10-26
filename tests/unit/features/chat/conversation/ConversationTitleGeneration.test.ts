@@ -1,6 +1,7 @@
 import '@/providers';
 
 import { claudeCatalogFixture } from '@test/helpers/claudeModels';
+import { testDate } from '@test/helpers/testClock';
 import { Notice } from 'obsidian';
 
 import type { TitleGenerationService } from '@/core/providers/types';
@@ -14,11 +15,16 @@ describe('fallbackConversationTitle', () => {
     expect(fallbackConversationTitle('How do I set up React? I need help.')).toBe('How do I set up React');
   });
 
-  it('truncates long titles to 50 chars', () => {
-    const title = fallbackConversationTitle('A'.repeat(100));
-
-    expect(title.length).toBeLessThanOrEqual(53); // 50 + '...'
-    expect(title).toContain('...');
+  it.each([
+    ['A'.repeat(100), 'A'.repeat(50) + '...'],
+    ['A'.repeat(50), 'A'.repeat(50)],
+    ['A'.repeat(49) + '\uD83D\uDE00tail', 'A'.repeat(49) + '...'],
+    ['A'.repeat(48) + '\uD83D\uDE00tail', 'A'.repeat(48) + '\uD83D\uDE00...'],
+    ['A'.repeat(48) + '\uD83D\uDE00', 'A'.repeat(48) + '\uD83D\uDE00'],
+    ['  ' + 'A'.repeat(49) + '\uD83D\uDE00tail? Later sentence', 'A'.repeat(49) + '...'],
+    ['A'.repeat(49) + '\u4E2Dtail', 'A'.repeat(49) + '\u4E2D...'],
+  ])('preserves the 50-unit prefix and suffix without splitting pairs (%#)', (input, expected) => {
+    expect(fallbackConversationTitle(input)).toBe(expected);
   });
 
   it('keeps messages without sentence breaks', () => {
@@ -26,11 +32,12 @@ describe('fallbackConversationTitle', () => {
   });
 });
 
-describe('ConversationTitleGeneration.regenerate', () => {
+describe('ConversationTitleGeneration', () => {
   let host: {
     settings: Record<string, unknown>;
     getConversationById: jest.Mock;
     renameConversation: jest.Mock;
+    completeConversationTitleGeneration: jest.Mock;
     updateConversation: jest.Mock;
   };
   let service: { generateTitle: jest.Mock; cancel: jest.Mock };
@@ -50,10 +57,26 @@ describe('ConversationTitleGeneration.regenerate', () => {
       },
       getConversationById: jest.fn().mockResolvedValue(null),
       renameConversation: jest.fn().mockResolvedValue(undefined),
+      completeConversationTitleGeneration: jest.fn().mockResolvedValue(undefined),
       updateConversation: jest.fn().mockResolvedValue(undefined),
     };
     service = { generateTitle: jest.fn().mockResolvedValue(undefined), cancel: jest.fn() };
     titles = createTitles(() => service as unknown as TitleGenerationService);
+  });
+
+  it('uses a pair-safe first-turn fallback when automatic title generation is disabled', async () => {
+    host.settings.enableAutoTitleGeneration = false;
+
+    await titles.titleFirstTurn('conv-1', {
+      id: 'user-1', role: 'user', content: 'A'.repeat(49) + '\uD83D\uDE00tail',
+      timestamp: testDate().getTime(),
+    });
+
+    expect(host.renameConversation).toHaveBeenCalledTimes(1);
+    expect(host.renameConversation).toHaveBeenCalledWith('conv-1', 'A'.repeat(49) + '...');
+    expect(service.generateTitle).not.toHaveBeenCalled();
+    expect(host.updateConversation).not.toHaveBeenCalled();
+    expect(host.completeConversationTitleGeneration).not.toHaveBeenCalled();
   });
 
   it.each(['', 'removed-model'])('gives settings guidance without pending status for title model %s', async model => {
@@ -166,7 +189,7 @@ describe('ConversationTitleGeneration.regenerate', () => {
     );
   });
 
-  it('should rename conversation with generated title', async () => {
+  it('commits the generated title against the title captured before generation', async () => {
     host.getConversationById.mockResolvedValue({
       id: 'conv-1',
       title: 'Old Title',
@@ -183,7 +206,8 @@ describe('ConversationTitleGeneration.regenerate', () => {
 
     await titles.regenerate('conv-1');
 
-    expect(host.renameConversation).toHaveBeenCalledWith('conv-1', 'New Generated Title');
+    expect(host.completeConversationTitleGeneration).toHaveBeenCalledWith('conv-1', 'Old Title', 'New Generated Title');
+    expect(host.renameConversation).not.toHaveBeenCalled();
   });
 
   describe('generation callback', () => {
@@ -198,52 +222,17 @@ describe('ConversationTitleGeneration.regenerate', () => {
       });
     });
 
-    it('should mark as failed when generation fails and user has not renamed', async () => {
+    it('commits a failed generation against the captured title', async () => {
       service.generateTitle.mockImplementation(
         async (_convId: string, _user: string, callback: any) => {
-          // On callback, the stored title is unchanged (user didn't rename).
-          host.getConversationById.mockResolvedValue({ id: 'conv-1', title: 'Original Title', messages: [] });
-          await callback('conv-1', { success: false, title: '' });
+          await callback('conv-1', { success: false, error: 'Unavailable' });
         },
       );
 
       await titles.regenerate('conv-1');
 
       expect(host.renameConversation).not.toHaveBeenCalled();
-      expect(host.updateConversation).toHaveBeenCalledWith('conv-1', {
-        titleGenerationStatus: 'failed',
-      });
-    });
-
-    it('should clear status when user manually renamed during generation', async () => {
-      service.generateTitle.mockImplementation(
-        async (_convId: string, _user: string, callback: any) => {
-          // On callback, the stored title differs (user renamed).
-          host.getConversationById.mockResolvedValue({ id: 'conv-1', title: 'User Renamed Title', messages: [] });
-          await callback('conv-1', { success: true, title: 'AI Generated Title' });
-        },
-      );
-
-      await titles.regenerate('conv-1');
-
-      // The user's rename takes precedence over the generated title.
-      expect(host.renameConversation).not.toHaveBeenCalled();
-      expect(host.updateConversation).toHaveBeenCalledWith('conv-1', {
-        titleGenerationStatus: undefined,
-      });
-    });
-
-    it('should not apply title when conversation no longer exists during callback', async () => {
-      service.generateTitle.mockImplementation(
-        async (_convId: string, _user: string, callback: any) => {
-          host.getConversationById.mockResolvedValue(null);
-          await callback('conv-1', { success: true, title: 'New Title' });
-        },
-      );
-
-      await titles.regenerate('conv-1');
-
-      expect(host.renameConversation).not.toHaveBeenCalled();
+      expect(host.completeConversationTitleGeneration).toHaveBeenCalledWith('conv-1', 'Original Title', null);
     });
   });
 });

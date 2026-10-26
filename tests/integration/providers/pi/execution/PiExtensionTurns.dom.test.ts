@@ -1,6 +1,9 @@
 /** @jest-environment jsdom */
 import '@/providers';
 
+import { createProjectsFake } from '@test/helpers/features/chat/ProjectsFake';
+import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
+import { runtimeHostFor } from '@test/helpers/providerRuntimeHost';
 import { waitFor, within } from '@testing-library/dom';
 import { App, Component, MarkdownRenderer } from 'obsidian';
 
@@ -51,12 +54,24 @@ class ScriptedPiKernel implements PiExecutionKernel {
     this.emit({ message: { role: 'assistant', stopReason: 'stop', timestamp: Date.now() }, type: 'message_end' });
   }
 
+  /** A completed native tool call, as Pi reports extension tools such as Peeps. */
+  tool(toolCallId: string, toolName: string, args: Record<string, unknown>, details: Record<string, unknown>): void {
+    this.emit({ args, toolCallId, toolName, type: 'tool_execution_start' });
+    this.emit({
+      isError: false,
+      result: { content: [{ text: JSON.stringify(details), type: 'text' }], details },
+      toolCallId,
+      toolName,
+      type: 'tool_execution_end',
+    });
+  }
+
   /** A Peeps result delivered with `pi.sendMessage({ display: true })`. */
   result(runId: string, text: string): void {
     const message = {
       content: `[Peeps automated result — ${runId} — answer]\n${text}`,
       customType: 'peeps-result',
-      details: { runId, status: 'answer' },
+      details: { owner: 'pi-session', results: [{ runId, seq: 1, status: 'answer' }] },
       display: true,
       role: 'custom',
     };
@@ -116,9 +131,7 @@ async function createPiView() {
     getActiveEnvironmentVariables: () => '',
   };
   const kernels: ScriptedPiKernel[] = [];
-  const backend = new PiExecutionBackend(providerHost as never, {
-    commandCatalog: { setCommandSnapshot() {} } as never,
-  }, {
+  const backend = new PiExecutionBackend(runtimeHostFor(providerHost, 'pi'), {
     createKernel: (spec, callbacks) => {
       const kernel = new ScriptedPiKernel(spec, callbacks);
       kernels.push(kernel);
@@ -134,10 +147,10 @@ async function createPiView() {
       persistExecutionSnapshot: async () => true,
       recordConversationActivity: async () => {},
     },
-    getSessionSnapshotDirectory: () => '/tmp/claudian-sessions',
     getCommittedSettings: () => settings,
     getActiveEnvironmentVariables: () => '',
     getConversationSummary: () => conversation,
+    projects: createProjectsFake(),
     getConversationSync: () => conversation,
     getConversationById: async () => conversation,
     getConversationList: () => [conversation],
@@ -146,11 +159,13 @@ async function createPiView() {
     mutateSettings: async (mutate: (settings: ClaudianSettings) => void) => mutate(settings),
     chatModelSelection: { beginIntent: () => 1, commitIntent: async () => true },
   } as unknown as ChatFeatureHost;
+  if (!plugin.sessionRuntimes) installSessionRuntimePool(plugin);
   const tab = await createTabRuntime({
     plugin, conversation, component: new Component(),
     containerEl: document.body.createDiv(),
     mentionDataProvider: new VaultMentionDataProvider(plugin.app),
     getProviderCatalogConfig: () => null, isRuntimeLive: () => true,
+    openConversation: async () => {}, startNewConversation: async () => {},
   });
   tab.hydrationState = 'ready';
   await tab.executionCoordinator.bindConversation({ conversationId: conversation.id, providerId: 'pi' });
@@ -224,7 +239,7 @@ describe('Pi extension-initiated turns in the chat view', () => {
       await waitFor(() => expect(within(view.tab.dom.messagesEl)
         .getAllByRole('button', { name: 'Task notification' })).toHaveLength(2));
       await waitFor(() => expect(view.tab.executionCoordinator.hasBackgroundWork).toBe(false));
-      await view.tab.session.awaitBackgroundWork();
+      await view.tab.session.runtime.awaitBackgroundWork();
 
       const [prompted, replyA, replyB] = responseElements(view);
       expect(responseElements(view)).toHaveLength(3);
@@ -241,6 +256,53 @@ describe('Pi extension-initiated turns in the chat view', () => {
       expectVisibleAnswer(replyB, 'Reply B.');
       expect(within(replyB).getByText('Result B.')).toBeTruthy();
       expect(view.tab.dom.messagesEl.textContent).not.toContain('Peeps automated result');
+    } finally {
+      await view.dispose();
+    }
+  });
+
+  it('renders a Peeps child as a subagent card that its later result completes', async () => {
+    const view = await createPiView();
+    try {
+      await sendPrompt(view, 'Delegate the probe', async (kernel) => {
+        kernel.emit({ type: 'agent_start' });
+        kernel.emit({ message: { role: 'assistant' }, type: 'message_start' });
+        kernel.emit({ message: { role: 'assistant', stopReason: 'toolUse', timestamp: Date.now() }, type: 'message_end' });
+        kernel.tool('spawn-1', 'peeps_spawn', { label: 'vault probe', task: 'List the vault root.' }, {
+          id: 'run-1', label: 'vault probe', status: 'starting',
+        });
+        kernel.tool('inspect-1', 'peeps_inspect', { id: 'run-1' }, { id: 'run-1', status: 'working' });
+        await later();
+        kernel.answer('Spawned.');
+        kernel.emit({ messages: [], type: 'agent_end' });
+        kernel.emit({ type: 'agent_settled' });
+      });
+      // Work before the answer collapses into its disclosure.
+      await waitFor(() => within(view.tab.dom.messagesEl)
+        .getByRole('button', { hidden: true, name: /^Subagent task: vault probe - Status: running/ }));
+      // The card replaces the spawn's generic tool card; status tools keep theirs.
+      expect(within(view.tab.dom.messagesEl).queryByText('peeps_spawn')).toBeNull();
+      expect(within(view.tab.dom.messagesEl).getByText('peeps_inspect')).toBeTruthy();
+
+      const kernel = view.kernels[0];
+      kernel.emit({ type: 'agent_start' });
+      await later();
+      kernel.result('run-1', 'Inbox, Work, Template.');
+      await later();
+      kernel.answer('The probe finished.');
+      kernel.emit({ messages: [], type: 'agent_end' });
+      kernel.emit({ type: 'agent_settled' });
+      await waitFor(() => expect(view.tab.executionCoordinator.hasBackgroundWork).toBe(false));
+      await view.tab.session.runtime.awaitBackgroundWork();
+
+      const completed = within(view.tab.dom.messagesEl)
+        .getByRole('button', { hidden: true, name: /^Subagent task: vault probe - Status: completed/ });
+      const [prompted] = responseElements(view);
+      expect(prompted.contains(completed)).toBe(true);
+      const content = completed.closest<HTMLElement>('[data-subagent-id]')!;
+      expect(within(content).getByText('List the vault root.')).toBeTruthy();
+      expect(within(content).getByText('Inbox, Work, Template.')).toBeTruthy();
+      expect(view.tab.dom.messagesEl.querySelectorAll('[data-subagent-id="spawn-1"]')).toHaveLength(1);
     } finally {
       await view.dispose();
     }
@@ -268,7 +330,7 @@ describe('Pi extension-initiated turns in the chat view', () => {
       await waitFor(() => expect(within(view.tab.dom.messagesEl)
         .getAllByRole('button', { name: 'Task notification' })).toHaveLength(1));
       await waitFor(() => expect(view.tab.executionCoordinator.hasBackgroundWork).toBe(false));
-      await view.tab.session.awaitBackgroundWork();
+      await view.tab.session.runtime.awaitBackgroundWork();
 
       const [prompted, wake] = responseElements(view);
       expect(responseElements(view)).toHaveLength(2);

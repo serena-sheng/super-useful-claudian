@@ -1,6 +1,9 @@
 /** @jest-environment jsdom */
 import '@/providers';
 
+import { runtimeHostFor } from '@test/helpers/providerRuntimeHost';
+import { parseGrokHistoryContent } from '@test/helpers/providers/grokHistory';
+import { writeGrokCatalog } from '@test/helpers/providers/grokSettings';
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, within } from '@testing-library/dom';
 import { axe } from 'jest-axe';
@@ -18,8 +21,6 @@ import { SubagentManager } from '@/features/chat/subagents/SubagentManager';
 import { StreamController } from '@/features/chat/turns/StreamController';
 import type { ACPSessionNotification } from '@/providers/acp';
 import { GrokExecutionBackend, type GrokExecutionNativeConnection } from '@/providers/grok/execution/GrokExecutionBackend';
-import { parseGrokHistoryContent } from '@/providers/grok/history/GrokHistoryStore';
-import { updateCurrentGrokCatalog } from '@/providers/grok/settings';
 
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };
@@ -45,7 +46,7 @@ function createGrokHost(): ProviderHost {
     getResolvedProviderCliPath: async () => 'grok',
     settings: { model: 'grok/grok-4', providerConfigs: { grok: { enabled: true, visibleModels: ['grok-4'] } } },
   } as unknown as ProviderHost;
-  updateCurrentGrokCatalog(host.settings, {
+  writeGrokCatalog(host.settings, {
     defaultModelId: 'grok-4', fingerprint: 'fixture', refreshedAt: 1,
     models: [{ rawId: 'grok-4', displayName: 'Grok 4', supportsReasoning: false, reasoningEfforts: [] }],
   });
@@ -76,9 +77,9 @@ async function restoreLive(updates: NativeToolUpdates): Promise<ToolCallInfo> {
     interactionPort: { askUserQuestion: jest.fn(), dismissInteraction: jest.fn(), requestApproval: jest.fn() },
     lifecycle: 'persistent',
     nativePersistence: 'enabled',
-    vaultWorkingDirectory: '/workspace',
+    workingDirectory: '/workspace',
   };
-  const session = new GrokExecutionBackend(createGrokHost(), { nativeFactory: { create: () => native } })
+  const session = new GrokExecutionBackend(runtimeHostFor(createGrokHost(), 'grok'), { nativeFactory: { create: () => native } })
     .createSession(config);
   const output: ProviderExecutionEvent[] = [];
   try {
@@ -200,6 +201,22 @@ function mcpLookupUpdates(): NativeToolUpdates {
 }
 
 describe.each(['live', 'history'] as const)('%s Grok tool presentation', mode => {
+  it.each([{}, { rawInput: null, rawOutput: null }])('keeps a prior directory result across a v1 no-change update: %j', update => {
+    return (async () => {
+      const tool = await restore(mode, [
+        { sessionUpdate: 'tool_call', toolCallId: 'ls-null', title: 'list_dir', rawInput: { target_directory: 'notes' } },
+        { sessionUpdate: 'tool_call_update', toolCallId: 'ls-null', rawOutput: { type: 'ListDir', Content: { content: '- /workspace/\n  - kept.md', absolute_root_path: '/workspace' } } },
+        { sessionUpdate: 'tool_call_update', toolCallId: 'ls-null', status: 'completed', ...update },
+      ]);
+      const block = renderStoredToolCall(document.body.createDiv(), tool);
+      expand(block, /^LS: notes/);
+      expect(tool.input).toMatchObject({ path: 'notes' });
+      expect(tool.providerPayload).toMatchObject({ rawInput: { target_directory: 'notes' }, rawOutput: { type: 'ListDir' } });
+      expect(lines(block)).toEqual(['- /workspace/', '  - kept.md']);
+      expect((await axe(block)).violations).toEqual([]);
+    })();
+  });
+
   it('shows terminal output without the pre-execution description or ANSI escapes', async () => {
     const plain = 'total 16\ndrwxr-xr-x@ 4 user wheel 128 .\n-rw-r--r--@ 1 user wheel 32 notes.txt\n  0%100% done\n';
     const colored = 'total 16\ndrwxr-xr-x@ 4 user wheel 128 \u001b[34m.\u001b[39;49m\u001b[0m\n-rw-r--r--@ 1 user wheel 32 notes.txt\n\r  0%\r100% done\n';

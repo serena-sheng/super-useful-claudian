@@ -18,6 +18,8 @@ export interface SDKNativeMessage {
     commandMode?: string;
   };
   parentUuid?: string | null;
+  /** Set on `compact_boundary`, whose `parentUuid` restarts the chain, to the pre-compaction parent. */
+  logicalParentUuid?: string | null;
   sessionId?: string;
   uuid?: string;
   timestamp?: string;
@@ -40,6 +42,8 @@ export interface SDKNativeMessage {
   sourceToolAssistantUUID?: string;
   sourceToolUseID?: string;
   isMeta?: boolean;
+  /** Native turn of a user-type record (Claude Code 2.1.274+). */
+  promptId?: string;
   isSidechain?: boolean;
   operation?: string;
   content?: string;
@@ -71,6 +75,8 @@ export interface SDKSessionLoadResult {
 export interface AsyncSubagentResult {
   result: string;
   status: string;
+  /** The notice carried only a summary; the full report lives in the sidecar. */
+  summaryOnly: boolean;
 }
 
 export type ResolvedAsyncStatus = Exclude<AsyncSubagentStatus, 'pending'>;

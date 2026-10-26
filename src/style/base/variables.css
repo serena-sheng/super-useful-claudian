@@ -1,8 +1,13 @@
 /* Brand & semantic color tokens */
 .claudian-container,
-.claudian-settings {
+.claudian-settings,
+.claudian-inline-input-container,
+.claudian-inline-menu-layer {
   --claudian-brand: #D97757;
   --claudian-brand-rgb: 217, 119, 87;
+  --claudian-provider-logo: var(--claudian-brand-claude);
+  --claudian-brand-neutral: #fff;
+  --claudian-brand-neutral-rgb: 255, 255, 255;
   --claudian-brand-claude: #D97757;
   --claudian-brand-claude-rgb: 217, 119, 87;
   --claudian-brand-codex: #d0d0d0;
@@ -13,6 +18,7 @@
   --claudian-brand-pi-rgb: 255, 255, 255;
   --claudian-brand-grok: #fff;
   --claudian-brand-grok-rgb: 255, 255, 255;
+  --claudian-brand-deepseek: #4D6BFE;
   --claudian-brand-omp: #F97316;
   --claudian-brand-omp-rgb: 249, 115, 22;
   --claudian-error: #dc3545;
@@ -25,7 +31,11 @@
   --claudian-selection-check: #86efac;
 }
 
-body.theme-light .claudian-container {
+body.theme-light .claudian-container,
+body.theme-light .claudian-inline-input-container,
+body.theme-light .claudian-inline-menu-layer {
+  --claudian-brand-neutral: #000;
+  --claudian-brand-neutral-rgb: 0, 0, 0;
   --claudian-brand-codex: #000;
   --claudian-brand-codex-rgb: 0, 0, 0;
   --claudian-brand-opencode: #707070;
@@ -34,44 +44,71 @@ body.theme-light .claudian-container {
   --claudian-brand-pi-rgb: 0, 0, 0;
   --claudian-brand-grok: #000;
   --claudian-brand-grok-rgb: 0, 0, 0;
-  --claudian-brand-omp: #EA580C;
-  --claudian-brand-omp-rgb: 234, 88, 12;
   --claudian-selection-check: #16a34a;
 }
 
-/* Active-provider alias for single-provider surfaces; a model row that names its provider takes that provider's. */
+/* Active-provider aliases (chat, zen, and the inline edit composer and its menu layer): `--claudian-provider-logo` colours provider icons, `--claudian-brand` the other accents.
+   A provider tab in the model menu takes its own provider's. */
 .claudian-container[data-provider="claude"],
-.claudian-container .claudian-model-option[data-provider="claude"] {
+.claudian-inline-input-container[data-provider="claude"],
+.claudian-inline-menu-layer[data-provider="claude"],
+.claudian-model-provider-tab[data-provider="claude"] {
   --claudian-brand: var(--claudian-brand-claude);
   --claudian-brand-rgb: var(--claudian-brand-claude-rgb);
+  --claudian-provider-logo: var(--claudian-brand-claude);
 }
 
 .claudian-container[data-provider="codex"],
-.claudian-container .claudian-model-option[data-provider="codex"] {
+.claudian-inline-input-container[data-provider="codex"],
+.claudian-inline-menu-layer[data-provider="codex"],
+.claudian-model-provider-tab[data-provider="codex"] {
   --claudian-brand: var(--claudian-brand-codex);
   --claudian-brand-rgb: var(--claudian-brand-codex-rgb);
+  --claudian-provider-logo: var(--claudian-brand-codex);
 }
 
 .claudian-container[data-provider="opencode"],
-.claudian-container .claudian-model-option[data-provider="opencode"] {
+.claudian-inline-input-container[data-provider="opencode"],
+.claudian-inline-menu-layer[data-provider="opencode"],
+.claudian-model-provider-tab[data-provider="opencode"] {
   --claudian-brand: var(--claudian-brand-opencode);
   --claudian-brand-rgb: var(--claudian-brand-opencode-rgb);
+  --claudian-provider-logo: var(--claudian-brand-opencode);
 }
 
 .claudian-container[data-provider="pi"],
-.claudian-container .claudian-model-option[data-provider="pi"] {
+.claudian-inline-input-container[data-provider="pi"],
+.claudian-inline-menu-layer[data-provider="pi"],
+.claudian-model-provider-tab[data-provider="pi"] {
   --claudian-brand: var(--claudian-brand-pi);
   --claudian-brand-rgb: var(--claudian-brand-pi-rgb);
+  --claudian-provider-logo: var(--claudian-brand-pi);
 }
 
 .claudian-container[data-provider="grok"],
-.claudian-container .claudian-model-option[data-provider="grok"] {
+.claudian-inline-input-container[data-provider="grok"],
+.claudian-inline-menu-layer[data-provider="grok"],
+.claudian-model-provider-tab[data-provider="grok"] {
   --claudian-brand: var(--claudian-brand-grok);
   --claudian-brand-rgb: var(--claudian-brand-grok-rgb);
+  --claudian-provider-logo: var(--claudian-brand-grok);
+}
+
+.claudian-container[data-provider="deepseek"],
+.claudian-inline-input-container[data-provider="deepseek"],
+.claudian-inline-menu-layer[data-provider="deepseek"],
+.claudian-model-provider-tab[data-provider="deepseek"] {
+  /* DeepSeek blue marks only its logo; its other accents read as normal text. */
+  --claudian-brand: var(--claudian-brand-neutral);
+  --claudian-brand-rgb: var(--claudian-brand-neutral-rgb);
+  --claudian-provider-logo: var(--claudian-brand-deepseek);
 }
 
 .claudian-container[data-provider="omp"],
-.claudian-container .claudian-model-option[data-provider="omp"] {
+.claudian-inline-input-container[data-provider="omp"],
+.claudian-inline-menu-layer[data-provider="omp"],
+.claudian-model-provider-tab[data-provider="omp"] {
   --claudian-brand: var(--claudian-brand-omp);
   --claudian-brand-rgb: var(--claudian-brand-omp-rgb);
+  --claudian-provider-logo: var(--claudian-brand-omp);
 }

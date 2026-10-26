@@ -4,7 +4,6 @@ import type {
   ProviderModelPolicy,
   ProviderUIOption,
 } from '../../core/providers/types';
-import { maybeGetOpencodeWorkspaceServices } from './app/OpencodeWorkspaceServices';
 import { OpencodeMetadataService } from './metadata/OpencodeMetadataService';
 import {
   buildOpencodeBaseModels,
@@ -14,6 +13,7 @@ import {
   OPENCODE_DEFAULT_THINKING_LEVEL,
   resolveOpencodeBaseModelRawId,
   resolveOpencodeDefaultThinkingLevel,
+  splitOpencodeModelLabel,
 } from './models';
 import { OPENCODE_PERMISSION_MODE_POLICY } from './permissionModes';
 import { getOpencodeProviderSettings, updateOpencodeProviderSettings } from './settings';
@@ -23,18 +23,18 @@ export const opencodeModelPolicy: ProviderModelPolicy = {
   permissionModes: OPENCODE_PERMISSION_MODE_POLICY,
   getModelOptions(settings): ProviderUIOption[] {
     const opencodeSettings = getOpencodeProviderSettings(settings);
-    const applyAlias = (rawId: string, option: ProviderUIOption): ProviderUIOption => {
-      const alias = opencodeSettings.modelAliases[rawId];
-      return alias ? { ...option, label: alias } : option;
-    };
-    const discoveredModels = new Map(buildOpencodeBaseModels(opencodeSettings.discoveredModels).map((model) => [
-      encodeOpencodeModelId(model.rawId),
-      applyAlias(model.rawId, {
-        description: model.description ?? 'ACP runtime',
-        label: model.label,
+    // Native labels read "Upstream/Model": the upstream provider becomes the group, the rest the name.
+    const discoveredModels = new Map(buildOpencodeBaseModels(opencodeSettings.discoveredModels).map((model) => {
+      const { modelLabel, providerLabel } = splitOpencodeModelLabel(model.label);
+      const hasUpstream = model.label.includes('/');
+      const option: ProviderUIOption = {
+        ...(model.description ? { description: model.description } : {}),
+        ...(hasUpstream ? { group: providerLabel } : {}),
+        label: Object.hasOwn(opencodeSettings.modelAliases, model.rawId) ? opencodeSettings.modelAliases[model.rawId] : modelLabel,
         value: encodeOpencodeModelId(model.rawId),
-      }),
-    ]));
+      };
+      return [option.value, option];
+    }));
     const seenValues = new Set<string>();
     const options: ProviderUIOption[] = [];
     for (const rawModelId of [...opencodeSettings.visibleModels]) {
@@ -89,30 +89,6 @@ export const opencodeModelPolicy: ProviderModelPolicy = {
 
   applyModelProjectionDefaults: applyOpencodeModelDefaults,
 
-  async prepareModelMetadata(model: string, _settings: Record<string, unknown>, context): Promise<void> {
-    const rawModelId = decodeOpencodeModelId(model);
-    if (!rawModelId) {
-      return;
-    }
-
-    const opencodeSettings = getOpencodeProviderSettings(context.plugin.settings);
-    const baseRawId = resolveOpencodeBaseModelRawId(rawModelId, opencodeSettings.discoveredModels);
-    if (baseRawId && opencodeSettings.thinkingOptionsByModel[baseRawId]) {
-      return;
-    }
-
-    const workspaceService = maybeGetOpencodeWorkspaceServices()?.metadataService;
-    const metadataService = workspaceService
-      ?? new OpencodeMetadataService(context.plugin);
-    try {
-      await metadataService.warmModelMetadata(model);
-    } catch {
-      // Metadata warmup is opportunistic; the first real turn can still discover it.
-    } finally {
-      if (!workspaceService) await metadataService.dispose();
-    }
-  },
-
   applyReasoningSelection(model: string, value: string, settings: unknown): void {
     if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
       return;
@@ -127,7 +103,7 @@ export const opencodeModelPolicy: ProviderModelPolicy = {
     const opencodeSettings = getOpencodeProviderSettings(settingsBag);
     const baseRawId = resolveOpencodeBaseModelRawId(rawModelId, opencodeSettings.discoveredModels);
     const supportedValues = new Set(
-      (opencodeSettings.thinkingOptionsByModel[baseRawId] ?? []).map((variant) => variant.value),
+      (Object.hasOwn(opencodeSettings.thinkingOptionsByModel, baseRawId) ? opencodeSettings.thinkingOptionsByModel[baseRawId] : []).map((variant) => variant.value),
     );
     const nextPreferredThinkingByModel = {
       ...opencodeSettings.preferredThinkingByModel,
@@ -136,7 +112,7 @@ export const opencodeModelPolicy: ProviderModelPolicy = {
     if (!value || !supportedValues.has(value)) {
       delete nextPreferredThinkingByModel[baseRawId];
     } else {
-      nextPreferredThinkingByModel[baseRawId] = value;
+      Object.defineProperty(nextPreferredThinkingByModel, baseRawId, { value, enumerable: true, writable: true, configurable: true });
     }
 
     updateOpencodeProviderSettings(settingsBag, {
@@ -190,8 +166,8 @@ function getDefaultThinkingLevelForModel(
 ): string {
   const opencodeSettings = getOpencodeProviderSettings(settings);
   return resolveOpencodeDefaultThinkingLevel(
-    opencodeSettings.thinkingOptionsByModel[baseRawId] ?? [],
-    opencodeSettings.preferredThinkingByModel[baseRawId],
+    Object.hasOwn(opencodeSettings.thinkingOptionsByModel, baseRawId) ? opencodeSettings.thinkingOptionsByModel[baseRawId] : [],
+    Object.hasOwn(opencodeSettings.preferredThinkingByModel, baseRawId) ? opencodeSettings.preferredThinkingByModel[baseRawId] : undefined,
   );
 }
 
@@ -206,7 +182,7 @@ function getOpencodeThinkingOptions(
 
   const opencodeSettings = getOpencodeProviderSettings(settings);
   const baseRawId = resolveOpencodeBaseModelRawId(rawModelId, opencodeSettings.discoveredModels);
-  return opencodeSettings.thinkingOptionsByModel[baseRawId] ?? [];
+  return Object.hasOwn(opencodeSettings.thinkingOptionsByModel, baseRawId) ? opencodeSettings.thinkingOptionsByModel[baseRawId] : [];
 }
 
 function pushOption(
@@ -221,4 +197,36 @@ function pushOption(
 
   seenValues.add(value);
   target.push(option);
+}
+
+/**
+ * Warms model-scoped metadata after selection. Reuses the shared workspace metadata
+ * service when initialized; otherwise owns and disposes a temporary one.
+ */
+export function createOpencodeModelMetadataPreparer(
+  getSharedMetadataService: () => OpencodeMetadataService | null | undefined,
+): NonNullable<ProviderModelPolicy['prepareModelMetadata']> {
+  return async (model, _settings, context) => {
+    const rawModelId = decodeOpencodeModelId(model);
+    if (!rawModelId) {
+      return;
+    }
+
+    const opencodeSettings = getOpencodeProviderSettings(context.plugin.settings);
+    const baseRawId = resolveOpencodeBaseModelRawId(rawModelId, opencodeSettings.discoveredModels);
+    if (baseRawId && Object.hasOwn(opencodeSettings.thinkingOptionsByModel, baseRawId)) {
+      return;
+    }
+
+    const workspaceService = getSharedMetadataService();
+    const metadataService = workspaceService
+      ?? new OpencodeMetadataService(context.plugin.getRuntimeHost('opencode'), context.plugin.executionLifecycleRegistry);
+    try {
+      await metadataService.warmModelMetadata(model);
+    } catch {
+      // Metadata warmup is opportunistic; the first real turn can still discover it.
+    } finally {
+      if (!workspaceService) await metadataService.dispose();
+    }
+  };
 }

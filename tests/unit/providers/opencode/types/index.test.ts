@@ -21,7 +21,7 @@ describe('OpenCode provider state', () => {
     Object.assign(conversation, await service.hydrateConversationHistory(
       conversation,
       null,
-      { environment: { HOME: '/missing-home', XDG_DATA_HOME: '/missing-data' } },
+      { config: {}, environment: { HOME: '/missing-home', XDG_DATA_HOME: '/missing-data' }, environmentText: '' },
     ));
     expect(service.buildPersistedProviderState(conversation)).toEqual({
       futureResumeCursor: { token: 'cursor-1' },
@@ -70,6 +70,24 @@ describe('OpenCode provider state', () => {
 
   it('retains the typed source checkpoint for a deferred fork', () => {
     expect(getOpencodeState({ forkSource: { sessionId: 'source', resumeAt: 'reply' } })).toEqual({ forkSource: { sessionId: 'source', resumeAt: 'reply' } });
+  });
+
+  it('normalizes history-only previous sessions and drops malformed entries', () => {
+    expect(getOpencodeState({
+      previousSessions: [
+        { sessionId: ' first ', databasePath: ' /tmp/opencode.db ', nativeVersion: 1 },
+        { sessionId: 'second', databasePath: 42, nativeVersion: 3 },
+        { sessionId: '  ' },
+        'third',
+        null,
+      ],
+    })).toEqual({
+      previousSessions: [
+        { sessionId: 'first', databasePath: '/tmp/opencode.db', nativeVersion: 1 },
+        { sessionId: 'second' },
+      ],
+    });
+    expect(getOpencodeState({ previousSessions: 'invalid' })).toEqual({});
   });
 
   it.each([undefined, null, [], 'invalid', 42])(

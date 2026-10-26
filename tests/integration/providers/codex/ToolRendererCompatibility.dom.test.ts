@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 import '@/providers';
 
+import { parseCodexSessionContent } from '@test/helpers/providers/codex/parseCodexSessionContent';
 import { testDate, testTime } from '@test/helpers/testClock';
 import { fireEvent, waitFor, within } from '@testing-library/dom';
 import { axe } from 'jest-axe';
@@ -9,15 +10,13 @@ import { Component, MarkdownRenderer } from 'obsidian';
 import { getToolIcon } from '@/core/tools/toolIcons';
 import { applyToolResultPresentation } from '@/core/tools/toolResultDetails';
 import type { ChatMessage, StreamChunk, ToolCallInfo } from '@/core/types';
-import { AsyncQuestionPrompts } from '@/features/chat/interactions/AsyncQuestionPrompts';
 import type { QuestionAnswerHandler } from '@/features/chat/interactions/InlineAskUserQuestion';
-import { InlineInteractionPrompts } from '@/features/chat/interactions/InlineInteractionPrompts';
+import { SessionInteractions } from '@/features/chat/interactions/SessionInteractions';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
 import { renderStoredToolCall, renderToolCall, updateToolCallResult } from '@/features/chat/rendering/tools/ToolCallRenderer';
 import { ChatState } from '@/features/chat/state/ChatState';
 import { SubagentManager } from '@/features/chat/subagents/SubagentManager';
 import { StreamController } from '@/features/chat/turns/StreamController';
-import { parseCodexSessionContent } from '@/providers/codex/history/CodexHistoryStore';
 import { formatCodexQuestionReply } from '@/providers/codex/normalization/codexQuestionNormalization';
 import { CodexNotificationRouter } from '@/providers/codex/runtime/CodexNotificationRouter';
 
@@ -355,13 +354,12 @@ function showQuestion(tool: ToolCallInfo, onAnswer: QuestionAnswerHandler) {
   const panelHost = document.body.createDiv();
 
   const block = renderToolCall(document.body.createDiv(), tool, { initiallyExpanded: true });
-  const prompts = new AsyncQuestionPrompts({
-    prompts: new InlineInteractionPrompts({ getPromptParentEl: () => panelHost, getSuppressedEl: () => composer }),
+  const prompts = new SessionInteractions({ getPromptParentEl: () => panelHost, getSuppressedEl: () => composer });
+  prompts.bindAsyncQuestions({
     answer: (_tool, answers) => onAnswer(answers),
     onChange: current => updateToolCallResult(block, current),
-    onPendingChange: () => undefined,
   });
-  prompts.update(tool);
+  prompts.updateAsyncQuestion(tool);
   return { composer, input, panelHost, block, prompts };
 }
 
@@ -381,7 +379,7 @@ it('submits a selected option and a free-text answer once, then restores both an
   fireEvent.input(within(panelHost).getByRole('textbox', { name: 'Any details?' }), { target: { value: 'Preserve my notes.' } });
   // Acknowledgement must not erase a selection made before it arrives.
   updateToolCallResult(block, tool);
-  prompts.update(tool);
+  prompts.updateAsyncQuestion(tool);
   const panel = within(panelHost).getByRole('region', { name: 'Question' });
   fireEvent.click(within(panel).getByRole('button', { name: 'Submit' }));
   expect(within(panel).getByText('History')).toBeDefined();
@@ -441,7 +439,7 @@ it('keeps answer controls usable after rejected submission and disables controls
   expect(tool.resolvedAnswers).toBeUndefined();
   expect((await axe(block)).violations).toEqual([]);
   tool.status = 'error';
-  prompts.update(tool);
+  prompts.updateAsyncQuestion(tool);
   await waitFor(() => expect(within(panelHost).queryByRole('button', { name: 'Submit answers' })).toBeNull());
   expect(composer.classList.contains('claudian-hidden')).toBe(false);
   expect(within(block).getByText('Question expired.')).toBeDefined();
@@ -485,7 +483,7 @@ it('expires dismissed questions and keeps history replay read-only', async () =>
   expect(onAnswer).not.toHaveBeenCalled();
   expect(tool.resolvedAnswers).toBeUndefined();
   expect(within(block).getByText('Question expired.')).toBeDefined();
-  prompts.update(tool);
+  prompts.updateAsyncQuestion(tool);
   const restored = renderStoredToolCall(document.body.createDiv(), tool, { initiallyExpanded: true });
   expect(within(restored).queryByRole('region', { name: 'Question' })).toBeNull();
   expect(within(restored).getByText('Question expired.')).toBeDefined();
@@ -548,21 +546,11 @@ it.each([false, true].flatMap(lateNative => ['text', 'thinking'].map(boundary =>
     (el as HTMLElement).createEl('p', { text: markdown });
   });
   const messagesEl = document.body.createDiv();
-  // Rendering an edit/apply_patch card schedules a delayed vault refresh
-  // (vaultFileChangeNotifications, 200ms). The callback outlives the test, so the
-  // stub vault has to answer it: under CI load it otherwise fired after teardown
-  // and threw `vault.getAbstractFileByPath is not a function`, failing whichever
-  // test happened to be running.
-  const plugin = {
-    app: {
-      vault: {
-        adapter: { list: async () => ({ files: [], folders: [] }) },
-        getAbstractFileByPath: () => null,
-        trigger: () => undefined,
-      },
-    },
-    settings: { mediaFolder: '', showMessageTimestamps: false },
-  } as any;
+  const vault = {
+    getAbstractFileByPath: jest.fn(() => null),
+    adapter: { list: jest.fn(async () => ({ files: [], folders: [] })) },
+  };
+  const plugin = { app: { vault }, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
   const renderer = new MessageRenderer(plugin, new Component(), messagesEl);
   const state = new ChatState();
   const subagents = new SubagentManager(() => undefined);
@@ -574,43 +562,101 @@ it.each([false, true].flatMap(lateNative => ['text', 'thinking'].map(boundary =>
     pending = pending.then(() => stream.handleStreamChunk(chunk, response));
   }, '/workspace');
   const notify = async (method: string, params: unknown) => { router.handleNotification(method, params); await pending; };
+  const timerWindow: Window = window;
+  const realSetTimeout = timerWindow.setTimeout.bind(timerWindow);
+  const vaultNotifications: Promise<void>[] = [];
+  // Keep real notification timing, but join this case's callbacks before releasing its fixture.
+  const timeoutSpy = jest.spyOn(timerWindow, 'setTimeout').mockImplementation((handler, delay, ...args) => {
+    if (delay !== 200 || typeof handler !== 'function') return realSetTimeout(handler, delay, ...args);
+    let complete!: () => void;
+    vaultNotifications.push(new Promise<void>(resolve => { complete = resolve; }));
+    return realSetTimeout(function (this: Window, ...callbackArgs: unknown[]) {
+      try {
+        return handler.apply(this, callbackArgs);
+      } finally {
+        complete();
+      }
+    }, delay, ...args);
+  });
+  const joinVaultNotifications = async () => {
+    for (const notification of vaultNotifications) await notification;
+  };
+  const retainedHeaders: HTMLElement[] = [];
+  const expectPatchCard = (header: HTMLElement, index: number, patch: string, result: string) => {
+    const card = state.toolCallElements.get(`patch-${index}`)!;
+    expect(header.parentElement).toBe(card);
+    expect(card.dataset.toolId).toBe(`patch-${index}`);
+    expect(response.toolCalls?.find(tool => tool.id === `patch-${index}`)).toMatchObject({
+      id: `patch-${index}`, name: 'apply_patch', input: { patch }, status: 'completed', result,
+    });
+    expect(within(card).getByLabelText('Changes: +1 -0')).toBeDefined();
+    expect(header.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(header);
+    expect(header.getAttribute('aria-expanded')).toBe('true');
+    const content = card.querySelector<HTMLElement>('.claudian-tool-content')!;
+    expect(within(content).getAllByText(`hello-${index}`)).toHaveLength(1);
+    fireEvent.click(header);
+    expect(header.getAttribute('aria-expanded')).toBe('false');
+  };
   try {
     state.addMessage(response);
     state.currentContentEl = renderer.addMessage(response).querySelector('.claudian-message-content');
     router.beginTurn();
     await notify('item/agentMessage/delta', { itemId: 'intro', delta: 'Creating the note.' });
     for (const [index, wrapped] of [false, true].entries()) {
-      const patch = `*** Begin Patch\n*** Add File: note-${index}.md\n+hello\n*** End Patch`;
+      const patch = `*** Begin Patch\n*** Add File: note-${index}.md\n+hello-${index}\n*** End Patch`;
       await notify('rawResponseItem/completed', { item: { type: 'custom_tool_call', name: wrapped ? 'exec' : 'apply_patch', call_id: `patch-${index}`,
         input: wrapped ? `text(await tools.apply_patch(${JSON.stringify(patch)}));` : patch } });
       await notify('rawResponseItem/completed', { item: { type: 'custom_tool_call_output', call_id: `patch-${index}`, output: 'Success.' } });
       await notify(boundary === 'text' ? 'item/agentMessage/delta' : 'item/reasoning/summaryTextDelta', { itemId: `check-${index}`, delta: `Checking note ${index}.` });
       await stream.finalizeCurrentThinkingBlock(response);
       await stream.finalizeCurrentTextBlock(response);
-      expect(within(messagesEl).getAllByRole('button', { name: /^apply_patch: note-/ })).toHaveLength(index + 1);
+      const currentHeaders = within(messagesEl).getAllByRole('button', { name: /^apply_patch:/ });
+      expect(currentHeaders).toHaveLength(index + 1);
+      const header = currentHeaders[index];
+      retainedHeaders.push(header);
+      expectPatchCard(header, index, patch, 'Success.');
       if (lateNative) {
         await notify('item/completed', { item: { type: 'fileChange', id: `native-${index}`, status: 'completed',
-          changes: [{ path: `/workspace/note-${index}.md`, kind: { type: 'add' }, diff: 'hello\n' }] } });
+          changes: [{ path: `/workspace/note-${index}.md`, kind: { type: 'add' }, diff: `hello-${index}\n` }] } });
       }
+      const updatedHeaders = within(messagesEl).getAllByRole('button', { name: /^apply_patch:/ });
+      expect(updatedHeaders).toHaveLength(index + 1);
+      for (const [position, retained] of retainedHeaders.entries()) {
+        expect(updatedHeaders[position]).toBe(retained);
+      }
+      expectPatchCard(updatedHeaders[index], index, patch, lateNative ? `add: /workspace/note-${index}.md` : 'Success.');
       if (boundary === 'text') {
         await notify('rawResponseItem/completed', { item: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: `Checking note ${index}.` }] } });
         await stream.finalizeCurrentTextBlock(response);
       }
       expect(within(messagesEl).getAllByText(`Checking note ${index}.`)).toHaveLength(1);
+      const boundaryText = within(messagesEl).getByText(`Checking note ${index}.`);
+      expect(header.compareDocumentPosition(boundaryText) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
     await notify('item/agentMessage/delta', { itemId: 'final', delta: 'Notes are ready.' });
     await notify('rawResponseItem/completed', { item: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Notes are ready.' }] } });
     await notify('turn/completed', { turn: { id: 'turn', status: 'completed' } });
     await stream.finalizeCurrentTextBlock(response);
-    const cards = within(messagesEl).getAllByRole('button', { name: /^apply_patch: note-/ });
+    const cards = within(messagesEl).getAllByRole('button', { name: /^apply_patch:/ });
     expect(cards).toHaveLength(2);
+    for (const [index, header] of cards.entries()) {
+      expect(header).toBe(retainedHeaders[index]);
+      expectPatchCard(header, index, `*** Begin Patch\n*** Add File: note-${index}.md\n+hello-${index}\n*** End Patch`, lateNative ? `add: /workspace/note-${index}.md` : 'Success.');
+    }
     const intro = within(messagesEl).getByText('Creating the note.');
     const answer = within(messagesEl).getByText('Notes are ready.');
     expect(intro.compareDocumentPosition(cards[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(cards[0].compareDocumentPosition(cards[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(cards[1].compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await joinVaultNotifications();
+    expect(vault.getAbstractFileByPath).toHaveBeenCalledWith('note-0.md');
+    expect(vault.getAbstractFileByPath).toHaveBeenCalledWith('note-1.md');
+    expect(vault.adapter.list).toHaveBeenCalledWith('');
     expect((await axe(messagesEl)).violations).toEqual([]);
   } finally {
+    await joinVaultNotifications();
     stream.dispose(); subagents.clear(); renderer.dispose();
+    timeoutSpy.mockRestore();
   }
 });

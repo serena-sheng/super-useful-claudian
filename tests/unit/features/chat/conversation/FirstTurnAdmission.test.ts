@@ -1,4 +1,5 @@
 import { createFixture, deferred, waitForCall } from '@test/helpers/ChatInputHarness';
+import { createProjectsFake } from '@test/helpers/features/chat/ProjectsFake';
 
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ChatExecutionPreHandoffError, type ChatTurnSubmission } from '@/features/chat/execution/ChatExecutionCoordinator';
@@ -127,6 +128,24 @@ describe('FirstTurnAdmission', () => {
     expect(fixture.input.value).toBe('Start linked session');
   });
 
+  it('creates a project-seeded draft with its raw frozen seed, keeping the seed across failed creation', async () => {
+    const fixture = createFixture();
+    // No live record: whether the seed still names a project is the repository's decision at creation, not admission's.
+    Object.assign(fixture.plugin, { projects: createProjectsFake([]) });
+    fixture.state.currentConversationId = null;
+    fixture.deps.conversationController.seedDraftProject('project-1');
+    fixture.plugin.createConversation
+      .mockRejectedValueOnce(new Error('storage unavailable'))
+      .mockResolvedValue({ id: 'project-conversation' });
+
+    await expect(fixture.controller.sendMessage({ content: 'First attempt' })).rejects.toThrow('storage unavailable');
+    await fixture.controller.sendMessage({ content: 'Retry' });
+
+    const expected = { providerId: 'claude', selectedModel: 'claude-model', projectId: 'project-1' };
+    expect(fixture.plugin.createConversation.mock.calls).toEqual([[expected], [expected]]);
+    expect(fixture.state.currentConversationId).toBe('project-conversation');
+  });
+
   it('keeps a created zero-message Conversation locked and retries ordinal one', async () => {
     const token = Object.freeze({ path: 'Projects/Plan.md' });
     const linkedContentController = {
@@ -211,15 +230,6 @@ describe('FirstTurnAdmission', () => {
       beginSubmission: jest.fn().mockReturnValue(token),
       commitSubmission: jest.fn().mockImplementation(() => {
         currentPath = 'Projects/New';
-        return {
-          linkedContentPath: currentPath,
-          queuedEvents: [{
-            kind: 'rename',
-            oldPath: 'Projects/Old',
-            newPath: 'Projects/New',
-            includeDescendants: true,
-          }],
-        };
       }),
       getSnapshot: jest.fn().mockImplementation(() => ({
         mode: currentPath === 'Projects/Old' ? 'explicit-draft' : 'locked',
@@ -276,7 +286,6 @@ it('does not steer Linked content captured while the first turn resolves session
   fixture.plugin.getConversationById.mockReturnValueOnce(source.promise);
   Object.assign(fixture.plugin, {
     findConversationAcrossViews: () => null,
-    writeSessionSnapshot: jest.fn().mockResolvedValue('/tmp/claudian-sessions/source.md'),
   });
   const turn = deferred<{ accepted: boolean; status: string }>();
   fixture.coordinator.execute.mockReturnValueOnce(turn.promise);

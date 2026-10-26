@@ -38,7 +38,7 @@ export interface SubagentStreamRouterDeps {
   state: ChatState;
   /** Shared with other streams of the same owner; managed ids stay per stream. */
   subagentManager: SubagentManager;
-  getMessagesEl: () => HTMLElement;
+  getMessagesEl: () => HTMLElement | null;
   getProviderId: () => ProviderId;
   /** Recovers finished async subagents from provider history; absent when the owner has none. */
   asyncSubagentHistoryRecovery?: AsyncSubagentHistoryRecovery;
@@ -98,7 +98,7 @@ export class SubagentStreamRouter {
       this.#recordRenderedPendingTask(
         msg,
         chunk.id,
-        subagentManager.renderPendingTaskFromTaskResult(
+        subagentManager.resolvePendingTaskFromTaskResult(
           chunk.id,
           chunk.content,
           chunk.isError || false,
@@ -133,7 +133,7 @@ export class SubagentStreamRouter {
       this.#recordRenderedPendingTask(
         msg,
         parentToolUseId,
-        subagentManager.renderPendingTask(parentToolUseId, this.#getMessageContentEl(msg)),
+        subagentManager.resolvePendingTask(parentToolUseId, this.#getMessageContentEl(msg)),
       );
     }
 
@@ -147,7 +147,7 @@ export class SubagentStreamRouter {
         break;
 
       case 'subagent_tool_output': {
-        const toolCall = subagentState.info.toolCalls.find(tc => tc.id === chunk.id);
+        const toolCall = subagentState.toolCalls.find(tc => tc.id === chunk.id);
         if (toolCall) {
           subagentManager.updateSyncToolResult(parentToolUseId, chunk.id, {
             ...toolCall, result: (toolCall.result ?? '') + chunk.content,
@@ -157,7 +157,7 @@ export class SubagentStreamRouter {
       }
 
       case 'subagent_tool_result': {
-        const existing = subagentState.info.toolCalls.find(tc => tc.id === chunk.id);
+        const existing = subagentState.toolCalls.find(tc => tc.id === chunk.id);
         if (existing) {
           const toolCall = { ...existing };
           applyToolCompletion(toolCall, chunk);
@@ -172,12 +172,15 @@ export class SubagentStreamRouter {
   /** Applies a provider session update; returns whether a lifecycle subagent card was placed. */
   handleSubagentUpdate(info: SubagentInfo): boolean {
     this.deps.subagentManager.applySessionUpdate(info);
-    for (const message of this.deps.state.messages) {
+    const { messages } = this.deps.state;
+    for (const [index, message] of messages.entries()) {
       const tool = message.toolCalls?.find(candidate => candidate.id === info.id);
       if (!tool) continue;
       const adapter = this.#getAdapter(tool.name);
       if (adapter?.protocol !== 'lifecycle') return false;
-      this.#placeLifecycleSubagent(tool, message, adapter);
+      // An earlier turn's unrendered message (outside the transcript window) never places into the current reply.
+      const earlierTurn = messages.slice(index + 1).some(item => item.role === 'user');
+      this.#placeLifecycleSubagent(tool, message, adapter, !earlierTurn);
       return true;
     }
     return false;
@@ -229,10 +232,10 @@ export class SubagentStreamRouter {
     return resolveSubagentAdapter(this.deps.getProviderId(), toolName);
   }
 
-  #getMessageContentEl(message: ChatMessage): HTMLElement | null {
-    return this.deps.getMessagesEl().querySelector<HTMLElement>(
+  #getMessageContentEl(message: ChatMessage, inCurrentReply = true): HTMLElement | null {
+    return this.deps.getMessagesEl()?.querySelector<HTMLElement>(
       `[data-message-id="${message.id}"] .claudian-message-content`,
-    ) ?? this.deps.state.currentContentEl;
+    ) ?? (inCurrentReply ? this.deps.state.currentContentEl : null);
   }
 
   // ============================================
@@ -247,7 +250,7 @@ export class SubagentStreamRouter {
     );
     switch (result.action) {
       case 'created_sync':
-        this.#recordSubagentInMessage(msg, result.subagentState.info, chunk.id);
+        this.#recordSubagentInMessage(msg, result.info, chunk.id);
         this.deps.indicator.show();
         break;
       case 'created_async':
@@ -265,11 +268,11 @@ export class SubagentStreamRouter {
   #recordRenderedPendingTask(
     msg: ChatMessage,
     toolId: string,
-    result: ReturnType<SubagentManager['renderPendingTask']>,
+    result: ReturnType<SubagentManager['resolvePendingTask']>,
   ): void {
     if (!result) return;
     if (result.mode === 'sync') {
-      this.#recordSubagentInMessage(msg, result.subagentState.info, toolId);
+      this.#recordSubagentInMessage(msg, result.info, toolId);
     } else {
       this.#recordSubagentInMessage(msg, result.info, toolId, 'async');
     }
@@ -427,10 +430,11 @@ export class SubagentStreamRouter {
     toolCall: ToolCallInfo,
     msg: ChatMessage,
     adapter: ProviderSubagentLifecycleAdapter,
+    inCurrentReply = true,
   ): void {
     const { state, subagentManager, tools } = this.deps;
     const id = toolCall.id;
-    const content = this.#getMessageContentEl(msg);
+    const content = this.#getMessageContentEl(msg, inCurrentReply);
     const restored = content ? [...content.querySelectorAll<HTMLElement>('[data-subagent-id]')]
       .find(element => element.dataset.subagentId === id) : undefined;
     const previous = restored ?? subagentManager.getLifecycleElement(id) ?? state.toolCallElements.get(id);

@@ -1,5 +1,5 @@
-import type { ProviderAsyncSubagentCompletedEvent, ProviderBackgroundOutputEvent, ProviderSessionConfig, ProviderSystemInstructions } from '@/core/execution';
-import type { ProviderHost } from '@/core/providers/ProviderHost';
+import type { ProviderAsyncSubagentCompletedEvent, ProviderBackgroundOutputEvent, ProviderExecutionRequest,ProviderSessionConfig } from '@/core/execution';
+import type { ProviderRuntimeHost } from '@/core/providers/ProviderRuntimeHost';
 import type { ForkSource, SubagentProgress } from '@/core/types';
 import type { ACPPromptRequest, ACPPromptResponse, ACPSessionConfigOption, ACPSessionModelState, ACPSessionNotification } from '@/providers/acp';
 
@@ -12,7 +12,8 @@ export type OpencodeExecutionProfile = 'managed' | 'passive' | 'readonly';
 
 export interface OpencodeKernelConnectOptions {
   readonly profile: OpencodeExecutionProfile;
-  readonly systemInstructions: ProviderSystemInstructions;
+  /** Literal instructions, fixed for the kernel's lifetime. */
+  readonly systemPrompt: string;
 }
 
 export interface OpencodeNativeSessionInfo {
@@ -41,7 +42,7 @@ export interface OpencodeSessionKernelOptions {
   readonly getActiveTurnId: () => string | null;
   readonly onClosed: (error: Error) => void;
   readonly onNotification: (notification: ACPSessionNotification) => void;
-  readonly plugin: ProviderHost;
+  readonly host: ProviderRuntimeHost;
   readonly sessionInstanceId: string;
 }
 
@@ -57,7 +58,7 @@ export interface OpencodeSessionKernel {
   /** Replies `once` to managed permission requests, like OpenCode's `--auto`; `deny` rules never ask. */
   setAutoApprove(enabled: boolean): void;
   /** `userText` locates typed input whose native mentions the kernel may resolve. */
-  prompt(request: ACPPromptRequest, userText?: OpencodeTextRange | null): Promise<Pick<
+  prompt(request: ACPPromptRequest, userText?: OpencodeTextRange | null, run?: Pick<ProviderExecutionRequest, 'toolPolicy' | 'signal'>): Promise<Pick<
     ACPPromptResponse,
     'usage' | 'userMessageId'
   > & Partial<Pick<ACPPromptResponse, 'stopReason'>>>;

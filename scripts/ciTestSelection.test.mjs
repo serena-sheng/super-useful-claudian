@@ -58,6 +58,22 @@ test('mocked process policies remain in the ordinary suite without native jobs',
   assert.equal(result.crossPlatform, false);
 });
 
+test('platform-sensitive unit tests retain native checks for both direct and source changes', () => {
+  for (const [source, consumer] of [
+    ['src/core/process/env.ts', 'tests/unit/core/process/env.test.ts'],
+    ['src/core/storage/VaultFileAdapter.ts', 'tests/unit/core/storage/VaultFileAdapter.test.ts'],
+    ['src/providers/codex/history/CodexHistoryStore.ts', 'tests/unit/providers/codex/history/CodexHistoryStore.test.ts'],
+    ['src/providers/deepseek/ui/DeepSeekSettingsTab.ts', 'tests/unit/providers/deepseek/ui/DeepSeekSettingsTab.test.ts'],
+  ]) {
+    for (const eventName of ['pull_request', 'push']) {
+      const result = select([source], [consumer], eventName);
+      assert.deepEqual(result.crossPlatformTests, [consumer]);
+      assert.equal(result.crossPlatform, true);
+      assert.deepEqual(select([consumer], [], eventName).crossPlatformTests, [consumer]);
+    }
+  }
+});
+
 test('real dependency discovery retains native launch checks for shared process changes', () => {
   const result = selectRelatedCiTests({
     changes: [{ status: 'M', path: 'src/core/process/windowsCmdShim.ts' }],
@@ -65,6 +81,18 @@ test('real dependency discovery retains native launch checks for shared process 
   assert.deepEqual(result.crossPlatformTests.sort(), [
     'tests/integration/core/process/ManagedStdioProcess.test.ts',
     'tests/integration/core/process/ProcessProbe.test.ts',
+    'tests/integration/core/process/loginShellPath.test.ts',
+    'tests/integration/providers/deepseek/app/DeepSeekWorkspaceServices.test.ts',
+    'tests/integration/providers/deepseek/runtime/DeepSeekHostProcess.test.ts',
+    'tests/integration/providers/opencode/execution/OpencodeV2Execution.test.ts',
+    'tests/integration/providers/opencode/http/OpencodeSharedServer.test.ts',
+    'tests/integration/providers/pi/execution/PiExecutionKernel.test.ts',
+    'tests/integration/providers/pi/execution/PiRecoveryContext.test.ts',
+    'tests/unit/providers/claude/execution/ClaudeExecutionBackend.test.ts',
+    'tests/unit/providers/codex/execution/CodexExecutionBackend.test.ts',
+    'tests/unit/providers/deepseek/runtime/DeepSeekCLIResolver.test.ts',
+    'tests/unit/providers/deepseek/runtime/DeepSeekInstallation.test.ts',
+    'tests/unit/providers/deepseek/ui/DeepSeekSettingsTab.test.ts',
   ]);
   assert.equal(result.piWindows, true);
   assert.ok(result.testFiles.includes('tests/unit/core/process/windowsCmdShim.test.ts'));
@@ -89,6 +117,7 @@ test('shared test helpers use their graph consumers', () => {
 });
 
 test('filesystem-read documentation, styles, and captured fixtures retain their consumers', () => {
+  assert.ok(select(['src/style/base/visibility.css']).testFiles.includes('tests/integration/features/chat/composer/PromptHistoryNavigation.dom.test.ts'));
   assert.deepEqual(select(['README.md']).testFiles, [docs]);
   assert.deepEqual(select(['src/features/chat/AGENTS.md']).testFiles, [docs]);
   assert.ok(select(['src/style/components/code.css']).testFiles.includes('tests/unit/style/components/code.test.ts'));
@@ -101,7 +130,79 @@ test('filesystem-read documentation, styles, and captured fixtures retain their 
   }
   const fixture = select(['tests/fixtures/providers/grok/history/example.json']);
   assert.ok(fixture.testFiles.includes('tests/unit/providers/grok/history/GrokHistoryStore.test.ts'));
+  for (const status of ['A', 'M']) {
+    for (const event of ['pull_request', 'push']) {
+      for (const [file, consumers] of [
+        ['tests/fixtures/providers/grok/runtime/models-list.json', [
+          'tests/integration/providers/grok/runtime/GrokModels.test.ts',
+          'tests/integration/providers/grok/runtime/GrokModelDiscoveryService.test.ts',
+        ]],
+        ['tests/fixtures/providers/grok/runtime/models-list-byok.json', [
+          'tests/integration/providers/grok/runtime/GrokModels.test.ts',
+          'tests/integration/providers/grok/runtime/GrokModelDiscoveryService.test.ts',
+        ]],
+        ['tests/fixtures/providers/grok/runtime/turn-completed.json', [
+          'tests/unit/providers/grok/execution/GrokExecutionBackend.test.ts',
+        ]],
+      ]) {
+        const selected = select([{ status, path: file }], [], event);
+        for (const consumer of consumers) {
+          assert.ok(selected.testFiles.includes(consumer), `${status} ${file} on ${event} must select ${consumer}`);
+        }
+        assert.deepEqual([...selected.testFiles].sort(), [...consumers].sort(),
+          `${status} ${file} on ${event} must select exactly its filesystem consumers`);
+      }
+    }
+  }
 });
+
+const codexHistoryFixtures = [
+  'tests/fixtures/providers/codex/history/codex-session-persisted-tools.jsonl',
+  'tests/fixtures/providers/codex/history/codex-session-agent-lifecycle.jsonl',
+  'tests/fixtures/providers/codex/history/codex-session-websearch-persisted.jsonl',
+];
+
+for (const [name, selector] of [
+  ['pure', input => selectCiTests({ ...input, relatedTests: [] })],
+  ['related', selectRelatedCiTests],
+]) {
+  for (const fixture of codexHistoryFixtures) {
+    for (const status of ['A', 'M']) {
+      for (const eventName of ['pull_request', 'push']) {
+        test(`${name} selector registers ${status} ${fixture} on ${eventName}`, () => {
+          assert.deepEqual(selector({ changes: [{ status, path: fixture }], eventName }), {
+            testFiles: ['tests/unit/providers/codex/history/CodexHistoryStore.test.ts'],
+            scriptTests: [],
+            crossPlatformTests: ['tests/unit/providers/codex/history/CodexHistoryStore.test.ts'],
+            crossPlatform: true,
+            piWindows: false,
+          });
+        });
+      }
+    }
+  }
+
+  test(`${name} selector retains full verification outside the known Codex fixture boundary`, () => {
+    const full = {
+      testFiles: null, scriptTests: null, crossPlatformTests: null,
+      crossPlatform: true, piWindows: true,
+    };
+    for (const eventName of ['pull_request', 'push']) {
+      for (const changes of [
+        ...codexHistoryFixtures.map(path => [{ status: 'D', path }]),
+        [{ status: 'M', path: 'tests/fixtures/providers/codex/history/unregistered.jsonl' }],
+        [{ status: 'M', path: 'tests/fixtures/providers/codex/history/codex-session-persisted-tools-extra.jsonl' }],
+        [{ status: 'M', path: 'scripts/ciTestSelection.mjs' }],
+        [{ status: 'M', path: codexHistoryFixtures[0] }, { status: 'M', path: 'unknown-config' }],
+      ]) {
+        assert.deepEqual(selector({ changes, eventName }), full);
+      }
+    }
+    for (const eventName of ['schedule', 'workflow_call', 'workflow_dispatch']) {
+      assert.deepEqual(selector({ changes: [{ status: 'M', path: codexHistoryFixtures[0] }], eventName }), full);
+    }
+  });
+}
 
 test('native Pi launch runs only when affected', () => {
   const pi = 'tests/integration/providers/pi/runtime/PiSubprocess.windows.test.ts';

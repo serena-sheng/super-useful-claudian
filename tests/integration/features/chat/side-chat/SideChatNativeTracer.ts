@@ -10,8 +10,8 @@ import type { ProviderExecutionLifecycleRegistry } from '@/core/execution';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { ChatMessage, ImageAttachment, ProviderId } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
+import { handleForkRequest } from '@/features/chat/sessions/SessionForkSource';
 import { SideChatSession } from '@/features/chat/side-chat/SideChatSession';
-import { handleForkRequest } from '@/features/chat/tabs/forking/ForkSource';
 import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
 
 export const capturedImage: ImageAttachment = {
@@ -75,7 +75,7 @@ export async function traceSideChild(
     resolveBackend: () => backend,
     lifecycleRegistry: registry,
     interactionPort: options.interactionPort ?? rejectingInteractionPort(),
-    vaultWorkingDirectory: env.root,
+    workingDirectory: env.root,
     onRequestedEvent: event => { if (event.type === 'text_delta') responseText += event.text; },
   });
 

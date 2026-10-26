@@ -26,8 +26,7 @@ export const opencodeProviderRegistration: ProviderModule = {
   chatUIConfig: opencodeChatUIConfig,
   createExecutionBackend: (plugin) => {
     const workspace = getOpencodeWorkspaceServices();
-    return new OpencodeExecutionBackend(plugin, {
-      commandCatalog: workspace.commandCatalog,
+    return new OpencodeExecutionBackend(plugin.getRuntimeHost('opencode'), {
       serverService: workspace.serverService,
     });
   },
@@ -35,9 +34,11 @@ export const opencodeProviderRegistration: ProviderModule = {
   displayName: 'OpenCode',
   environmentKeyPatterns: [/^OPENCODE_/i],
   // History recovery can run before the workspace is initialized lazily.
-  historyService: new OpencodeConversationHistoryService(async context => {
-    if (!maybeGetOpencodeWorkspaceServices()) await context?.ensureWorkspace?.();
-    return maybeGetOpencodeWorkspaceServices()?.serverService;
+  historyService: new OpencodeConversationHistoryService({
+    getServerService: async context => {
+      if (!maybeGetOpencodeWorkspaceServices()) await context?.ensureWorkspace?.();
+      return maybeGetOpencodeWorkspaceServices()?.serverService;
+    },
   }),
   isEnabled: (settings) => getOpencodeProviderSettings(settings).enabled,
   setEnabled: (settings, enabled) => updateOpencodeProviderSettings(settings, { enabled }),

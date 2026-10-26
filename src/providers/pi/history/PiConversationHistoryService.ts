@@ -6,8 +6,8 @@ import { copyProviderHistoryState } from '@/core/providers/providerHistory';
 import { mergePersistedProviderState } from '../../../core/providers/providerState';
 import type {
   ProviderConversationHistoryService,
+  ProviderHistoryEnvironment,
   ProviderHistoryInput,
-  ProviderHistoryPathContext,
   ProviderHistoryResult,
   ProviderHistoryState,
   ProviderHistoryUpdate,
@@ -19,20 +19,23 @@ import {
   clearPiResumeState,
   getPiState,
   type PiPreviousSession,
+  type PiProviderState,
 } from '../types';
 import {
   isPiSessionPathReference,
   resolvePiSessionFileHint,
 } from './PiHistoryPathResolver';
 import {
+  type ParsedPiSessionEntries,
   parsePiSessionContent,
-  parsePiSessionEntries,
   parsePiSessionModel,
+  readPiSessionEntries,
   readPiSessionHeader,
   resolvePiTreeCursor,
 } from './PiHistoryStore';
 
 const PI_PROVIDER_STATE_KEYS = [
+  'bindingRetired', // Retired-binding migration.
   'treeCursor',
   'treeSelections',
   'forkSource',
@@ -60,7 +63,7 @@ export class PiConversationHistoryService implements ProviderConversationHistory
   async recoverConversationModelSelection(
     conversation: ProviderHistoryInput,
     vaultPath: string | null,
-    pathContext?: ProviderHistoryPathContext,
+    pathContext?: ProviderHistoryEnvironment,
   ): Promise<string | null> {
     const state = getPiState(conversation.providerState);
     const isPendingFork = this.isPendingForkConversation(conversation);
@@ -76,7 +79,7 @@ export class PiConversationHistoryService implements ProviderConversationHistory
     if (!sessionFile) return null;
 
     try {
-      const content = parsePiSessionEntries(await fs.readFile(sessionFile, 'utf8'));
+      const content = await readPiSessionEntries(sessionFile);
       const cursor = state.treeCursor ? resolvePiTreeCursor(content.entries, state.treeCursor) : undefined;
       return parsePiSessionModel(content, isPendingFork ? state.forkSource!.resumeAt : cursor ? cursor.leafId : state.leafEntryId);
     } catch {
@@ -87,7 +90,7 @@ export class PiConversationHistoryService implements ProviderConversationHistory
   async hydrateConversationHistory(
     input: ProviderHistoryInput,
     vaultPath: string | null,
-    pathContext?: ProviderHistoryPathContext,
+    pathContext?: ProviderHistoryEnvironment,
   ): Promise<ProviderHistoryUpdate> {
     const conversation = copyProviderHistoryState(input);
     const state = getPiState(conversation.providerState);
@@ -116,7 +119,7 @@ export class PiConversationHistoryService implements ProviderConversationHistory
       }
 
       try {
-        const content = await fs.readFile(sourceSessionFile, 'utf-8');
+        const content = await readPiSessionEntries(sourceSessionFile);
         const messages = parsePiSessionContent(content, {
           leafEntryId: state.forkSource!.resumeAt,
           requireLeafEntryId: true,
@@ -201,8 +204,15 @@ export class PiConversationHistoryService implements ProviderConversationHistory
     const messages: ChatMessage[] = [];
     let readCurrent = false;
     for (const source of resolvedSources) {
+      let content: ParsedPiSessionEntries;
       try {
-        const content = parsePiSessionEntries(await fs.readFile(source.sessionFile, 'utf-8'));
+        content = await readPiSessionEntries(source.sessionFile);
+      } catch (error) {
+        // Previous segments may be unavailable; an unreadable current transcript must surface.
+        if (source.kind === 'current' && !isMissingFileError(error)) throw error;
+        continue;
+      }
+      try {
         const cursor = source.kind === 'current' && state.treeCursor
           ? resolvePiTreeCursor(content.entries, state.treeCursor) : undefined;
         const sourceMessages = parsePiSessionContent(content, {
@@ -239,6 +249,49 @@ export class PiConversationHistoryService implements ProviderConversationHistory
     }
 
     conversation.messages = dedupeMessages(messages);
+    return conversation;
+  }
+
+  /**
+   * Retired-binding migration (#1647, added 2026-10-16; remove after 2027-01-16).
+   * Earlier versions retired live bindings on launch-only changes without marking them. The latest
+   * session is restored once when it is still this conversation's own transcript in the configured
+   * store. A pending fork retires into its source session, which predates the fork.
+   */
+  async recoverConversationSessionReference(
+    input: ProviderHistoryInput,
+    vaultPath: string | null,
+    pathContext?: ProviderHistoryEnvironment,
+  ): Promise<ProviderHistoryUpdate | null> {
+    const conversation = copyProviderHistoryState(input);
+    const state = getPiState(conversation.providerState);
+    const latest = state.previousSessions?.at(-1);
+    if (
+      !latest || state.bindingRetired || !vaultPath || !pathContext || input.createdAt === undefined
+      || conversation.sessionId || state.sessionId || state.sessionFile || state.forkSource
+    ) {
+      return null;
+    }
+
+    const sessionFile = resolvePiSessionFileHint(latest.sessionFile, latest.sessionId, vaultPath, pathContext);
+    const sessionId = sessionFile
+      ? await readOwnPiSessionId(sessionFile, latest, vaultPath, input.createdAt)
+      : null;
+    const nextState: PiProviderState = sessionFile && sessionId
+      ? {
+        ...state,
+        previousSessions: state.previousSessions!.slice(0, -1),
+        sessionFile,
+        sessionId,
+        ...(latest.leafEntryId ? { leafEntryId: latest.leafEntryId } : {}),
+      }
+      : { ...state, bindingRetired: true };
+    conversation.sessionId = sessionId;
+    conversation.providerState = mergePersistedProviderState(
+      conversation.providerState,
+      PI_PROVIDER_STATE_KEYS,
+      buildPersistedPiState(nextState) as Record<string, unknown> | undefined,
+    );
     return conversation;
   }
 
@@ -314,7 +367,7 @@ export class PiConversationHistoryService implements ProviderConversationHistory
     resumeAt: string,
     sourceProviderState?: Record<string, unknown>,
     vaultPath: string | null = null,
-    pathContext?: ProviderHistoryPathContext,
+    pathContext?: ProviderHistoryEnvironment,
   ): Promise<Record<string, unknown>> {
     const sourceState = getPiState(sourceProviderState);
     const candidates: PiForkSourceCandidate[] = [];
@@ -410,7 +463,7 @@ export class PiConversationHistoryService implements ProviderConversationHistory
   async #resolvePreviousSessionFile(
     source: PiPreviousSession,
     vaultPath: string | null,
-    pathContext?: ProviderHistoryPathContext,
+    pathContext?: ProviderHistoryEnvironment,
     preferResolvedPath = false,
   ): Promise<string | null> {
     const resolved = resolvePiSessionFileHint(
@@ -483,8 +536,8 @@ async function findForkSourceContainingCheckpoint(
 ): Promise<PiForkSourceCandidate | null> {
   for (const candidate of candidates) {
     try {
-      const content = await fs.readFile(candidate.sessionFile!, 'utf-8');
-      if (parsePiSessionEntries(content).entries.some(entry => entry.id === resumeAt)) {
+      const content = await readPiSessionEntries(candidate.sessionFile!);
+      if (content.entries.some(entry => entry.id === resumeAt)) {
         return candidate;
       }
     } catch {
@@ -492,6 +545,10 @@ async function findForkSourceContainingCheckpoint(
     }
   }
   return null;
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | null)?.code === 'ENOENT';
 }
 
 function getLastPreviousSessionTarget(
@@ -540,6 +597,21 @@ async function isMatchingArchivedPiSession(
   }
 
   return await resolveRealPath(header.cwd) === await resolveRealPath(vaultPath);
+}
+
+/** Retired-binding migration: the session's own id when it started no earlier than its conversation. */
+async function readOwnPiSessionId(
+  sessionFile: string,
+  source: PiPreviousSession,
+  vaultPath: string,
+  createdAt: number,
+): Promise<string | null> {
+  if (!await isMatchingArchivedPiSession(sessionFile, source, vaultPath)) return null;
+  const header = await readPiSessionHeader(sessionFile);
+  const startedAt = typeof header?.timestamp === 'string' ? Date.parse(header.timestamp) : Number.NaN;
+  return typeof header?.id === 'string' && header.id.trim() && startedAt >= createdAt
+    ? header.id.trim()
+    : null;
 }
 
 async function resolveRealPath(value: string): Promise<string> {

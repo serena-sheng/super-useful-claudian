@@ -1,3 +1,4 @@
+import { createProjectsFake } from '@test/helpers/features/chat/ProjectsFake';
 import { FakeSideBackend } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { waitFor } from '@testing-library/dom';
 import { Component } from 'obsidian';
@@ -6,8 +7,12 @@ import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { ProviderCapabilities, ProviderConversationHistoryService, ProviderRegistration } from '@/core/providers/types';
 import { ComposerDraftController } from '@/features/chat/composer/ComposerDraftController';
+import {
+  captureLatestCompletedForkSource,
+  findLatestForkCheckpoint,
+  type LiveForkSourceOwner,
+} from '@/features/chat/sessions/SessionForkSource';
 import { SideChatController } from '@/features/chat/side-chat/SideChatController';
-import { captureLatestCompletedForkSource } from '@/features/chat/tabs/forking/ForkSource';
 import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
 
 Object.assign(HTMLElement.prototype, {
@@ -58,6 +63,7 @@ export function createHarness(options: {
   checkpoint?: string | null;
   settings?: Record<string, unknown>;
   supportsEphemeralFork?: boolean;
+  supportsForkDuringTurn?: boolean;
   forkMode?: ProviderCapabilities['forkMode'];
   buildForkProviderState?: ProviderConversationHistoryService['buildForkProviderState'];
 } = {}) {
@@ -67,7 +73,7 @@ export function createHarness(options: {
   ProviderRegistry.register('claude', {
     formatQuestionReply: options.formatQuestionReply,
     getConversationCapabilities: options.getConversationCapabilities,
-    capabilities: { providerId: 'claude', supportsFork: options.supportsFork ?? true, supportsEphemeralSessions: true, supportsEphemeralFork: options.supportsEphemeralFork, forkMode: options.forkMode },
+    capabilities: { providerId: 'claude', supportsFork: options.supportsFork ?? true, supportsEphemeralSessions: true, supportsEphemeralFork: options.supportsEphemeralFork, supportsForkDuringTurn: options.supportsForkDuringTurn, forkMode: options.forkMode },
     modelPolicy: ProviderRegistry.getModelPolicy('claude'),
     chatUIConfig: ProviderRegistry.getChatUIConfig('claude'),
     createExecutionBackend: () => backend,
@@ -108,21 +114,22 @@ export function createHarness(options: {
     },
   ];
   const tab = {
+    settledTranscriptEnd: (messages: readonly unknown[]) => messages.length,
     conversationId: 'conversation-1',
     controllers: {},
     executionCoordinator: { resolveForkSource: async () => ({ resumeAt: checkpoint, sessionId: 'main-session' }) },
     id: 'tab-1',
     providerId: 'claude',
     state: { isRewinding: false, isStreaming: false, messages },
-  } as unknown as AssembledTabRuntime;
+  } as unknown as AssembledTabRuntime & LiveForkSourceOwner;
 
   const app = { vault: { adapter: { basePath: '/vault' }, getFiles: () => [] } };
   const settings = options.settings ?? {};
   const plugin = {
-    getSessionSnapshotDirectory: () => '/tmp/claudian-sessions',
     app,
     getConversationSummary(id: string) { return (this as unknown as { getConversationSync: (id: string) => any }).getConversationSync(id); },
     getConversationSync: () => options.providerState ? { id: 'conversation-1', providerId: 'claude', providerState: options.providerState } : null,
+    projects: createProjectsFake(),
     providerHost: { app, settings, executionLifecycleRegistry: lifecycleRegistry },
     settings,
   } as never;
@@ -132,22 +139,19 @@ export function createHarness(options: {
     getInput: () => inputEl, getImages: () => imageContextManager as never, getDestination: () => controller.destination,
   });
   const controller = new SideChatController({
-    component: new Component(),
-    composerEl,
     drafts,
-    getInputEl: () => inputEl as never,
     parent: {
       get conversationId() { return tab.conversationId; },
       get providerId() { return tab.providerId; },
       get isLive() { return true; },
       get isStreaming() { return tab.state.isStreaming; },
-      get lastMessageId() { return tab.state.messages.at(-1)?.id; },
+      readLatestForkCheckpoint: async () => findLatestForkCheckpoint(tab.state.messages),
       captureForkSource: () => captureLatestCompletedForkSource(tab, plugin, () => true),
     },
-    inputWrapperEl,
     onDestinationChanged: () => { destinationChanges.push(controller.destination); options.onDestinationChanged?.(); },
     plugin,
   });
+  controller.attachPresentation({ component: new Component(), composerEl, inputWrapperEl, getInputEl: () => inputEl as never });
   cleanups.push(async () => {
     await controller.dispose();
     await lifecycleRegistry.dispose();

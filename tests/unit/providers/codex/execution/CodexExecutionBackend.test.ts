@@ -1,11 +1,13 @@
 import type * as fsType from 'node:fs';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join, normalize } from 'node:path';
 
 import pair from '@test/fixtures/providers/codex/turn-stats-pair.json';
 import { capturedSelectionPrompt, capturedSelections } from '@test/helpers/capturedSelections';
 import { TEST_CODEX_MODEL } from '@test/helpers/codexModels';
+import { runtimeHostFor } from '@test/helpers/providerRuntimeHost';
+import { parseCodexSessionContent } from '@test/helpers/providers/codex/parseCodexSessionContent';
 
 import type {
   ProviderExecutionEvent,
@@ -17,7 +19,11 @@ import type {
 import { isSteerableExecutionSession } from '@/core/execution';
 import type { ProviderHost } from '@/core/providers/ProviderHost';
 import type { ClaudianSettings } from '@/core/types';
+import { CodexConversationHistoryService } from '@/providers/codex/history/CodexConversationHistoryService';
 import { createCodexPathMapper } from '@/providers/codex/runtime/CodexPathMapper';
+
+/** The backend resolves its runtime per session; tests pin one instance. */
+const fixedRuntime = (runtime: CodexAppServerRuntime) => (): CodexAppServerRuntime => runtime;
 type MutableTestHost = ProviderHost & { settings: ClaudianSettings };
 
 const mockTransportRequest = jest.fn();
@@ -69,16 +75,19 @@ jest.mock('@/providers/codex/runtime/codexAppServerSupport', () => {
 });
 
 import { CodexExecutionBackend } from '@/providers/codex/execution/CodexExecutionBackend';
-import { parseCodexSessionContent } from '@/providers/codex/history/CodexHistoryStore';
 import { CodexAppServerRuntime } from '@/providers/codex/runtime/CodexAppServerRuntime';
 import { CodexRPCResponseError } from '@/providers/codex/runtime/CodexRPCTransport';
 import { updateCodexProviderSettings } from '@/providers/codex/settings';
 
 const runtimes: CodexAppServerRuntime[] = [];
 function createBackend(plugin: ProviderHost): CodexExecutionBackend {
-  const runtime = new CodexAppServerRuntime(plugin, () => undefined);
+  const host = runtimeHostFor(plugin, 'codex');
+  const runtime = new CodexAppServerRuntime(host, () => undefined);
   runtimes.push(runtime);
-  return new CodexExecutionBackend(plugin, runtime);
+  return new CodexExecutionBackend(
+    host,
+    fixedRuntime(runtime),
+  );
 }
 afterEach(async () => { await Promise.all(runtimes.splice(0).map(runtime => runtime.dispose())); });
 
@@ -257,7 +266,7 @@ function createSessionConfig(
   return {
     lifecycle: 'persistent',
     nativePersistence: 'enabled',
-    vaultWorkingDirectory: '/vault',
+    workingDirectory: '/vault',
     interactionPort: createInteractionPort(),
     ...overrides,
   };
@@ -677,6 +686,34 @@ describe('CodexExecutionBackend', () => {
     await session.dispose();
   });
 
+  it('falls back to saved Codex preferences, then current selections, for unset request fields', async () => {
+    mockTransportRequest.mockImplementation(async (method: string) => {
+      if (method === 'initialize') return {
+        userAgent: 'test', codexHome: '/tmp/.codex', platformFamily: 'unix', platformOs: 'macos',
+      };
+      if (method === 'thread/start') return createThreadResult('thread-fallbacks');
+      if (method === 'turn/start') {
+        queueMicrotask(() => completeTurn('thread-fallbacks', 'turn-fallbacks'));
+        return createTurnResult('turn-fallbacks');
+      }
+      throw new Error(`Unexpected method: ${method}`);
+    });
+    const plugin = createPlugin();
+    Object.assign(plugin.settings, {
+      savedProviderEffort: { codex: 'low', claude: 'high' },
+      savedProviderPermissionMode: { codex: 'yolo' },
+    });
+    const session = createBackend(plugin).createSession(createSessionConfig());
+    await collectEvents(session.execute(createRequest(undefined, {
+      configuration: { systemInstructions: { kind: 'explicit', instructions: 'Be concise.' } },
+    })).events);
+
+    expect(mockTransportRequest).toHaveBeenCalledWith('turn/start', expect.objectContaining({
+      model: TEST_CODEX_MODEL, effort: 'low', serviceTier: 'default', approvalPolicy: 'never',
+    }));
+    await session.dispose();
+  });
+
   it('rejects an unavailable selected model before native startup with a configuration error', async () => {
     const host = createPlugin();
     host.settings.providerConfigs!.codex!.visibleModels = [];
@@ -716,6 +753,62 @@ describe('CodexExecutionBackend', () => {
         canRepresentHostPath: () => true,
       },
     });
+  });
+
+  it('keeps parent output flowing after a child messages its parent', async () => {
+    configureSteerTransport('parent', 'parent-turn', () => ({}));
+    const session = createBackend(createPlugin()).createSession(createSessionConfig());
+    const updates: ProviderSessionEvent[] = [];
+    session.onEvent(event => updates.push(event));
+    try {
+      const run = session.execute(createRequest());
+      const output = collectEvents(run.events);
+      await waitForCondition(() => mockTransportRequest.mock.calls.some(([method]) => method === 'turn/start'));
+      emitNotification('item/completed', { threadId: 'parent', turnId: 'parent-turn',
+        item: { type: 'subAgentActivity', id: 'spawn', kind: 'started', agentThreadId: 'child', agentPath: '/root/review' } });
+      emitNotification('turn/started', { threadId: 'child', turn: { id: 'child-turn', status: 'inProgress', items: [], error: null } });
+      // Native records a child's message to its parent on the child thread, targeting the parent.
+      emitNotification('item/completed', { threadId: 'child', turnId: 'child-turn',
+        item: { type: 'subAgentActivity', id: 'message-parent', kind: 'interacted', agentThreadId: 'parent', agentPath: '/root' } });
+      emitNotification('item/completed', { threadId: 'parent', turnId: 'parent-turn',
+        item: { type: 'agentMessage', id: 'final', phase: 'final_answer', text: 'Parent done.', memoryCitation: null } });
+      completeTurn('parent', 'parent-turn');
+      const settled = await Promise.race([
+        output.then(events => JSON.stringify(events)),
+        new Promise<null>(resolve => setTimeout(() => resolve(null), 1_000)),
+      ]);
+      expect(settled).toContain('Parent done.');
+      expect(updates).not.toContainEqual(expect.objectContaining({
+        subagent: expect.objectContaining({ agentId: 'parent' }),
+      }));
+    } finally {
+      await session.dispose();
+    }
+  });
+
+  it('keeps a sibling message from replacing the receiving subagent invocation', async () => {
+    configureSteerTransport('parent', 'parent-turn', () => ({}));
+    const session = createBackend(createPlugin()).createSession(createSessionConfig());
+    const updates: ProviderSessionEvent[] = [];
+    session.onEvent(event => updates.push(event));
+    try {
+      session.execute(createRequest());
+      await waitForCondition(() => mockTransportRequest.mock.calls.some(([method]) => method === 'turn/start'));
+      for (const name of ['a', 'b']) {
+        emitNotification('item/completed', { threadId: 'parent', turnId: 'parent-turn',
+          item: { type: 'subAgentActivity', id: `spawn-${name}`, kind: 'started', agentThreadId: name, agentPath: `/root/${name}` } });
+      }
+      emitNotification('turn/started', { threadId: 'b', turn: { id: 'b-turn-1', status: 'inProgress', items: [], error: null } });
+      emitNotification('turn/completed', { threadId: 'b', turn: { id: 'b-turn-1', status: 'completed', items: [], error: null } });
+      emitNotification('turn/started', { threadId: 'a', turn: { id: 'a-turn', status: 'inProgress', items: [], error: null } });
+      emitNotification('item/completed', { threadId: 'a', turnId: 'a-turn',
+        item: { type: 'subAgentActivity', id: 'a-message-b', kind: 'interacted', agentThreadId: 'b', agentPath: '/root/b' } });
+      emitNotification('turn/started', { threadId: 'b', turn: { id: 'b-turn-2', status: 'inProgress', items: [], error: null } });
+      const latestB = updates.filter(event => (event as any).subagent?.agentId === 'b').at(-1) as any;
+      expect(latestB.subagent).toEqual(expect.objectContaining({ id: 'spawn-b', status: 'running' }));
+    } finally {
+      await session.dispose();
+    }
   });
 
   it('publishes native subagent completion after the parent settles and through later follow-ups', async () => {
@@ -832,6 +925,34 @@ describe('CodexExecutionBackend', () => {
     },
   );
 
+  it('submits an image with a filesystem-limit basename and cleans up its bytes', async () => {
+    configureSteerTransport('thread-image', 'turn-image', () => ({}));
+    const session = createBackend(createPlugin()).createSession(createSessionConfig());
+    const request = createImageRequest();
+    const image = request.input.find(block => block.type === 'image')!;
+    if (image.type !== 'image') throw new Error('Expected image request');
+    image.image.name = `${'a'.repeat(251)}.png`;
+    expect(Buffer.byteLength(image.image.name)).toBe(255);
+    let filePath: string | undefined;
+    try {
+      const run = session.execute(request);
+      let settled = false;
+      const events = collectEvents(run.events).then(result => { settled = true; return result; });
+      await waitForCondition(() => mockTransportRequest.mock.calls.some(([method]) => method === 'turn/start') || settled);
+      const nativeInput = mockTransportRequest.mock.calls.find(([method]) => method === 'turn/start')?.[1].input;
+      expect(nativeInput).toEqual([{ type: 'localImage', path: expect.any(String) }]);
+      filePath = nativeInput[0].path;
+      expect(Buffer.byteLength(basename(filePath!))).toBeLessThanOrEqual(255);
+      expect(filePath).toMatch(/\.png$/);
+      expect(readFileSync(filePath!)).toEqual(Buffer.from('hello'));
+      completeTurn('thread-image', 'turn-image');
+      expect((await events).at(-1)?.type).toBe('turn_completed');
+      await waitForCondition(() => !existsSync(dirname(filePath!)));
+    } finally {
+      await session.dispose();
+    }
+  });
+
   it.each([false, true])('steers session references with target-visible paths (WSL: %s)', async wsl => {
     if (wsl) {
       const launch = await mockResolveLaunchSpec();
@@ -842,12 +963,10 @@ describe('CodexExecutionBackend', () => {
     try {
       await expect(session.steer(createRequest(new AbortController().signal, {
         input: [{ type: 'text', text: 'Use @"Review"' }],
-        context: { ...capturedSelections, sessionReferences: [{ id: 'conv-1-ref', title: 'Review & fix', providerId: 'codex', updatedAt: 'updated',
-          snapshotPath: wsl ? 'C:\\Temp\\claudian-sessions\\ref.md' : '/tmp/claudian-sessions/ref.md' }] },
+        context: { ...capturedSelections, sessionReferences: [{ id: 'conv-1-ref', title: 'Review & fix', providerId: 'codex', updatedAt: 'updated' }] },
       }))).resolves.toBe(true);
       const input = mockTransportRequest.mock.calls.find(([method]) => method === 'turn/steer')![1].input;
-      expect(input).toEqual([{ type: 'text', text_elements: [], text: 'Use @"Review"\n\n<context_sessions>\n<context_session title="Review &amp; fix" id="conv-1-ref" provider="codex" updated="updated" path="'
-        + (wsl ? '/mnt/c/Temp/claudian-sessions/ref.md' : '/tmp/claudian-sessions/ref.md') + '" />\n</context_sessions>' + '\n\n' + capturedSelectionPrompt }]);
+      expect(input).toEqual([{ type: 'text', text_elements: [], text: 'Use @"Review"\n\n' + capturedSelectionPrompt + '\n\n<context_sessions>\n<context_session title="Review &amp; fix" id="conv-1-ref" provider="codex" updated="updated" />\n</context_sessions>' }]);
     } finally { run.cancel(); await collectEvents(run.events); await session.dispose(); }
   });
 
@@ -1075,22 +1194,25 @@ describe('CodexExecutionBackend', () => {
 
     await collectEvents(session.execute(createRequest(undefined, {
       configuration: {
-        systemInstructions: { kind: 'provider-default' },
+        systemInstructions: { kind: 'main-agent', instructions: 'Caller-resolved Main Agent prompt.' },
         model: TEST_CODEX_MODEL,
         permissionMode: 'normal',
         reasoning: 'high',
         serviceTier: 'priority',
       },
-    })).events);
+    } as never)).events);
 
     const threadStart = mockTransportRequest.mock.calls.find(
       ([method]) => method === 'thread/start',
     )?.[1] as { baseInstructions?: string } | undefined;
-    expect(threadStart?.baseInstructions).toContain('## Runtime Context');
+    expect(threadStart?.baseInstructions).toBe('Caller-resolved Main Agent prompt.');
     await session.dispose();
   });
 
-  it('reapplies changed system instructions to a loaded thread', async () => {
+  it.each([
+    ['explicit', (instructions: string) => ({ kind: 'explicit' as const, instructions })],
+    ['Main Agent', (instructions: string) => ({ kind: 'main-agent' as const, instructions })],
+  ])('reapplies changed %s instructions to a loaded thread', async (_label, systemInstructionsFor) => {
     let turnIndex = 0;
     mockTransportRequest.mockImplementation(async (method: string) => {
       if (method === 'initialize') {
@@ -1115,7 +1237,7 @@ describe('CodexExecutionBackend', () => {
       .createSession(createSessionConfig());
     const requestWithInstructions = (instructions: string) => createRequest(undefined, {
       configuration: {
-        systemInstructions: { kind: 'explicit', instructions },
+        systemInstructions: systemInstructionsFor(instructions),
         model: TEST_CODEX_MODEL,
         permissionMode: 'normal',
         reasoning: 'high',
@@ -1557,25 +1679,24 @@ describe('CodexExecutionBackend', () => {
       new AbortController().signal,
       {
         context: {
-          sessionReferences: [{ id: 'conv-1-ref', title: 'Review', providerId: 'codex', updatedAt: 'updated', snapshotPath: wsl ? 'C:\\Temp\\claudian-sessions\\ref.md' : '/tmp/claudian-sessions/ref.md' }],
-          linkedContent: {
-            path: 'notes/"draft" & review.md',
-            content: 'Before\n]]>\nAfter',
-          },
-          editorSelection: {
-            mode: 'selection',
-            notePath: 'notes/"draft" & review.md',
-            selectedText: 'Selected\n</editor_selection>',
-          },
-          browserSelection: {
-            source: 'browser:https://example.com',
-            selectedText: 'Browser text',
-            url: 'https://example.com/?a=1&b=2',
-          },
-          canvasSelection: {
-            canvasPath: 'boards/"draft" & review.canvas',
-            nodeIds: ['node-1'],
-          },
+          sessionReferences: [{ id: 'conv-1-ref', title: 'Review', providerId: 'codex', updatedAt: 'updated' }],
+          linkedContent: { path: 'notes/"draft" & review.md' },
+          selections: [
+            { kind: 'editor', selection: {
+              mode: 'selection',
+              notePath: 'notes/"draft" & review.md',
+              selectedText: 'Selected\n</editor_selection>',
+            } },
+            { kind: 'browser', selection: {
+              source: 'browser:https://example.com',
+              selectedText: 'Browser text',
+              url: 'https://example.com/?a=1&b=2',
+            } },
+            { kind: 'canvas', selection: {
+              canvasPath: 'boards/"draft" & review.canvas',
+              nodeIds: ['node-1'],
+            } },
+          ],
         },
       },
     )).events);
@@ -1586,7 +1707,7 @@ describe('CodexExecutionBackend', () => {
       };
     const prompt = turnParams.input.find(block => block.type === 'text')?.text;
     expect(prompt).toContain(
-      '<linked_content path="notes/&quot;draft&quot; &amp; review.md">\n<![CDATA[Before\n]]]]><![CDATA[>\nAfter]]>\n</linked_content>',
+      '<linked_content path="notes/&quot;draft&quot; &amp; review.md" />',
     );
     expect(prompt).toContain(
       '<editor_selection path="notes/&quot;draft&quot; &amp; review.md">\n<![CDATA[Selected\n</editor_selection>]]>\n</editor_selection>',
@@ -1597,7 +1718,11 @@ describe('CodexExecutionBackend', () => {
     expect(prompt).toContain(
       '<canvas_selection path="boards/&quot;draft&quot; &amp; review.canvas">',
     );
-    expect(prompt).toContain(`<context_sessions>\n<context_session title="Review" id="conv-1-ref" provider="codex" updated="updated" path="${wsl ? "/mnt/c/Temp/claudian-sessions/ref.md" : "/tmp/claudian-sessions/ref.md"}" />\n</context_sessions>`);
+    expect(prompt).toContain(`<context_sessions>\n<context_session title="Review" id="conv-1-ref" provider="codex" updated="updated" />\n</context_sessions>`);
+    // Canonical order shared by every provider: linked content, selections, then session references.
+    const order = ['<linked_content', '<editor_selection', '<browser_selection', '<canvas_selection', '<context_sessions>']
+      .map(tag => prompt!.indexOf(tag));
+    expect(order).toEqual([...order].sort((a, b) => a - b));
     expect(prompt).not.toContain('[Editor selection from');
     expect(prompt).not.toContain('<linked_note');
     expect(prompt).not.toContain('<current_note');
@@ -1771,8 +1896,11 @@ describe('CodexExecutionBackend', () => {
       }
       throw new Error(`Unexpected method: ${method}`);
     });
-    const session = createBackend(createPlugin())
-      .createSession(createSessionConfig());
+    // An invalidated conversation: its earlier thread is history-only and context must be replayed.
+    const previousSegments = [{ threadId: 'thread-invalidated', sessionFilePath: '/tmp/.codex/sessions/thread-invalidated.jsonl' }];
+    const session = createBackend(createPlugin()).createSession(createSessionConfig({
+      resumeSeed: { providerState: { nativeConversationContextEstablished: false, previousSegments } },
+    }));
     const conversationHistory = [
       { id: 'history-user', role: 'user' as const, content: 'prior question', timestamp: 1 },
       { id: 'history-assistant', role: 'assistant' as const, content: 'prior answer', timestamp: 2 },
@@ -1806,7 +1934,95 @@ describe('CodexExecutionBackend', () => {
     expect(turnRequests[1]).not.toContain('prior question');
     expect(turnRequests[1]).toContain('Follow up');
 
+    // The native rollout records the replayed prompt; its history must not render as the user's input.
+    const replayedPrompt = mockTransportRequest.mock.calls
+      .find(([method]) => method === 'turn/start')![1].input
+      .find((item: { type: string }) => item.type === 'text').text as string;
+    const rollout = [
+      { type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-history-1' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: replayedPrompt }] } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'replayed answer' }] } },
+      { type: 'event_msg', payload: { type: 'task_complete', turn_id: 'turn-history-1' } },
+    ].map(record => JSON.stringify(record)).join('\n');
+    expect(parseCodexSessionContent(rollout).map(message => message.content))
+      .toEqual(['hello', 'replayed answer']);
+    expect(session.getSnapshot().providerState).toMatchObject({
+      threadId: 'thread-history',
+      nativeConversationContextEstablished: true,
+      previousSegments,
+    });
+
     await session.dispose();
+  });
+
+  it('keeps an orphaned transcript from an older missing-thread reset when the next send starts a thread', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'claudian-codex-orphan-'));
+    const sessions = join(root, 'sessions', '2026', '03', '27');
+    mkdirSync(sessions, { recursive: true });
+    const rollout = (threadId: string, question: string, answer: string) => [
+      { type: 'session_meta', payload: { id: threadId } },
+      { type: 'event_msg', payload: { type: 'task_started', turn_id: `${threadId}-turn` } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: question }] } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: answer }] } },
+      { type: 'event_msg', payload: { type: 'task_complete', turn_id: `${threadId}-turn` } },
+    ].map(record => JSON.stringify(record)).join('\n');
+    const oldThreadId = '019a0000-0000-7000-8000-00000000000a';
+    const oldPath = join(sessions, `rollout-2026-03-27T00-00-00-${oldThreadId}.jsonl`);
+    writeFileSync(oldPath, rollout(oldThreadId, 'Old question', 'Old answer'));
+    const newThreadId = '019a0000-0000-7000-8000-00000000000b';
+    const newPath = join(sessions, `rollout-2026-03-27T01-00-00-${newThreadId}.jsonl`);
+    mockTransportRequest.mockImplementation(async (method: string) => {
+      if (method === 'initialize') {
+        return { userAgent: 'test', codexHome: root, platformFamily: 'unix', platformOs: 'macos' };
+      }
+      if (method === 'thread/start') {
+        const result = createThreadResult(newThreadId);
+        return { ...result, thread: { ...result.thread, path: newPath } };
+      }
+      if (method === 'turn/start') {
+        queueMicrotask(() => completeTurn(newThreadId, `${newThreadId}-turn`));
+        return createTurnResult(`${newThreadId}-turn`);
+      }
+      throw new Error(`Unexpected method: ${method}`);
+    });
+    // What the earlier missing-thread reset left: the thread binding is gone, its transcript locators remain.
+    const orphanState = {
+      sessionFilePath: oldPath,
+      transcriptRootPath: join(root, 'sessions'),
+      workspaceDependencyToolVersion: 1,
+    };
+    const history = new CodexConversationHistoryService();
+    const contents = (update: { messages?: Array<{ content: string }> }) => (update.messages ?? []).map(message => message.content);
+    try {
+      const before = await history.hydrateConversationHistory({ sessionId: null, providerState: orphanState, messages: [] }, null);
+      expect(contents(before)).toEqual(['Old question', 'Old answer']);
+
+      const session = createBackend(createPlugin()).createSession(createSessionConfig({
+        resumeSeed: { providerState: { ...orphanState } },
+      }));
+      await collectEvents(session.execute(createRequest(new AbortController().signal, {
+        conversationHistory: before.messages,
+        input: [{ type: 'text', text: 'New question' }],
+      })).events);
+      const prompt = mockTransportRequest.mock.calls
+        .find(([method]) => method === 'turn/start')![1].input
+        .find((item: { type: string }) => item.type === 'text').text as string;
+      writeFileSync(newPath, rollout(newThreadId, prompt, 'New answer'));
+      const snapshot = session.getSnapshot();
+      await session.dispose();
+
+      expect(snapshot.providerState).toMatchObject({
+        threadId: newThreadId,
+        sessionFilePath: newPath,
+        previousSegments: [{ threadId: oldThreadId, sessionFilePath: oldPath }],
+      });
+      const after = await history.hydrateConversationHistory({
+        sessionId: snapshot.providerSessionId ?? null, providerState: snapshot.providerState, messages: [],
+      }, null);
+      expect(contents(after)).toEqual(['Old question', 'Old answer', 'New question', 'New answer']);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('retains cold-start history replay until the first turn is handed off', async () => {
@@ -2402,7 +2618,7 @@ describe('CodexExecutionBackend', () => {
 
     function countTranscriptRootProbes(): number {
       return probes.reduce(
-        (count, probe) => count + probe.mock.calls.filter(([target]) => String(target) === sessionsRoot).length,
+        (count, probe) => count + probe.mock.calls.filter(([target]) => normalize(String(target)) === sessionsRoot).length,
         0,
       );
     }
@@ -2492,7 +2708,7 @@ describe('CodexExecutionBackend', () => {
     });
   });
 
-  it('forks, resumes, and rolls back to the requested checkpoint before executing', async () => {
+  it('forks, resumes, and reverts an adopted child to the requested checkpoint before executing', async () => {
     let turnAttempt = 0;
     mockTransportRequest.mockImplementation(async (method: string) => {
       if (method === 'initialize') {
@@ -2515,7 +2731,7 @@ describe('CodexExecutionBackend', () => {
           { id: 'later-turn' },
         ]);
       }
-      if (method === 'thread/rollback') return createThreadResult('thread-fork');
+      if (method === 'thread/revert') return createThreadResult('thread-fork');
       if (method === 'turn/start') {
         turnAttempt += 1;
         if (turnAttempt === 2) {
@@ -2535,6 +2751,8 @@ describe('CodexExecutionBackend', () => {
             forkSourceSessionFilePath: '/tmp/source.jsonl',
             forkSourceTranscriptRootPath: '/tmp/sessions',
             forkSource: { sessionId: 'thread-source', resumeAt: 'checkpoint' },
+            // An older missing-thread reset left the lost child's transcript; the fork re-materializes it.
+            sessionFilePath: '/tmp/sessions/thread-lost-child.jsonl',
             unknownFutureState: { keep: true },
           },
         },
@@ -2547,12 +2765,12 @@ describe('CodexExecutionBackend', () => {
       'initialize',
       'thread/fork',
       'thread/resume',
-      'thread/rollback',
+      'thread/revert',
       'turn/start',
     ]);
     expect(mockTransportRequest).toHaveBeenCalledWith(
-      'thread/rollback',
-      { threadId: 'thread-fork', numTurns: 1 },
+      'thread/revert',
+      { threadId: 'thread-fork', beforeTurnId: 'later-turn' },
     );
     // The child inherits a source thread whose dependency-tool generation is unknown.
     expect(mockTransportRequest).toHaveBeenCalledWith('thread/resume', expect.objectContaining({
@@ -2567,6 +2785,7 @@ describe('CodexExecutionBackend', () => {
       unknownFutureState: { keep: true },
     }));
     expect(forkedSnapshot.providerState).not.toHaveProperty('forkSource');
+    expect(forkedSnapshot.providerState).not.toHaveProperty('previousSegments');
     expect(forkedSnapshot.providerState).not.toHaveProperty('forkSourceSessionFilePath');
     expect(forkedSnapshot.providerState).not.toHaveProperty('forkSourceTranscriptRootPath');
     expect(forkedSnapshot.providerStateDeletes).toEqual([
@@ -2625,13 +2844,13 @@ describe('CodexExecutionBackend', () => {
   it.each([
     ['checkpoint validation', 'checkpoint'] as const,
     ['thread resume', 'resume'] as const,
-    ['thread rollback', 'rollback'] as const,
+    ['thread revert', 'revert'] as const,
   ])(
     'retains one fork target across %s failure and retries its materialization',
     async (_description, failureBoundary) => {
       let forkCount = 0;
       let resumeCount = 0;
-      let rollbackCount = 0;
+      let revertCount = 0;
       mockTransportRequest.mockImplementation(async (method: string) => {
         if (method === 'initialize') {
           return {
@@ -2660,15 +2879,15 @@ describe('CodexExecutionBackend', () => {
             'thread-fork-target',
             failureBoundary === 'checkpoint' && resumeCount === 1
               ? [{ id: 'different-checkpoint' }]
-              : failureBoundary === 'rollback' && resumeCount > 1
+              : failureBoundary === 'revert' && resumeCount > 1
               ? [{ id: 'checkpoint' }]
               : [{ id: 'checkpoint' }, { id: 'later-turn' }],
           );
         }
-        if (method === 'thread/rollback') {
-          rollbackCount += 1;
-          if (failureBoundary === 'rollback' && rollbackCount === 1) {
-            throw new Error('rollback response lost after apply');
+        if (method === 'thread/revert') {
+          revertCount += 1;
+          if (failureBoundary === 'revert' && revertCount === 1) {
+            throw new Error('revert response lost after apply');
           }
           return createThreadResult('thread-fork-target', [{ id: 'checkpoint' }]);
         }
@@ -2691,7 +2910,7 @@ describe('CodexExecutionBackend', () => {
             ? /checkpoint not found/i
             : failureBoundary === 'resume'
               ? /resume rejected/i
-          : /rollback response lost/i,
+          : /revert response lost/i,
         ),
       });
       expectPendingForkOwnershipEvent(failedEvents);
@@ -2715,7 +2934,7 @@ describe('CodexExecutionBackend', () => {
       expect(retryEvents.at(-1)).toMatchObject({ type: 'turn_completed' });
       expect(forkCount).toBe(1);
       expect(resumeCount).toBeGreaterThanOrEqual(1);
-      expect(rollbackCount).toBe(1);
+      expect(revertCount).toBe(1);
       expect(session.getSnapshot()).toMatchObject({
         providerSessionId: 'thread-fork-target',
         providerState: {
@@ -2766,7 +2985,7 @@ describe('CodexExecutionBackend', () => {
             { id: 'later-turn' },
           ]);
       }
-      if (method === 'thread/rollback') {
+      if (method === 'thread/revert') {
         return createThreadResult('thread-fork-target', [{ id: 'checkpoint' }]);
       }
       if (method === 'turn/start') {
@@ -2837,7 +3056,7 @@ describe('CodexExecutionBackend', () => {
             { id: 'later-turn' },
           ]);
       }
-      if (method === 'thread/rollback') {
+      if (method === 'thread/revert') {
         return createThreadResult('thread-fork-target', [{ id: 'checkpoint' }]);
       }
       if (method === 'turn/start') {
@@ -2917,7 +3136,7 @@ describe('CodexExecutionBackend', () => {
             { id: 'later-turn' },
           ]);
       }
-      if (method === 'thread/rollback') {
+      if (method === 'thread/revert') {
         return createThreadResult('thread-fork-target', [{ id: 'checkpoint' }]);
       }
       if (method === 'turn/start') {
@@ -2991,7 +3210,7 @@ describe('CodexExecutionBackend', () => {
             { id: 'later-turn' },
           ]);
         }
-        if (method === 'thread/rollback') {
+        if (method === 'thread/revert') {
           return createThreadResult('thread-fork-target', [{ id: 'checkpoint' }]);
         }
         if (method === 'turn/start') {
@@ -4092,7 +4311,7 @@ describe('CodexExecutionBackend', () => {
     await expect(session.steer(createRequest(
       new AbortController().signal,
       { input: [{ type: 'text', text: 'redirect' }] },
-    ))).rejects.toThrow('Codex CLI returned an ambiguous steer acknowledgement.');
+    ))).rejects.toThrow('Codex returned an ambiguous steer acknowledgement.');
 
     run.cancel();
     await collectEvents(run.events);

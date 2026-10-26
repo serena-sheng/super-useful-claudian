@@ -1,32 +1,34 @@
 import { Notice } from 'obsidian';
 
-import type { ConversationBranchResult } from '@/core/execution';
-import { extractUserDisplayContent } from '@/core/prompt/promptContext';
+import type { ConversationBranchResult, ProviderSystemInstructions } from '@/core/execution';
+import { getUserDisplayText } from '@/core/prompt/promptContext';
 import type { ChatMessage } from '@/core/types';
 import type { ComposerDraft, ComposerDraftController } from '@/features/chat/composer/ComposerDraftController';
+import { buildChatExecutionConfiguration } from '@/features/chat/execution/chatExecutionConfiguration';
 import type { ChatExecutionCoordinator } from '@/features/chat/execution/ChatExecutionCoordinator';
-import type { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
+import type { MessageRenderer, ReadingAnchor } from '@/features/chat/rendering/MessageRenderer';
+import type { ChatSessionRuntime } from '@/features/chat/sessions/ChatSessionRuntime';
 import type { ChatState } from '@/features/chat/state/ChatState';
-import type { TabSession } from '@/features/chat/tabs/TabSession';
 
 export interface ConversationBranchingDeps {
   state: ChatState;
   setRewinding(value: boolean): void;
-  renderer: Pick<MessageRenderer, 'refreshBranchButtons' | 'refreshBranchButtonState'>;
+  renderer: Pick<MessageRenderer, 'refreshBranchButtons' | 'refreshBranchButtonState' | 'captureReadingAnchor' | 'restoreReadingAnchor'> | null;
   drafts: Pick<ComposerDraftController, 'destination' | 'capture' | 'restore'>;
-  session: Pick<TabSession, 'canNavigateConversation' | 'runConversationNavigation'>;
-  getMessagesEl: () => HTMLElement;
+  session: Pick<ChatSessionRuntime, 'canNavigateConversation' | 'runConversationNavigation'>;
   getExecutionCoordinator: () => ChatExecutionCoordinator | null;
   ensureExecutionInitialized?: () => Promise<boolean>;
   getSelectedModel?: () => string | null;
-  isDisposed?: () => boolean;
+  /** The bound conversation's live project instructions, resolved for each branch operation. */
+  getSystemInstructions: (workingDirectory: string) => ProviderSystemInstructions;
+  isClosing?: () => boolean;
   /** Persists the current conversation state. */
   save: () => Promise<void>;
   /** Replaces the rendered transcript, optionally resyncing welcome visibility to the state. */
   renderTranscript: (messages: ChatMessage[], syncWelcomeVisibility: boolean) => void;
 }
 
-type BranchDraft = { conversationId: string; message: ChatMessage; previousDraft: ComposerDraft; scrollTop: number };
+type BranchDraft = { conversationId: string; message: ChatMessage; previousDraft: ComposerDraft; readingAnchor: ReadingAnchor | null };
 type BranchState =
   | { kind: 'idle' }
   | { kind: 'preview'; draft: BranchDraft }
@@ -46,6 +48,14 @@ export class ConversationBranching {
 
   get hasDraft(): boolean {
     return this.#state.kind !== 'idle';
+  }
+
+  /** The transcript the user sees: a preview shows only the messages before the edited prompt. */
+  get visibleMessages(): readonly ChatMessage[] {
+    const { messages } = this.deps.state;
+    if (this.#state.kind !== 'preview') return messages;
+    const index = messages.indexOf(this.#state.draft.message);
+    return index < 0 ? messages : messages.slice(0, index);
   }
 
   /** Forgets branch state when the tab loads another conversation or a new chat. */
@@ -80,8 +90,8 @@ export class ConversationBranching {
     }
     if (!branchMessageId) {
       this.#state = { kind: 'preview', draft: { conversationId, message, previousDraft,
-        scrollTop: this.deps.getMessagesEl().scrollTop } };
-      const content = message.displayContent ?? extractUserDisplayContent(message.content) ?? message.content;
+        readingAnchor: this.deps.renderer?.captureReadingAnchor() ?? null } };
+      const content = getUserDisplayText(message);
       this.deps.renderTranscript(messages.slice(0, messages.indexOf(message)), false);
       drafts.restore('main', { content, images: message.images }, { focus: true, notify: true });
       return;
@@ -89,16 +99,20 @@ export class ConversationBranching {
     await navigation.runConversationNavigation(signal => this.#changeBranch(message, branchMessageId, signal));
   }
 
-  /** Leaves a branch preview, restoring the full transcript, the prior draft, and scroll. */
-  cancelDraft(): void {
+  /**
+   * Leaves a branch preview, restoring the prior draft and, unless the presentation is going away
+   * (`render: false`), the full transcript and reading position.
+   */
+  cancelDraft(options: { render?: boolean } = {}): void {
     if (this.#state.kind !== 'preview') return;
     const { draft } = this.#state;
     this.#state = { kind: 'idle' };
     const { state } = this.deps;
-    if (this.deps.isDisposed?.() || state.currentConversationId !== draft.conversationId) return;
+    if (this.deps.isClosing?.() || state.currentConversationId !== draft.conversationId) return;
     this.deps.drafts.restore('main', draft.previousDraft);
+    if (options.render === false) return;
     this.deps.renderTranscript(state.messages, true);
-    this.deps.getMessagesEl().scrollTop = draft.scrollTop;
+    if (draft.readingAnchor) this.deps.renderer?.restoreReadingAnchor(draft.readingAnchor);
   }
 
   /** Runs inside the already admitted main turn, without taking a second operation. */
@@ -126,7 +140,7 @@ export class ConversationBranching {
       if (!message.userMessageId && userMessageIds[message.id]) message.userMessageId = userMessageIds[message.id];
       if (message.userMessageId && branches[message.userMessageId]) message.treeBranches = branches[message.userMessageId];
     }
-    this.deps.renderer.refreshBranchButtons(state.messages);
+    this.deps.renderer?.refreshBranchButtons(state.messages);
   }
 
   async #changeBranch(message?: ChatMessage, branchMessageId?: string, signal?: AbortSignal): Promise<ConversationBranchResult> {
@@ -136,7 +150,7 @@ export class ConversationBranching {
     const previous = this.#state;
     let draft = previous.kind === 'idle' ? undefined : previous.draft;
     let coordinator: ChatExecutionCoordinator | null = null;
-    const isCurrent = () => !this.deps.isDisposed?.() && state.currentConversationId === conversationId
+    const isCurrent = () => !this.deps.isClosing?.() && state.currentConversationId === conversationId
       && (!coordinator || coordinator === this.deps.getExecutionCoordinator());
     this.#state = { kind: 'committing', draft };
     this.deps.setRewinding(true);
@@ -145,8 +159,11 @@ export class ConversationBranching {
       if (this.deps.ensureExecutionInitialized && !await this.deps.ensureExecutionInitialized()) return result;
       coordinator = this.deps.getExecutionCoordinator();
       if (!coordinator || !isCurrent()) return result;
-      const request = { configuration: { model: this.deps.getSelectedModel?.() ?? undefined,
-        systemInstructions: { kind: 'provider-default' as const } }, signal };
+      const configuration = buildChatExecutionConfiguration(
+        { model: this.deps.getSelectedModel?.() ?? undefined },
+        this.deps.getSystemInstructions(coordinator.workingDirectory),
+      );
+      const request = { configuration, signal };
       result = message
         ? await coordinator.navigateConversationBranch({ ...request, userMessageId: message.userMessageId!, branchMessageId })
         : await coordinator.reconcileConversationBranch(request);
@@ -186,7 +203,7 @@ export class ConversationBranching {
         this.#state = { kind: 'recovery', draft };
       } else this.#state = draft ? { kind: 'preview', draft } : { kind: 'idle' };
       this.deps.setRewinding(false);
-      renderer.refreshBranchButtonState();
+      renderer?.refreshBranchButtonState();
     }
   }
 }

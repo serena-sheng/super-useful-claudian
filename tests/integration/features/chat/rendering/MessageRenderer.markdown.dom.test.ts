@@ -41,10 +41,28 @@ afterEach(() => {
 });
 
 it.each([
-  [false, 'Inline $x<y$.\n$$y^2$$\n`echo $PATH`'],
-  [true, 'Inline \\$x<y\\$.\n\\$\\$y^2\\$\\$\n`echo $PATH`'],
-])('normalizes math before rendering and defers it only when requested (%s)', async (deferMath, expected) => {
-  await renderer.renderContent(host, 'Inline \\(x<y\\).\n\\[y^2\\]\n`echo $PATH`', { deferMath });
+  [false, 'Inline \\(x<y\\).\n\\[y^2\\]\n`echo $PATH`', 'Inline $x<y$.\n$$y^2$$\n`echo $PATH`'],
+  [true, 'Inline \\(x<y\\).\n\\[y^2\\]\n`echo $PATH`', 'Inline \\$x<y\\$.\n\\$\\$y^2\\$\\$\n`echo $PATH`'],
+  [false, 'Padded \\(  x + y  \\).', 'Padded $x + y$.'],
+  [true, 'Padded \\(  x + y  \\).', 'Padded \\$x + y\\$.'],
+])('normalizes math before rendering and defers it only when requested (%s)', async (deferMath, markdown, expected) => {
+  await renderer.renderContent(host, markdown, { deferMath });
+
+  expect(MarkdownRenderer.render).toHaveBeenLastCalledWith(app, expected, host, '', expect.any(Component));
+});
+
+it.each([false, true])('preserves reference-link definitions through the Markdown pipeline (deferMath=%s)', async deferMath => {
+  const markdown = [
+    '[Price][cost] and \\(visible\\).',
+    '',
+    '[cost]: https://host/$price "Cost $5"',
+    '[next]:',
+    '  <https://host/$next>',
+    '  "Price $8"',
+  ].join('\n');
+  const expected = markdown.replace('\\(visible\\)', deferMath ? '\\$visible\\$' : '$visible$');
+
+  await renderer.renderContent(host, markdown, { deferMath });
 
   expect(MarkdownRenderer.render).toHaveBeenLastCalledWith(app, expected, host, '', expect.any(Component));
 });

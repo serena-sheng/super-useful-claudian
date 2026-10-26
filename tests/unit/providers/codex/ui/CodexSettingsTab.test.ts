@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 import { TEST_CODEX_CATALOG, TEST_CODEX_MODEL } from '@test/helpers/codexModels';
 import { createMockEl } from '@test/helpers/MockElement';
+import { withRuntimeHosts } from '@test/helpers/providerRuntimeHost';
 import { applyTextInput } from '@test/helpers/settingsControls';
 import { fireEvent, waitFor, within } from '@testing-library/dom';
 import * as fs from 'fs';
@@ -9,7 +10,7 @@ import { setImmediate } from 'timers';
 
 import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
-import { DEFAULT_CODEX_PROVIDER_SETTINGS } from '@/providers/codex/settings';
+import { DEFAULT_CODEX_PROVIDER_SETTINGS } from '@/providers/codex/config';
 import { createCodexSettingsTabRenderer } from '@/providers/codex/ui/CodexSettingsTab';
 
 Object.assign(globalThis, { setImmediate });
@@ -351,7 +352,7 @@ function createPlugin(overrides: Record<string, unknown> = {}): any {
     await plugin.mutateSettings(mutation);
     await onApplied?.();
   }));
-  return plugin;
+  return withRuntimeHosts(plugin);
 }
 
 function createContext(plugin: any) {
@@ -475,7 +476,7 @@ describe('CodexSettingsTab', () => {
     expect(mockRenderCodexModelPicker).toHaveBeenCalledWith(
       container,
       'codex',
-      'Codex CLI',
+      'Codex',
       expect.objectContaining({ refresh: mockRefreshModelCatalog }),
       expect.any(Function),
     );
@@ -511,7 +512,7 @@ describe('CodexSettingsTab', () => {
     const context = createContext(plugin);
 
     createSettingsRenderer().render(createContainer(), context);
-    const enableSetting = findSetting('Enable Codex CLI');
+    const enableSetting = findSetting('Enable Codex');
     await enableSetting.toggleComponents[0].onChangeCallback?.(false);
 
     expect(context.notifyProviderModelOptionsChanged).toHaveBeenCalledWith('codex');
@@ -550,7 +551,7 @@ describe('CodexSettingsTab', () => {
     const context = createContext(plugin);
 
     createSettingsRenderer().render(createContainer(), context);
-    const toggle = findSetting('Enable Codex CLI').toggleComponents[0];
+    const toggle = findSetting('Enable Codex').toggleComponents[0];
     await toggle.onChangeCallback?.(true);
 
     expect(plugin.runProviderExecutionTransition).toHaveBeenCalledWith(
@@ -582,7 +583,7 @@ describe('CodexSettingsTab', () => {
       const context = createContext(plugin);
 
       createSettingsRenderer().render(createContainer(), context);
-      const toggle = findSetting('Enable Codex CLI').toggleComponents[0];
+      const toggle = findSetting('Enable Codex').toggleComponents[0];
       toggle.value = false;
       toggle.setValue.mockClear();
 
@@ -615,7 +616,7 @@ describe('CodexSettingsTab', () => {
 
     const warningCallIndex = container.createDiv.mock.calls.findIndex(
       ([options]: [{ text?: string }?]) => options?.text
-        === 'No Codex CLI models are enabled. Go to Models below and enable at least one model.',
+        === 'No Codex models are enabled. Go to Models below and enable at least one model.',
     );
     const warningEl = container.createDiv.mock.results[warningCallIndex]?.value;
     expect(warningCallIndex).toBeGreaterThanOrEqual(0);

@@ -3,6 +3,7 @@ import {
   spawn as nodeSpawn,
 } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
+import { StringDecoder } from 'node:string_decoder';
 
 import crossSpawn from 'cross-spawn';
 
@@ -54,9 +55,14 @@ export class ManagedStdioProcess {
   private spawnConfirmed = false;
   private startAttempted = false;
   private stderrBuffer = '';
+  private readonly stderrDecoder = new StringDecoder('utf8');
   private stderrDataListener: ((chunk: Buffer | string) => void) | null = null;
 
-  constructor(private readonly options: ManagedStdioProcessOptions) {}
+  readonly #ownsProcessGroup: boolean;
+
+  constructor(private readonly options: ManagedStdioProcessOptions) {
+    this.#ownsProcessGroup = options.killProcessTree === true && process.platform !== 'win32';
+  }
 
   get stdin(): Writable {
     return this.#requireProcess().stdin;
@@ -87,6 +93,7 @@ export class ManagedStdioProcess {
         env: this.options.env,
         stdio: this.options.stdio ?? 'pipe',
         windowsHide: true,
+        ...(this.#ownsProcessGroup ? { detached: true } : {}),
         ...(this.options.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
       });
     } catch (error) {
@@ -110,9 +117,12 @@ export class ManagedStdioProcess {
       && !proc.killed
     );
     this.stderrDataListener = (chunk: Buffer | string) => {
-      const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
-      const limit = this.options.stderrBufferLimit ?? DEFAULT_STDERR_BUFFER_LIMIT;
-      this.stderrBuffer = `${this.stderrBuffer}${text}`.slice(-limit);
+      if (Buffer.isBuffer(chunk)) {
+        this.#appendStderr(this.stderrDecoder.write(chunk));
+      } else if (chunk.length > 0) {
+        this.#finalizeStderr();
+        this.#appendStderr(chunk);
+      }
     };
     proc.stderr.on('data', this.stderrDataListener);
     proc.on('spawn', this.handleSpawn);
@@ -165,6 +175,7 @@ export class ManagedStdioProcess {
 
     const proc = this.proc;
     if (!proc || !this.alive) {
+      if (proc) this.#killOwnedProcessGroup(proc, 'SIGKILL');
       this.shutdownPromise = Promise.resolve();
       return this.shutdownPromise;
     }
@@ -179,6 +190,8 @@ export class ManagedStdioProcess {
       const finish = (): void => {
         if (settled) return;
         settled = true;
+        // The root may exit before descendants that ignored its graceful signal.
+        this.#killOwnedProcessGroup(proc, 'SIGKILL');
         if (killTimer !== null) window.clearTimeout(killTimer);
         if (finalTimer !== null) window.clearTimeout(finalTimer);
         unsubscribeExit?.();
@@ -245,6 +258,7 @@ export class ManagedStdioProcess {
     code: number | null,
     signal: NodeJS.Signals | null,
   ): void => {
+    this.#finalizeStderr();
     this.alive = false;
     this.exitState = {
       closed: true,
@@ -268,7 +282,20 @@ export class ManagedStdioProcess {
 
   #killProcess(proc: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): boolean {
     try {
+      if (this.#ownsProcessGroup) {
+        return this.#killOwnedProcessGroup(proc, signal);
+      }
       return terminateSpawnedProcess(proc, signal, spawn, this.resolvedSpawnSpec);
+    } catch {
+      return false;
+    }
+  }
+
+  #killOwnedProcessGroup(proc: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): boolean {
+    if (!this.#ownsProcessGroup || !proc.pid) return false;
+    try {
+      process.kill(-proc.pid, signal);
+      return true;
     } catch {
       return false;
     }
@@ -282,6 +309,7 @@ export class ManagedStdioProcess {
 
   #cleanupProcessListeners(proc: ChildProcessWithoutNullStreams | null): void {
     if (!proc) return;
+    this.#finalizeStderr();
     proc.off('spawn', this.handleSpawn);
     proc.off('error', this.handleError);
     proc.off('exit', this.handleExit);
@@ -290,6 +318,19 @@ export class ManagedStdioProcess {
       proc.stderr.off('data', this.stderrDataListener);
       this.stderrDataListener = null;
     }
+  }
+
+  #appendStderr(text: string): void {
+    const limit = this.options.stderrBufferLimit ?? DEFAULT_STDERR_BUFFER_LIMIT;
+    const content = `${this.stderrBuffer}${text}`;
+    const tail = content.slice(-limit);
+    const cut = content.length - tail.length;
+    // If the cut splits a valid surrogate pair, omit its remaining half too.
+    this.stderrBuffer = cut > 0 && (content.codePointAt(cut - 1) ?? 0) > 0xffff ? tail.slice(1) : tail;
+  }
+
+  #finalizeStderr(): void {
+    this.#appendStderr(this.stderrDecoder.end());
   }
 
   #clearLifecycleListeners(): void {

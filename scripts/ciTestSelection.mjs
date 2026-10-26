@@ -26,16 +26,33 @@ const styleSuites = (existsSync(styleSuiteDirectory) ? readdirSync(styleSuiteDir
 
 // These consumers read files through fs rather than imports, so Jest cannot find their edges.
 const fileConsumers = [
+  [/^(?:tests\/fixtures\/providers\/models\/|src\/providers\/(?:grok|opencode)\/(?:settings|config|models|discoveryState|internal\/compareCollections)\.ts$|src\/core\/(?:device\/InstallationKey\.ts|providers\/(?:providerConfig\.ts|settings\/|models\/)))/, ['tests/integration/app/settings/ProviderModelDictionaryPersistence.test.ts']],
   [/^src\/i18n\/locales\/.*\.json$/, ['tests/integration/build/dependency-envelope.test.ts']],
   [/^src\/style\//, [
     ...styleSuites,
-    'tests/unit/features/chat/tabs/TabAttentionStyles.test.ts',
     'tests/unit/features/chat/navigation/NavigationSidebar.dom.test.ts',
+    'tests/unit/features/chat/rendering/MessageRenderer.codeFences.dom.test.ts',
   ]],
+  [/^tests\/fixtures\/providers\/deepseek\/runtime\//, ['tests/integration/providers/deepseek/runtime/DeepSeekHostProcess.test.ts']],
   [/^tests\/fixtures\/providers\/grok\/history\//, [
     'tests/unit/providers/grok/history/GrokConversationHistoryService.test.ts',
     'tests/unit/providers/grok/history/GrokHistoryStore.test.ts',
   ]],
+  [/^tests\/fixtures\/providers\/grok\/runtime\/models-list\.json$/, [
+    'tests/integration/providers/grok/runtime/GrokModels.test.ts',
+    'tests/integration/providers/grok/runtime/GrokModelDiscoveryService.test.ts',
+  ]],
+  [/^tests\/fixtures\/providers\/grok\/runtime\/models-list-byok\.json$/, [
+    'tests/integration/providers/grok/runtime/GrokModels.test.ts',
+    'tests/integration/providers/grok/runtime/GrokModelDiscoveryService.test.ts',
+  ]],
+  [/^tests\/fixtures\/providers\/grok\/runtime\/turn-completed\.json$/, [
+    'tests/unit/providers/grok/execution/GrokExecutionBackend.test.ts',
+  ]],
+  [/^tests\/fixtures\/providers\/codex\/history\/codex-session-(?:persisted-tools|agent-lifecycle|websearch-persisted)\.jsonl$/, [
+    'tests/unit/providers/codex/history/CodexHistoryStore.test.ts',
+  ]],
+  [/^src\/style\/base\/visibility\.css$/, ['tests/integration/features/chat/composer/PromptHistoryNavigation.dom.test.ts']],
 ];
 const scriptConsumers = new Map(suites.scriptTests.flatMap(file => [
   [file, file], [file.replace('.test.mjs', '.mjs'), file],
@@ -43,7 +60,7 @@ const scriptConsumers = new Map(suites.scriptTests.flatMap(file => [
 const globalInputs = new Set([
   'src/main.ts', 'tests/setupWindow.ts', 'scripts/ciTestSelection.mjs',
   'scripts/run-tests.js', 'scripts/run-jest.js', 'scripts/run-cross-platform-tests.js',
-  'scripts/testSuites.cjs', 'tests/tsconfig.json',
+  'scripts/testSuites.cjs',
 ]);
 
 export function selectCiTests({ changes, relatedTests, eventName }) {

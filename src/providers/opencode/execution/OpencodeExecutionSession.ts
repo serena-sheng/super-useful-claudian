@@ -16,7 +16,7 @@ import {
   SessionSnapshotState,
   type SteerableExecutionSession,
 } from '@/core/execution';
-import type { ProviderHost } from '@/core/providers/ProviderHost';
+import type { ProviderRuntimeHost } from '@/core/providers/ProviderRuntimeHost';
 import type { ChatMessage } from '@/core/types';
 import {
   ACPRequestedTurn,
@@ -26,7 +26,6 @@ import {
 } from '@/providers/acp';
 
 import { ProviderModelUnavailableError } from '../../../core/providers/models/ProviderModelUnavailableError';
-import type { OpencodeCommandCatalog } from '../commands/OpencodeCommandCatalog';
 import { loadOpencodeTurnStats } from '../history/OpencodeTurnStats';
 import type { OpencodeServerService } from '../http/OpencodeServerService';
 import { projectOpencodeMetadata } from '../metadata/OpencodeMetadataProjection';
@@ -52,7 +51,6 @@ export type OpencodeACPSessionKernelFactory = (
 ) => OpencodeSessionKernel;
 
 export interface OpencodeExecutionSessionOptions {
-  readonly commandCatalog?: Pick<OpencodeCommandCatalog, 'setCommandSnapshot'>;
   readonly serverService: OpencodeServerService;
   readonly createKernel?: OpencodeACPSessionKernelFactory;
 }
@@ -96,7 +94,7 @@ export class OpencodeExecutionSession implements ProviderExecutionSession, Steer
   private backgroundTurn: { id: string; sequence: number } | null = null;
 
   constructor(
-    private readonly plugin: ProviderHost,
+    private readonly host: ProviderRuntimeHost,
     private readonly config: ProviderSessionConfig,
     private readonly options: OpencodeExecutionSessionOptions,
   ) {
@@ -171,6 +169,11 @@ export class OpencodeExecutionSession implements ProviderExecutionSession, Steer
     if (this.disposed || (!this.backgroundTurn && this.backgroundScopes.size === 0)) return;
     this.lifecycleGeneration += 1;
     this.#interruptKernel();
+    if (this.backgroundTurn) {
+      // The native interrupt records the turn's `idle` outcome as interrupted, which history replays.
+      this.#emitBackground({ type: 'background_turn_completed', reason: 'interrupted', providerSessionId: this.nativeSessionId ?? undefined });
+      this.backgroundTurn = null;
+    }
     this.#invalidate('cancelled', true, new Error('Cancelled'));
     this.#emitSessionSnapshot();
     void this.#disposeKernel();
@@ -179,7 +182,7 @@ export class OpencodeExecutionSession implements ProviderExecutionSession, Steer
   /** Only kernels whose native protocol can steer accept; V1 ACP declines. */
   async steer(request: ProviderExecutionRequest): Promise<boolean> {
     try {
-      assertOpencodeModelAvailable(this.plugin.settings, request.configuration.model);
+      assertOpencodeModelAvailable(this.host, request.configuration.model);
     } catch (error) {
       if (error instanceof ProviderModelUnavailableError) return false;
       throw error;
@@ -248,13 +251,16 @@ export class OpencodeExecutionSession implements ProviderExecutionSession, Steer
         await this.options.serverService.waitUntilAvailable(request.signal);
         if (!this.#isRunCurrent(active, generation)) return;
       }
-      assertOpencodeModelAvailable(this.plugin.settings, request.configuration.model);
+      assertOpencodeModelAvailable(this.host, request.configuration.model);
       const pendingDisposal = this.kernelDisposalPromise;
       if (pendingDisposal) {
         await pendingDisposal;
         if (!this.#isRunCurrent(active, generation)) return;
       }
-      const kernelConfigurationKey = buildKernelConfigurationKey(request);
+      const profile = resolveProfile(request);
+      // Instructions are fixed per kernel: a changed prompt reopens the native session on a new one at this turn.
+      const systemPrompt = request.configuration.systemInstructions.instructions;
+      const kernelConfigurationKey = JSON.stringify([profile, systemPrompt]);
       let kernel = this.kernel;
       let native = this.nativeInfo;
       if (
@@ -358,14 +364,11 @@ export class OpencodeExecutionSession implements ProviderExecutionSession, Steer
               );
             }
           },
-          plugin: this.plugin,
+          host: this.host,
           sessionInstanceId: this.sessionInstanceId,
         });
         this.kernel = kernel;
-        await kernel.connect({
-          profile: resolveProfile(request),
-          systemInstructions: request.configuration.systemInstructions,
-        });
+        await kernel.connect({ profile, systemPrompt });
         if (this.kernel === kernel) {
           this.kernelConfigurationKey = kernelConfigurationKey;
         }
@@ -377,18 +380,18 @@ export class OpencodeExecutionSession implements ProviderExecutionSession, Steer
         if (!this.#isRunCurrent(active, generation)) return;
         phase = 'run';
         this.nativeInfo = native;
-        await projectOpencodeMetadata(this.plugin, native, this.kernelMetadataController.signal);
+        await projectOpencodeMetadata(this.host, native, this.kernelMetadataController.signal);
       } else {
         // Configuring a reused kernel is native work: cancellation must stop it.
         active.ownsNativeWork = true;
         this.state.setStatus('executing');
         phase = 'run';
       }
-      assertOpencodeModelAvailable(this.plugin.settings, request.configuration.model);
+      assertOpencodeModelAvailable(this.host, request.configuration.model);
       await this.#applyConfiguration(kernel, native, request);
       if (!this.#isRunCurrent(active, generation)) return;
 
-      assertOpencodeModelAvailable(this.plugin.settings, request.configuration.model);
+      assertOpencodeModelAvailable(this.host, request.configuration.model);
       const text = getInputText(request);
       const compact = parseCompactCommand(text);
       if (compact && !this.nativeConversationContextEstablished && request.conversationHistory?.length) {
@@ -400,7 +403,7 @@ export class OpencodeExecutionSession implements ProviderExecutionSession, Steer
       const response = await kernel.prompt({
         prompt: prompt?.blocks ?? [{ type: 'text', text: text.trim() }],
         sessionId: native.sessionId,
-      }, prompt?.userText);
+      }, prompt?.userText, request);
       this.#markNativeConversationContextEstablished(active);
       if (!this.#isRunCurrent(active, generation)) return;
       active.nativeCompleted = response.stopReason !== 'cancelled';
@@ -507,12 +510,6 @@ export class OpencodeExecutionSession implements ProviderExecutionSession, Steer
     } catch {
       return;
     }
-    if (metadata?.type === 'commands' && !this.kernelMetadataController.signal.aborted) {
-      const commands = metadata.commands.map((command) => ({
-        ...command,
-      }));
-      this.options.commandCatalog?.setCommandSnapshot(commands);
-    }
     if (metadata?.type === 'config_options') {
       if (this.nativeInfo) {
         this.nativeInfo = {
@@ -520,7 +517,7 @@ export class OpencodeExecutionSession implements ProviderExecutionSession, Steer
           configOptions: metadata.configOptions,
         };
       }
-      await projectOpencodeMetadata(this.plugin, {
+      await projectOpencodeMetadata(this.host, {
         configOptions: metadata.configOptions,
       }, this.kernelMetadataController.signal);
     }
@@ -549,7 +546,7 @@ export class OpencodeExecutionSession implements ProviderExecutionSession, Steer
           configOptions: response.configOptions,
         };
       }
-      await projectOpencodeMetadata(this.plugin, {
+      await projectOpencodeMetadata(this.host, {
         configOptions,
         selectedRawModelId: selectedModel,
       }, this.kernelMetadataController.signal);
@@ -580,10 +577,7 @@ export class OpencodeExecutionSession implements ProviderExecutionSession, Steer
   }
 
   #resolveSelectedRawModelId(explicit?: string): string | null {
-    const selection = explicit
-      ?? (typeof this.plugin.settings.model === 'string'
-        ? this.plugin.settings.model
-        : '');
+    const selection = explicit ?? this.host.selection.model ?? '';
     return decodeOpencodeModelId(selection) ?? (selection || null);
   }
 
@@ -790,19 +784,6 @@ function resolveProfile(request: ProviderExecutionRequest): OpencodeExecutionPro
   return 'managed';
 }
 
-function buildKernelConfigurationKey(
-  request: ProviderExecutionRequest,
-): string {
-  const instructions = request.configuration.systemInstructions;
-  return JSON.stringify([
-    resolveProfile(request),
-    instructions.kind,
-    instructions.kind === 'explicit'
-      ? instructions.instructions
-      : null,
-  ]);
-}
-
 function getInputText(request: ProviderExecutionRequest): string {
   return request.input
     .filter((block): block is Extract<typeof block, { type: 'text' }> => (
@@ -822,13 +803,8 @@ function buildPrompt(
     ))
     .map(({ image }) => image);
   return buildOpencodePrompt({
-    selections: request.context?.selections,
-    browserSelection: request.context?.browserSelection,
-    canvasSelection: request.context?.canvasSelection,
-    editorSelection: request.context?.editorSelection,
+    context: request.context,
     images,
-    linkedContent: request.context?.linkedContent,
-    sessionReferences: request.context?.sessionReferences,
     text: getInputText(request),
   }, bootstrapHistory
     ? [...(request.conversationHistory ?? [])] as ChatMessage[]

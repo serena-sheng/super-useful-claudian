@@ -5,8 +5,8 @@ import { encodeProviderModelSelectionId } from '../../../core/providers/modelSel
 import type {
   ProviderConversationHistoryService,
   ProviderConversationSessionAvailability,
+  ProviderHistoryEnvironment,
   ProviderHistoryInput,
-  ProviderHistoryPathContext,
   ProviderHistoryResult,
   ProviderHistoryState,
   ProviderHistoryUpdate,
@@ -25,18 +25,23 @@ import { extractHandbackResult } from '../normalization/claudeSubagentResult';
 import { isClaudeSubagentToolName } from '../subagentToolNames';
 import {
   type ClaudeProviderState,
+  type ClaudeSubagentOverlay,
   getClaudeConversationSessionIds,
   getClaudeState,
+  isFullClaudeSubagent,
 } from '../types/providerState';
 import type { SDKSessionLocation } from './ClaudeHistoryPathResolver';
 import {
   encodeVaultPathForSDK,
   getSDKProjectsPath,
+  hasSubagentSidecar,
   loadSDKSessionMessages,
   loadSDKSessionModel,
+  loadSubagentFinalResult,
   loadSubagentToolCalls,
   locateSDKSession,
   locateSDKSessions,
+  readSubagentToolUseIndex,
   recoverSDKSessionIdByTime,
 } from './ClaudeHistoryStore';
 
@@ -91,6 +96,8 @@ function mergeSubagentInfo(
   if (!sdkSubagent) {
     return {
       ...cachedSubagent,
+      description: cachedSubagent.description || (taskToolCall.input.description as string) || '',
+      prompt: cachedSubagent.prompt || (taskToolCall.input.prompt as string | undefined),
       asyncStatus: cachedAsyncStatus,
       result,
     };
@@ -272,6 +279,36 @@ function dedupeMessages(messages: ChatMessage[]): ChatMessage[] {
   return result;
 }
 
+/**
+ * Cached messages are the tab's live projection under Claudian-local ids. Native history supersedes
+ * every cached message it reflects by id or native identity. Complete history also supersedes every
+ * unmatched one before the last reflected message; later messages are the unconfirmed tail. A live
+ * task notification that native never consumed keeps its place. Incomplete history keeps every
+ * unmatched message: it may be the only copy of an unreadable segment.
+ */
+function retainUnconfirmedCachedMessages(
+  cached: ChatMessage[],
+  native: ChatMessage[],
+  complete: boolean,
+): ChatMessage[] {
+  const nativeIds = new Set(native.map(message => message.id));
+  const nativeUserIds = new Set(native.flatMap(message => message.role === 'user' && message.userMessageId
+    ? [message.userMessageId] : []));
+  const nativeAssistantIds = new Set(native.flatMap(message => message.role === 'assistant'
+    && message.assistantMessageId ? [message.assistantMessageId] : []));
+  const nativeNotifications = new Set(native.flatMap(message => (message.contentBlocks ?? [])
+    .flatMap(block => block.type === 'task_notification' ? [block.content] : [])));
+  const reflectsNative = (message: ChatMessage): boolean => nativeIds.has(message.id) || (message.role === 'user'
+    ? !!message.userMessageId && nativeUserIds.has(message.userMessageId)
+    : !!message.assistantMessageId && nativeAssistantIds.has(message.assistantMessageId));
+  const isUnconsumedNotification = (message: ChatMessage): boolean => !!message.contentBlocks?.length
+    && message.contentBlocks.every(block => block.type === 'task_notification' && !nativeNotifications.has(block.content));
+  let lastReflected = -1;
+  cached.forEach((message, index) => { if (reflectsNative(message)) lastReflected = index; });
+  return cached.filter((message, index) => nativeIds.has(message.id)
+    || (!reflectsNative(message) && (!complete || index > lastReflected || isUnconsumedNotification(message))));
+}
+
 /** Native transcript order wins; cached-only messages keep their surrounding anchors. */
 function mergeHistoryMessages(cached: ChatMessage[], native: ChatMessage[]): ChatMessage[] {
   const byId = new Map(dedupeMessages([...cached, ...native]).map(message => [message.id, message]));
@@ -314,46 +351,67 @@ function mergeHistoryMessages(cached: ChatMessage[], native: ChatMessage[]): Cha
   return result;
 }
 
-async function enrichAsyncSubagentToolCalls(
+/** Expands persisted subagents; overlays carry only lifecycle state and merge onto native records. */
+function expandCachedSubagents(
+  subagentData: Record<string, SubagentInfo | ClaudeSubagentOverlay>,
+): { subagents: Record<string, SubagentInfo>; overlayIds: Set<string> } {
+  const overlayIds = new Set<string>();
+  const subagents = Object.fromEntries(Object.entries(subagentData).map(([id, subagent]) => {
+    if (isFullClaudeSubagent(subagent)) return [id, subagent];
+    overlayIds.add(id);
+    return [id, { description: '', isExpanded: false, toolCalls: [], ...subagent }];
+  }));
+  return { subagents, overlayIds };
+}
+
+/** Fills cached async subagents from their sidecars where native history lacks the content. */
+async function enrichAsyncSubagents(
   subagentData: Record<string, SubagentInfo>,
+  messages: ChatMessage[],
   vaultPath: string,
   sessionIds: string[],
   relocatedSessionPaths: Map<string, string>,
-  pathContext?: ProviderHistoryPathContext,
+  pathContext?: ProviderHistoryEnvironment,
 ): Promise<void> {
   const uniqueSessionIds = [...new Set(sessionIds)];
   if (uniqueSessionIds.length === 0) return;
+  const nativeSubagents = new Map(messages.flatMap(message => message.toolCalls ?? [])
+    .flatMap(toolCall => toolCall.subagent ? [[toolCall.id, toolCall.subagent] as const] : []));
 
-  const loaderCache = new Map<string, ReturnType<typeof loadSubagentToolCalls>>();
-  const load = (sessionId: string, agentId: string): ReturnType<typeof loadSubagentToolCalls> => {
-    const cacheKey = `${sessionId}:${agentId}`;
-    let loader = loaderCache.get(cacheKey);
-    if (!loader) {
-      loader = loadSubagentToolCalls(
-        vaultPath,
-        sessionId,
-        agentId,
-        relocatedSessionPaths.get(sessionId),
-        pathContext,
-      );
-      loaderCache.set(cacheKey, loader);
+  // Segments are searched in order; later segments load only if earlier ones have no sidecar.
+  const findInSegments = async <T>(
+    load: (sessionId: string) => Promise<T | null>,
+  ): Promise<T | null> => {
+    for (const sessionId of uniqueSessionIds) {
+      const found = await load(sessionId);
+      if (found !== null) return found;
     }
-    return loader;
+    return null;
   };
 
   await Promise.all(Object.values(subagentData).map(async (subagent) => {
-    if (subagent.mode !== 'async' || !subagent.agentId || (subagent.toolCalls?.length ?? 0) > 0) return;
+    if (subagent.mode !== 'async' || !subagent.agentId) return;
+    const agentId = subagent.agentId;
+    const native = nativeSubagents.get(subagent.id);
 
-    // Segments are searched in order; later segments load only if earlier ones have no sidecar.
-    for (const sessionId of uniqueSessionIds) {
-      const recoveredToolCalls = await load(sessionId, subagent.agentId);
-      if (recoveredToolCalls.length === 0) continue;
+    if (subagent.toolCalls.length === 0 && !native?.toolCalls.length) {
+      const toolCalls = await findInSegments(async sessionId => {
+        const loaded = await loadSubagentToolCalls(
+          vaultPath, sessionId, agentId, relocatedSessionPaths.get(sessionId), pathContext,
+        );
+        return loaded.length > 0 ? loaded : null;
+      });
+      if (toolCalls) subagent.toolCalls = toolCalls.map(toolCall => ({ ...toolCall, input: { ...toolCall.input } }));
+    }
 
-      subagent.toolCalls = recoveredToolCalls.map(toolCall => ({
-        ...toolCall,
-        input: { ...toolCall.input },
-      }));
-      return;
+    // A completion Claudian observed that never reached the transcript keeps its result in the sidecar.
+    const cachedIsTerminal = isTerminalAsyncStatus(normalizeAsyncStatus(subagent));
+    const nativeIsTerminal = isTerminalAsyncStatus(normalizeAsyncStatus(native));
+    if (subagent.result === undefined && cachedIsTerminal && !nativeIsTerminal) {
+      const result = await findInSegments(sessionId => loadSubagentFinalResult(
+        vaultPath, sessionId, agentId, relocatedSessionPaths.get(sessionId), pathContext,
+      ));
+      if (result) subagent.result = result;
     }
   }));
 }
@@ -361,6 +419,7 @@ async function enrichAsyncSubagentToolCalls(
 function applySubagentData(
   messages: ChatMessage[],
   subagentData: Record<string, SubagentInfo>,
+  overlayIds: ReadonlySet<string> = new Set(),
 ): void {
   const attachedSubagentIds = new Set<string>();
   const subagentEntries = Object.entries(subagentData);
@@ -413,7 +472,8 @@ function applySubagentData(
   }
 
   for (const [subagentId, subagent] of subagentEntries) {
-    if (attachedSubagentIds.has(subagentId)) continue;
+    // An overlay without its native tool call belongs to history this replay excludes.
+    if (attachedSubagentIds.has(subagentId) || overlayIds.has(subagentId)) continue;
 
     let anchor = [...messages].reverse().find((msg): msg is ChatMessage => msg.role === 'assistant');
     if (!anchor) {
@@ -444,7 +504,7 @@ function applySubagentData(
 }
 
 function stripResultImageData(result: string | undefined): string | undefined {
-  if (!result?.includes('"base64"')) return result;
+  if (!result?.includes('"image"')) return result;
 
   try {
     let changed = false;
@@ -459,7 +519,7 @@ function stripResultImageData(result: string | undefined): string | undefined {
   }
 }
 
-function buildPersistedSubagent(subagent: SubagentInfo): SubagentInfo {
+function stripSubagentImageData(subagent: SubagentInfo): SubagentInfo {
   // Metadata written before results omitted image payloads still carries them; repair on save.
   return {
     ...subagent,
@@ -467,8 +527,32 @@ function buildPersistedSubagent(subagent: SubagentInfo): SubagentInfo {
     toolCalls: subagent.toolCalls.map(toolCall => ({
       ...toolCall,
       result: stripResultImageData(toolCall.result),
-      ...(toolCall.subagent ? { subagent: buildPersistedSubagent(toolCall.subagent) } : {}),
+      ...(toolCall.subagent ? { subagent: stripSubagentImageData(toolCall.subagent) } : {}),
     })),
+  };
+}
+
+/**
+ * Persists only what native history cannot rebuild. A subagent whose sidecar exists is rebuilt from
+ * its transcript tool call and sidecar on hydration; async runs keep the lifecycle state Claudian
+ * observed, because the transcript can lack the completion notice.
+ */
+function buildPersistedSubagent(
+  subagent: SubagentInfo | ClaudeSubagentOverlay,
+  findNativeSidecar: (subagent: SubagentInfo) => string | null,
+): SubagentInfo | ClaudeSubagentOverlay | null {
+  if (!isFullClaudeSubagent(subagent)) return subagent;
+  // A sync run without a terminal result has no transcript record to rebuild from.
+  const agentId = subagent.mode === 'async' || subagent.status !== 'running' ? findNativeSidecar(subagent) : null;
+  if (!agentId) return stripSubagentImageData(subagent);
+  if (subagent.mode !== 'async') return null;
+  const { id, mode, status, asyncStatus, result } = subagent;
+  // A failure explanation arrives only in the completion notice, which the transcript may lack.
+  const failed = status === 'error' || asyncStatus === 'error' || asyncStatus === 'orphaned';
+  return {
+    id, mode, agentId, status,
+    ...(asyncStatus ? { asyncStatus } : {}),
+    ...(failed && result !== undefined ? { result: stripResultImageData(result) } : {}),
   };
 }
 
@@ -524,7 +608,7 @@ export class ClaudeConversationHistoryService implements ProviderConversationHis
   #getSessionLocationCache(
     conversation: ProviderHistoryInput,
     vaultPath: string,
-    pathContext?: ProviderHistoryPathContext,
+    pathContext?: ProviderHistoryEnvironment,
   ): SessionLocationCache {
     const state = getClaudeState(conversation.providerState);
     const cacheKey = JSON.stringify([
@@ -553,7 +637,7 @@ export class ClaudeConversationHistoryService implements ProviderConversationHis
   async getConversationSessionAvailability(
     conversation: ProviderHistoryInput,
     vaultPath: string | null,
-    pathContext?: ProviderHistoryPathContext,
+    pathContext?: ProviderHistoryEnvironment,
   ): Promise<ProviderConversationSessionAvailability> {
     const sessionId = this.resolveSessionIdForConversation(conversation);
     if (!vaultPath) {
@@ -575,7 +659,7 @@ export class ClaudeConversationHistoryService implements ProviderConversationHis
   async prepareRelocatedConversationSession(
     input: ProviderHistoryInput,
     vaultPath: string | null,
-    pathContext?: ProviderHistoryPathContext,
+    pathContext?: ProviderHistoryEnvironment,
   ): Promise<ProviderHistoryUpdate | null> {
     const conversation = copyProviderHistoryState(input);
     const sessionId = this.resolveSessionIdForConversation(conversation);
@@ -593,6 +677,7 @@ export class ClaudeConversationHistoryService implements ProviderConversationHis
     state.previousProviderSessionIds = [
       ...new Set([...(state.previousProviderSessionIds || []), sessionId]),
     ];
+    state.bindingRetired = true;
     delete state.providerSessionId;
 
     if (state.forkSource?.sessionId === sessionId) {
@@ -609,7 +694,7 @@ export class ClaudeConversationHistoryService implements ProviderConversationHis
     input: ProviderHistoryInput,
     vaultPath: string | null,
     missingProviderSessionId?: string,
-    pathContext?: ProviderHistoryPathContext,
+    pathContext?: ProviderHistoryEnvironment,
   ): Promise<ProviderHistoryResult<'delete' | 'reset' | 'preserve'>> {
     const conversation = copyProviderHistoryState(input);
     const currentSessionId = this.resolveSessionIdForConversation(conversation);
@@ -636,6 +721,7 @@ export class ClaudeConversationHistoryService implements ProviderConversationHis
 
     const state = { ...getClaudeState(conversation.providerState) };
     state.previousProviderSessionIds = preservedSessionIds;
+    state.bindingRetired = true;
     delete state.providerSessionId;
     if (state.forkSource?.sessionId === currentSessionId) {
       conversation.resumeAtMessageId = state.forkSource.resumeAt;
@@ -674,7 +760,10 @@ export class ClaudeConversationHistoryService implements ProviderConversationHis
 
   buildPersistedProviderState(
     conversation: ProviderHistoryInput,
-    options: { preserveProviderState?: boolean } = {},
+    options: {
+      preserveProviderState?: boolean;
+      getNativeHistory?: () => { vaultPath: string | null; pathContext?: ProviderHistoryEnvironment };
+    } = {},
   ): Record<string, unknown> | undefined {
     const providerState: ClaudeProviderState = {
       ...getClaudeState(conversation.providerState),
@@ -683,10 +772,14 @@ export class ClaudeConversationHistoryService implements ProviderConversationHis
     const subagentData = options.preserveProviderState
       ? providerState.subagentData ?? {}
       : buildPersistedSubagentData(conversation.messages);
-    if (Object.keys(subagentData).length > 0) {
-      providerState.subagentData = Object.fromEntries(
-        Object.entries(subagentData).map(([id, subagent]) => [id, buildPersistedSubagent(subagent)]),
-      );
+    const nativeHistory = Object.keys(subagentData).length > 0 ? options.getNativeHistory?.() : undefined;
+    const findNativeSidecar = this.#createSidecarLookup(conversation, nativeHistory?.vaultPath, nativeHistory?.pathContext);
+    const persistedSubagents = Object.fromEntries(Object.entries(subagentData).flatMap(([id, subagent]) => {
+      const persisted = buildPersistedSubagent(subagent, findNativeSidecar);
+      return persisted ? [[id, persisted]] : [];
+    }));
+    if (Object.keys(persistedSubagents).length > 0) {
+      providerState.subagentData = persistedSubagents;
     } else {
       delete providerState.subagentData;
     }
@@ -694,13 +787,62 @@ export class ClaudeConversationHistoryService implements ProviderConversationHis
     return sanitizeProviderState(providerState);
   }
 
+  hasRedundantPersistedState(
+    conversation: ProviderHistoryInput,
+    vaultPath: string | null,
+    pathContext?: ProviderHistoryEnvironment,
+  ): boolean {
+    const findNativeSidecar = this.#createSidecarLookup(conversation, vaultPath, pathContext);
+    // Redundant exactly when the save projection would drop or reduce a stored full record.
+    return Object.values(getClaudeState(conversation.providerState).subagentData ?? {}).some(subagent => {
+      if (!isFullClaudeSubagent(subagent)) return false;
+      const persisted = buildPersistedSubagent(subagent, findNativeSidecar);
+      return persisted === null || !isFullClaudeSubagent(persisted);
+    });
+  }
+
+  /**
+   * Resolves the agent id whose native sidecar holds a subagent, searching the segments hydration
+   * reads. Records saved before sync subagents kept their agent id resolve through the sidecar
+   * index by spawning tool call id.
+   */
+  #createSidecarLookup(
+    conversation: ProviderHistoryInput,
+    vaultPath: string | null | undefined,
+    pathContext: ProviderHistoryEnvironment | undefined,
+  ): (subagent: SubagentInfo) => string | null {
+    if (!vaultPath) return () => null;
+    const sessionIds = [...new Set(this.#getConversationSessionIds(conversation))];
+    let toolUseIndex: Map<string, string> | null = null;
+    return (subagent) => {
+      if (subagent.agentId) {
+        const { agentId } = subagent;
+        return sessionIds.some(sessionId => hasSubagentSidecar(vaultPath, sessionId, agentId, pathContext))
+          ? agentId : null;
+      }
+      toolUseIndex ??= new Map(sessionIds.flatMap(sessionId => [
+        ...readSubagentToolUseIndex(vaultPath, sessionId, pathContext),
+      ]));
+      return toolUseIndex.get(subagent.id) ?? null;
+    };
+  }
+
   async recoverConversationSessionReference(
     input: ProviderHistoryInput,
     vaultPath: string | null,
-    pathContext?: ProviderHistoryPathContext,
+    pathContext?: ProviderHistoryEnvironment,
   ): Promise<ProviderHistoryUpdate | null> {
     const conversation = copyProviderHistoryState(input);
-    if (input.createdAt === undefined || input.lastActivityAt === undefined || !vaultPath || this.resolveSessionIdForConversation(conversation)) {
+    if (!vaultPath || this.resolveSessionIdForConversation(conversation)) {
+      return null;
+    }
+    const state = getClaudeState(conversation.providerState);
+    // Retired sessions are exact locators; matching by time must never stand in for them.
+    if (state.previousProviderSessionIds?.length) {
+      // Retired-binding migration: return null here once the restore is removed.
+      return this.#restoreEarlierRetiredBinding(conversation, state, vaultPath, pathContext);
+    }
+    if (input.createdAt === undefined || input.lastActivityAt === undefined) {
       return null;
     }
 
@@ -719,10 +861,42 @@ export class ClaudeConversationHistoryService implements ProviderConversationHis
     return conversation;
   }
 
+  /**
+   * Retired-binding migration (#1647, added 2026-10-16; remove after 2027-01-16).
+   * Earlier versions retired live bindings on launch-only changes without marking them. The latest
+   * session is restored once when its transcript is still in the configured store; a kept
+   * checkpoint may be a pending fork's, whose retired session belongs to the fork source.
+   */
+  async #restoreEarlierRetiredBinding(
+    conversation: ProviderHistoryState,
+    state: ClaudeProviderState,
+    vaultPath: string,
+    pathContext?: ProviderHistoryEnvironment,
+  ): Promise<ProviderHistoryUpdate | null> {
+    if (state.bindingRetired) return null;
+    const previousSessionIds = state.previousProviderSessionIds ?? [];
+    const sessionId = previousSessionIds.at(-1)!;
+    const availability = conversation.resumeAtMessageId
+      ? 'missing'
+      : (await locateSDKSession(vaultPath, sessionId, pathContext)).availability;
+    if (availability === 'unknown') return null;
+    if (availability !== 'available') {
+      conversation.providerState = sanitizeProviderState({ ...state, bindingRetired: true });
+      return conversation;
+    }
+    conversation.sessionId = sessionId;
+    conversation.providerState = sanitizeProviderState({
+      ...state,
+      providerSessionId: sessionId,
+      previousProviderSessionIds: previousSessionIds.length > 1 ? previousSessionIds.slice(0, -1) : undefined,
+    });
+    return conversation;
+  }
+
   async hydrateConversationHistory(
     input: ProviderHistoryInput,
     vaultPath: string | null,
-    pathContext?: ProviderHistoryPathContext,
+    pathContext?: ProviderHistoryEnvironment,
   ): Promise<ProviderHistoryUpdate> {
     return (await this.#readHistory(input, vaultPath, pathContext)).changes;
   }
@@ -730,7 +904,7 @@ export class ClaudeConversationHistoryService implements ProviderConversationHis
   async #readHistory(
     input: ProviderHistoryInput,
     vaultPath: string | null,
-    pathContext?: ProviderHistoryPathContext,
+    pathContext?: ProviderHistoryEnvironment,
   ): Promise<{ changes: ProviderHistoryState; complete: boolean }> {
     const conversation = copyProviderHistoryState(input);
     normalizeCachedSyncResults(conversation.messages);
@@ -822,21 +996,25 @@ export class ClaudeConversationHistoryService implements ProviderConversationHis
 
     const filteredSdkMessages = allSdkMessages.filter(msg => !msg.isRebuiltContext);
 
-    const merged = mergeHistoryMessages(conversation.messages, filteredSdkMessages);
+    const complete = errorCount === 0 && unknownSessionCount === 0 && missingSessionCount === 0;
+    const cached = retainUnconfirmedCachedMessages(conversation.messages, filteredSdkMessages, complete);
+    const merged = mergeHistoryMessages(cached, filteredSdkMessages);
 
     if (state.subagentData) {
-      await enrichAsyncSubagentToolCalls(
-        state.subagentData,
+      const { subagents, overlayIds } = expandCachedSubagents(state.subagentData);
+      await enrichAsyncSubagents(
+        subagents,
+        merged,
         vaultPath,
         allSessionIds,
         relocatedSessionPaths,
         pathContext,
       );
-      applySubagentData(merged, state.subagentData);
+      applySubagentData(merged, subagents, overlayIds);
     }
 
     conversation.messages = merged;
-    return { changes: conversation, complete: errorCount === 0 && unknownSessionCount === 0 };
+    return { changes: conversation, complete };
   }
 
   hasConversationModelRecoverySource(conversation: ProviderHistoryInput): boolean {
@@ -846,7 +1024,7 @@ export class ClaudeConversationHistoryService implements ProviderConversationHis
   async recoverConversationModelSelection(
     conversation: ProviderHistoryInput,
     vaultPath: string | null,
-    pathContext?: ProviderHistoryPathContext,
+    pathContext?: ProviderHistoryEnvironment,
   ): Promise<string | null> {
     if (!vaultPath) return null;
 

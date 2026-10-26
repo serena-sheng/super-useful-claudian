@@ -2,6 +2,10 @@ import type { VaultFileAdapter } from '@/core/storage/VaultFileAdapter';
 import type { SessionMetadata } from '@/core/types';
 
 import {
+  type ConversationTranscriptPersistence,
+  ConversationTranscriptStore,
+} from './ConversationTranscriptStore';
+import {
   type SessionMetadataAuthority,
   type SessionMetadataReader,
   SessionStorage,
@@ -9,6 +13,7 @@ import {
 
 export interface ConversationPersistence {
   readonly metadataReader: SessionMetadataReader;
+  readonly transcripts: ConversationTranscriptPersistence;
   saveMetadata(
     metadata: SessionMetadata,
     target?: SessionMetadataAuthority,
@@ -22,6 +27,7 @@ export interface ConversationPersistence {
 
 export class ConversationPersistenceStore implements ConversationPersistence {
   readonly metadataReader: SessionMetadataReader;
+  readonly transcripts: ConversationTranscriptPersistence;
   private readonly metadataStorage: SessionStorage;
 
   constructor(
@@ -30,6 +36,7 @@ export class ConversationPersistenceStore implements ConversationPersistence {
   ) {
     this.metadataStorage = new SessionStorage(adapter, deviceKey);
     this.metadataReader = this.metadataStorage;
+    this.transcripts = new ConversationTranscriptStore(adapter, deviceKey);
   }
 
   async saveMetadata(

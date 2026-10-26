@@ -1,4 +1,3 @@
-import { getProviderConfig, setProviderConfig } from '../../core/providers/providerConfig';
 import { sameDiscoveredModels, sameThinkingOptionsByModel } from './internal/compareCollections';
 import {
   normalizeOpencodeDiscoveredModels,
@@ -12,8 +11,8 @@ interface OpencodeDiscoveryState {
   thinkingOptionsByModel: OpencodeThinkingOptionsByModel;
 }
 
-function ensureDiscoveryState(settings: Record<string, unknown>): OpencodeDiscoveryState {
-  const config = getProviderConfig(settings, 'opencode');
+/** Reads the discovery state of a stored OpenCode configuration. */
+export function getOpencodeDiscoveryState(config: Readonly<Record<string, unknown>>): OpencodeDiscoveryState {
   const discoveredModels = normalizeOpencodeDiscoveredModels(config.discoveredModels ?? config.selectedModels);
   return {
     discoveredModels,
@@ -21,34 +20,12 @@ function ensureDiscoveryState(settings: Record<string, unknown>): OpencodeDiscov
   };
 }
 
-function cloneDiscoveredModels(models: OpencodeDiscoveredModel[]): OpencodeDiscoveredModel[] {
-  return models.map((model) => ({ ...model }));
-}
-
-function cloneThinkingOptionsByModel(
-  optionsByModel: OpencodeThinkingOptionsByModel,
-): OpencodeThinkingOptionsByModel {
-  return Object.fromEntries(
-    Object.entries(optionsByModel).map(([rawId, options]) => [
-      rawId,
-      options.map((option) => ({ ...option })),
-    ]),
-  );
-}
-
-export function getOpencodeDiscoveryState(settings: Record<string, unknown>): OpencodeDiscoveryState {
-  const state = ensureDiscoveryState(settings);
-  return {
-    discoveredModels: cloneDiscoveredModels(state.discoveredModels),
-    thinkingOptionsByModel: cloneThinkingOptionsByModel(state.thinkingOptionsByModel),
-  };
-}
-
+/** Updates the discovery state of a stored OpenCode configuration in place; returns whether it changed. */
 export function updateOpencodeDiscoveryState(
-  settings: Record<string, unknown>,
+  config: Record<string, unknown>,
   updates: Partial<OpencodeDiscoveryState>,
 ): boolean {
-  const state = ensureDiscoveryState(settings);
+  const state = getOpencodeDiscoveryState(config);
   const nextDiscoveredModels = 'discoveredModels' in updates
     ? normalizeOpencodeDiscoveredModels(updates.discoveredModels)
     : state.discoveredModels;
@@ -62,8 +39,7 @@ export function updateOpencodeDiscoveryState(
     return false;
   }
 
-  state.discoveredModels = cloneDiscoveredModels(nextDiscoveredModels);
-  state.thinkingOptionsByModel = cloneThinkingOptionsByModel(nextThinkingOptionsByModel);
-  setProviderConfig(settings, 'opencode', { ...getProviderConfig(settings, 'opencode'), ...state });
+  config.discoveredModels = nextDiscoveredModels;
+  config.thinkingOptionsByModel = nextThinkingOptionsByModel;
   return true;
 }

@@ -1,13 +1,15 @@
+import type { ProviderSessionToolPort } from '@/core/execution';
 import type { CodexAppServerConnection } from '@/providers/codex/runtime/CodexAppServerRuntime';
 import { CodexDynamicToolRegistry } from '@/providers/codex/runtime/CodexDynamicToolRegistry';
 import type { CodexLaunchSpec } from '@/providers/codex/runtime/codexLaunchTypes';
 import type { CodexRPCTransport } from '@/providers/codex/runtime/CodexRPCTransport';
 import type { CodexRuntimeContext } from '@/providers/codex/runtime/CodexRuntimeContext';
+import { createCodexSessionTools } from '@/providers/codex/runtime/CodexSessionTools';
 import type { CodexThreadObserver, CodexThreadScope } from '@/providers/codex/runtime/CodexThreadScope';
 import { createCodexWorkspaceDependencyTool } from '@/providers/codex/runtime/CodexWorkspaceDependencyTool';
 
 export interface CodexSessionConnectionHost {
-  readonly vaultWorkingDirectory: string;
+  readonly workingDirectory: string;
   /** Routes the attached thread scope's native traffic. */
   readonly observer: CodexThreadObserver;
   /** The attached app-server generation exited on its own. */
@@ -31,7 +33,10 @@ export class CodexSessionConnection {
   #detachListeners: (() => void) | null = null;
   #release: Promise<void> | null = null;
 
-  constructor(private readonly host: CodexSessionConnectionHost) {}
+  constructor(
+    private readonly host: CodexSessionConnectionHost,
+    private readonly sessionTools?: ProviderSessionToolPort,
+  ) {}
 
   get transport(): CodexRPCTransport | null {
     return this.#connection?.transport ?? null;
@@ -86,6 +91,9 @@ export class CodexSessionConnection {
     this.#runtimeContext = runtimeContext;
     this.#dynamicToolRegistry = new CodexDynamicToolRegistry();
     this.#dynamicToolRegistry.register(createCodexWorkspaceDependencyTool(runtimeContext));
+    if (this.sessionTools) {
+      for (const tool of createCodexSessionTools(this.sessionTools)) this.#dynamicToolRegistry.register(tool);
+    }
     this.#scope = connection.createThreadScope(this.host.observer);
     const offExit = connection.onExit(() => {
       if (this.#connection === connection) this.host.onExit();
@@ -117,8 +125,8 @@ export class CodexSessionConnection {
   /** The vault directory as the app-server sees it. */
   targetWorkingDirectory(): string {
     const launchSpec = this.#connection?.launchSpec;
-    if (!launchSpec) return this.host.vaultWorkingDirectory;
-    return launchSpec.pathMapper.toTargetPath(this.host.vaultWorkingDirectory) ?? launchSpec.targetCwd;
+    if (!launchSpec) return this.host.workingDirectory;
+    return launchSpec.pathMapper.toTargetPath(this.host.workingDirectory) ?? launchSpec.targetCwd;
   }
 
   toTargetPath(hostPath: string | null): string | null {

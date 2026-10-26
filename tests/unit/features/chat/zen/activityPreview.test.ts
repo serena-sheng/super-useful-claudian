@@ -42,6 +42,33 @@ describe('formatActivityPreview', () => {
   });
 
   it.each([
+    ['display crossing pair', 'A'.repeat(238) + '\uD83D\uDE00X', 'A'.repeat(238) + '…'],
+    ['display fitting pair', 'A'.repeat(237) + '\uD83D\uDE00XX', 'A'.repeat(237) + '\uD83D\uDE00…'],
+    ['display exact limit', 'A'.repeat(238) + '\uD83D\uDE00', 'A'.repeat(238) + '\uD83D\uDE00'],
+    ['ASCII exact limit', 'A'.repeat(240), 'A'.repeat(240)],
+    ['ASCII truncated', 'A'.repeat(241), 'A'.repeat(239) + '…'],
+    ['scan crossing pair', ' '.repeat(3761) + 'A'.repeat(238) + '\uD83D\uDE00X', 'A'.repeat(238)],
+    ['scan fitting pair', ' '.repeat(3760) + 'A'.repeat(238) + '\uD83D\uDE00X', 'A'.repeat(238) + '\uD83D\uDE00'],
+    ['scan exact limit', ' '.repeat(3760) + 'A'.repeat(238) + '\uD83D\uDE00', 'A'.repeat(238) + '\uD83D\uDE00'],
+    ['beyond scan head', ' '.repeat(4000) + 'X', ''],
+    ['display isolated high', 'A'.repeat(238) + '\uD83DXX', 'A'.repeat(238) + '\uD83D…'],
+    ['display isolated low', 'A'.repeat(238) + '\uDE00XX', 'A'.repeat(238) + '\uDE00…'],
+    ['scan high before ASCII', ' '.repeat(3761) + 'A'.repeat(238) + '\uD83DX', 'A'.repeat(238) + '\uD83D'],
+    ['scan high at EOF', ' '.repeat(3761) + 'A'.repeat(238) + '\uD83D', 'A'.repeat(238) + '\uD83D'],
+    ['scan isolated low', ' '.repeat(3761) + 'A'.repeat(238) + '\uDE00X', 'A'.repeat(238) + '\uDE00'],
+    ['scan high before another high', ' '.repeat(3761) + 'A'.repeat(238) + '\uD83D\uD83D\uDE00', 'A'.repeat(238) + '\uD83D'],
+  ])('preserves bounded UTF-16 text for %s in both activity paths', (_name, input, expected) => {
+    for (const kind of ['user', 'text'] as const) {
+      const state = new ChatState();
+      state.recordActivity({ kind, text: input });
+      const preview = formatActivityPreview(state);
+      expect({ kind, text: preview.text }).toEqual({ kind, text: expected });
+      expect(preview.text.length).toBe(expected.length);
+      expect(preview.tone).toBe('idle');
+    }
+  });
+
+  it.each([
     ['running', 'Bash · running'],
     ['completed', 'Bash · done'],
     ['error', 'Bash · failed'],
@@ -64,7 +91,7 @@ describe('formatActivityPreview', () => {
     })];
     expect(formatActivityPreview(state).toolName).toBe('Bash');
 
-    state.beginActionRequired('approval-1');
+    state.setActionRequired(true);
     expect(formatActivityPreview(state).toolName).toBeUndefined();
   });
 
@@ -127,9 +154,9 @@ describe('formatActivityPreview', () => {
     state.recordActivity({ kind: 'tool', tool: tool('completed') });
     expect(formatActivityPreview(state).text).toBe('Compacting...');
 
-    state.beginActionRequired('approval-1');
+    state.setActionRequired(true);
     expect(formatActivityPreview(state).text).toBe('Needs your input');
-    state.endActionRequired('approval-1');
+    state.setActionRequired(false);
 
     state.waitingStatus = null;
     expect(formatActivityPreview(state).text).toBe('Bash · done');
@@ -143,10 +170,10 @@ describe('formatActivityPreview', () => {
     state.recordActivity({ kind: 'error', message: 'Provider\nunavailable' });
     expect(formatActivityPreview(state)).toEqual({ text: 'Error: Provider unavailable', tone: 'error' });
 
-    state.beginActionRequired('approval-1');
+    state.setActionRequired(true);
     expect(formatActivityPreview(state)).toEqual({ text: 'Needs your input', tone: 'action-required' });
 
-    state.endActionRequired('approval-1');
+    state.setActionRequired(false);
     expect(formatActivityPreview(state).tone).toBe('error');
   });
 });

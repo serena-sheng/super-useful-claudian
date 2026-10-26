@@ -1,3 +1,4 @@
+import type * as nodeFs from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -8,6 +9,7 @@ import type { Conversation, ToolCallInfo } from '@/core/types';
 import { ClaudeConversationHistoryService } from '@/providers/claude/history/ClaudeConversationHistoryService';
 import type { SDKSessionLocation } from '@/providers/claude/history/ClaudeHistoryPathResolver';
 import * as historyStore from '@/providers/claude/history/ClaudeHistoryStore';
+import { clearClaudeResumeState } from '@/providers/claude/types/providerState';
 
 function createConversation(overrides: Partial<Conversation> = {}): Conversation {
   return {
@@ -223,8 +225,8 @@ describe('ClaudeConversationHistoryService', () => {
         entry({ type: 'assistant', uuid: 'a1', parentUuid: 'u1', timestamp: '2026-01-01T00:00:01Z',
           message: { model: 'claude-opus-4-6', content: [{ type: 'text', text: 'Answer' }] } }),
       ].join('\n'));
-      // Spy on the module object that the history reader's namespace import delegates to.
-      const readSpy = jest.spyOn(jest.requireActual<typeof fs>('fs/promises'), 'readFile');
+      // Spy on the module object that the streaming history reader calls through.
+      const readSpy = jest.spyOn(jest.requireActual<typeof nodeFs>('node:fs'), 'createReadStream');
       const service = new ClaudeConversationHistoryService();
       const conversation = createConversation();
 
@@ -319,7 +321,7 @@ describe('ClaudeConversationHistoryService', () => {
       await writeSession('other-project', 'session-2', 'Replacement');
       const actualFs = jest.requireActual<typeof fs>('fs/promises');
       const readdirSpy = jest.spyOn(actualFs, 'readdir');
-      const readSpy = jest.spyOn(actualFs, 'readFile');
+      const readSpy = jest.spyOn(jest.requireActual<typeof nodeFs>('node:fs'), 'createReadStream');
       const rootScans = () => readdirSpy.mock.calls.filter(([directory]) => directory === projectsPath).length;
       const service = new ClaudeConversationHistoryService();
       const conversation = createConversation();
@@ -379,6 +381,7 @@ describe('ClaudeConversationHistoryService', () => {
       expect(conversation.sessionId).toBeNull();
       expect(conversation.providerState).toEqual({
         previousProviderSessionIds: ['session-previous', 'session-1'],
+        bindingRetired: true,
       });
 
       locationSpy.mockRestore();
@@ -466,13 +469,78 @@ describe('ClaudeConversationHistoryService', () => {
       expect(conversation.sessionId).toBeNull();
       expect(conversation.providerState).toEqual({
         previousProviderSessionIds: ['session-previous'],
+        bindingRetired: true,
       });
 
       locationSpy.mockRestore();
     });
   });
 
+  // Retired-binding migration (#1647): delete this block after 2027-01-16.
+  describe('bindings retired by an earlier version', () => {
+    const retired = (overrides: Partial<Conversation> = {}): Conversation => createConversation({
+      sessionId: null,
+      providerState: { previousProviderSessionIds: ['session-0', 'session-1'] },
+      ...overrides,
+    });
+
+    async function recover(conversation: Conversation, sessionIds: string[]) {
+      const configDir = await fs.mkdtemp(path.join(os.tmpdir(), 'claudian-retired-binding-'));
+      const vaultPath = path.join(configDir, 'vault');
+      const pathContext = { environment: { CLAUDE_CONFIG_DIR: configDir }, vaultPath };
+      const sessionDir = path.join(historyStore.getSDKProjectsPath(pathContext), historyStore.encodeVaultPathForSDK(vaultPath));
+      await fs.mkdir(sessionDir, { recursive: true });
+      await Promise.all(sessionIds.map(sessionId => fs.writeFile(
+        path.join(sessionDir, `${sessionId}.jsonl`),
+        JSON.stringify({ type: 'user', uuid: 'u1', sessionId, timestamp: testTime(), message: { content: 'Question' } }),
+      )));
+      // A transcript that matches the conversation's times must not stand in for a retired binding.
+      const timeRecovery = jest.spyOn(historyStore, 'recoverSDKSessionIdByTime').mockResolvedValue('session-1');
+      try {
+        const update = await new ClaudeConversationHistoryService()
+          .recoverConversationSessionReference(conversation, vaultPath, pathContext);
+        expect(timeRecovery).not.toHaveBeenCalled();
+        return update;
+      } finally {
+        timeRecovery.mockRestore();
+        await fs.rm(configDir, { recursive: true, force: true });
+      }
+    }
+
+    it('restores the latest retired session when its transcript is still in the configured store', async () => {
+      expect(await recover(retired(), ['session-0', 'session-1'])).toMatchObject({
+        sessionId: 'session-1',
+        providerState: { providerSessionId: 'session-1', previousProviderSessionIds: ['session-0'] },
+      });
+    });
+
+    it.each([
+      ['its transcript is missing', retired(), []],
+      // A pending fork retires into its source session and leaves its fork checkpoint behind.
+      ['the record kept a checkpoint', retired({ resumeAtMessageId: 'assistant-1' }), ['session-1']],
+    ])('records the retirement as final when %s', async (_case, conversation, sessionIds) => {
+      const update = await recover(conversation, sessionIds);
+      expect(update).toMatchObject({ sessionId: null, providerState: { bindingRetired: true } });
+      expect(update?.providerState).not.toHaveProperty('providerSessionId');
+    });
+
+  });
+
   describe('hydrateConversationHistory', () => {
+    it('never matches a transcript by time for a record with retired sessions', async () => {
+      const conversation = createConversation();
+      clearClaudeResumeState(conversation);
+      // A transcript matching the conversation's times would be the deliberately retired session.
+      const timeRecovery = jest.spyOn(historyStore, 'recoverSDKSessionIdByTime').mockResolvedValue('session-1');
+      try {
+        expect(await new ClaudeConversationHistoryService()
+          .recoverConversationSessionReference(conversation, '/vault')).toBeNull();
+        expect(timeRecovery).not.toHaveBeenCalled();
+      } finally {
+        timeRecovery.mockRestore();
+      }
+    });
+
     it('recovers an unlinked native transcript from the conversation timestamps', async () => {
       const service = new ClaudeConversationHistoryService();
       const conversation = createConversation({
@@ -501,6 +569,63 @@ describe('ClaudeConversationHistoryService', () => {
       });
 
       recoverySpy.mockRestore();
+    });
+
+    it('replaces live turn projections with native history, keeping unconsumed notifications and the unconfirmed tail', async () => {
+      const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'claudian-live-projection-'));
+      const sessionPath = path.join(directory, 'session-1.jsonl');
+      const notification = '<task-notification><task-id>bg-1</task-id><tool-use-id>bash</tool-use-id>'
+        + '<status>completed</status><summary>Background command completed (exit code 0).</summary></task-notification>';
+      const rows = [
+        { type: 'user', uuid: 'command', timestamp: testTime({ seconds: 0 }), message: { content:
+          '<command-message>bg-test</command-message>\n<command-name>/bg-test</command-name>\n<command-args>hello world</command-args>' } },
+        { type: 'user', uuid: 'skill-body', isMeta: true, timestamp: testTime({ seconds: 0 }),
+          message: { content: [{ type: 'text', text: 'Base directory for this skill' }] } },
+        { type: 'assistant', uuid: 'launch', timestamp: testTime({ seconds: 1 }), message: { stop_reason: 'tool_use',
+          content: [{ type: 'tool_use', id: 'bash', name: 'Bash', input: { command: 'sleep 20', run_in_background: true } }] } },
+        { type: 'user', uuid: 'launched', timestamp: testTime({ seconds: 2 }), toolUseResult: {},
+          message: { content: [{ type: 'tool_result', tool_use_id: 'bash', content: 'Started' }] } },
+        { type: 'assistant', uuid: 'first-final', timestamp: testTime({ seconds: 3 }),
+          message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Background task started.' }] } },
+        { type: 'user', uuid: 'notification', timestamp: testTime({ seconds: 23 }), message: { content: notification } },
+        { type: 'assistant', uuid: 'notified-final', timestamp: testTime({ seconds: 24 }),
+          message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'It finished.' }] } },
+      ];
+      await fs.writeFile(sessionPath, rows.map((row, index) => JSON.stringify({
+        ...row, parentUuid: rows[index - 1]?.uuid ?? null,
+      })).join('\n'));
+      const locationSpy = jest.spyOn(historyStore, 'locateSDKSessions')
+        .mockResolvedValue(new Map([['session-1', { availability: 'relocated', sessionPath }]]));
+      // The tab's transcript after the turn and the background response, as saved to the repository.
+      const live: Conversation['messages'] = [
+        { id: 'local-user', role: 'user', content: '/bg-test hello world', displayContent: '/bg-test hello world',
+          timestamp: testDate({ seconds: 0 }).getTime(), userMessageId: 'sent-uuid' },
+        { id: 'local-response', role: 'assistant', content: 'Background task started.', timestamp: testDate({ seconds: 0 }).getTime(),
+          assistantMessageId: 'first-final', toolCalls: [{ id: 'bash', name: 'Bash', input: {}, status: 'completed' }] },
+        { id: 'local-unconsumed', role: 'assistant', isAutomaticResponse: true, content: '', timestamp: testDate({ seconds: 10 }).getTime(),
+          contentBlocks: [{ type: 'task_notification', content: 'Another task finished.' }] },
+        { id: 'local-notification', role: 'assistant', isAutomaticResponse: true, content: '', timestamp: testDate({ seconds: 23 }).getTime(),
+          contentBlocks: [{ type: 'task_notification', content: 'Background command completed (exit code 0).' }] },
+        { id: 'local-background', role: 'assistant', isAutomaticResponse: true, content: 'It finished.',
+          timestamp: testDate({ seconds: 23 }).getTime(), assistantMessageId: 'notified-final' },
+        { id: 'local-pending', role: 'user', content: 'Next question', timestamp: testDate({ seconds: 30 }).getTime() },
+      ];
+
+      try {
+        const hydrated = await new ClaudeConversationHistoryService()
+          .hydrateConversationHistory(createConversation({ messages: live }), '/vault');
+
+        expect(hydrated.messages?.map(message => [message.id, message.displayContent ?? message.content])).toEqual([
+          ['command', '/bg-test hello world'],
+          ['launch', 'Background task started.'],
+          ['local-unconsumed', ''],
+          ['notification', 'It finished.'],
+          ['local-pending', 'Next question'],
+        ]);
+      } finally {
+        locationSpy.mockRestore();
+        await fs.rm(directory, { recursive: true, force: true });
+      }
     });
 
     it('uses native recovery instead of old conversation backup headers', async () => {
@@ -828,13 +953,37 @@ describe('ClaudeConversationHistoryService', () => {
       loadSpy.mockRestore();
     });
 
-    it('retries hydration when one session segment has unknown availability', async () => {
+    it.each(['missing', 'unknown'] as const)('preserves cached history and retries when one session segment is %s', async availability => {
       const service = new ClaudeConversationHistoryService();
       const conversation = createConversation({
         providerState: {
           previousProviderSessionIds: ['session-previous'],
           providerSessionId: 'session-1',
         },
+        // Cached messages are the live projection under Claudian-local ids.
+        messages: [
+          {
+            id: 'local-previous-user',
+            role: 'user',
+            content: 'previous question',
+            userMessageId: 'user-previous',
+            timestamp: testDate({ seconds: 1 }).getTime(),
+          },
+          {
+            id: 'local-user',
+            role: 'user',
+            content: 'question',
+            userMessageId: 'user-1',
+            timestamp: testDate({ seconds: 2 }).getTime(),
+          },
+          {
+            id: 'local-assistant',
+            role: 'assistant',
+            content: 'answer',
+            assistantMessageId: 'assistant-1',
+            timestamp: testDate({ seconds: 3 }).getTime(),
+          },
+        ],
       });
       const available = (sessionId: string) => ({
         availability: 'available' as const,
@@ -842,7 +991,7 @@ describe('ClaudeConversationHistoryService', () => {
       });
       const locationSpy = jest.spyOn(historyStore, 'locateSDKSessions')
         .mockResolvedValueOnce(new Map<string, SDKSessionLocation>([
-          ['session-previous', { availability: 'unknown' }],
+          ['session-previous', { availability }],
           ['session-1', available('session-1')],
         ]))
         .mockResolvedValueOnce(new Map<string, SDKSessionLocation>([
@@ -851,27 +1000,54 @@ describe('ClaudeConversationHistoryService', () => {
         ]));
       const loadSpy = jest.spyOn(historyStore, 'loadSDKSessionMessages')
         .mockImplementation(async (_vaultPath, sessionId) => ({
-          messages: [{
-            id: `message-${sessionId}`,
-            role: 'user',
-            content: sessionId,
-            timestamp: sessionId === 'session-previous' ? 1 : 2,
-          }],
+          messages: sessionId === 'session-previous'
+            ? [{
+              id: 'native-previous-user',
+              role: 'user',
+              content: 'previous question',
+              userMessageId: 'user-previous',
+              timestamp: testDate({ seconds: 1 }).getTime(),
+            }]
+            : [
+              {
+                id: 'native-user',
+                role: 'user',
+                content: 'question',
+                userMessageId: 'user-1',
+                timestamp: testDate({ seconds: 2 }).getTime(),
+              },
+              {
+                id: 'native-assistant',
+                role: 'assistant',
+                content: 'answer',
+                assistantMessageId: 'assistant-1',
+                timestamp: testDate({ seconds: 3 }).getTime(),
+              },
+            ],
           skippedLines: 0,
         }));
 
-      Object.assign(conversation, await service.hydrateConversationHistory(conversation, '/vault'));
-      Object.assign(conversation, await service.hydrateConversationHistory(conversation, '/vault'));
+      try {
+        Object.assign(conversation, await service.hydrateConversationHistory(conversation, '/vault'));
+        // Native history supersedes the copies it reflects; the unreadable segment's copy stays.
+        expect(conversation.messages.map(message => message.id)).toEqual([
+          'local-previous-user',
+          'native-user',
+          'native-assistant',
+        ]);
+        Object.assign(conversation, await service.hydrateConversationHistory(conversation, '/vault'));
 
-      expect(conversation.messages.map(message => message.content)).toEqual([
-        'session-previous',
-        'session-1',
-      ]);
-      expect(locationSpy).toHaveBeenCalledTimes(2);
-      expect(loadSpy).toHaveBeenCalledTimes(3);
-
-      locationSpy.mockRestore();
-      loadSpy.mockRestore();
+        expect(conversation.messages.map(message => message.id)).toEqual([
+          'native-previous-user',
+          'native-user',
+          'native-assistant',
+        ]);
+        expect(locationSpy).toHaveBeenCalledTimes(2);
+        expect(loadSpy).toHaveBeenCalledTimes(3);
+      } finally {
+        locationSpy.mockRestore();
+        loadSpy.mockRestore();
+      }
     });
   });
 });

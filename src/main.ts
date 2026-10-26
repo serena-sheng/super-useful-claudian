@@ -1,4 +1,3 @@
-import { SessionSnapshotStore } from './app/conversations/SessionSnapshotStore';
 import { StartupProfiler } from './core/performance/StartupProfiler';
 // Must run before any SDK imports to patch Electron/Node.js realm incompatibility
 import { patchSetMaxListenersForElectron } from './utils/electronCompat';
@@ -12,6 +11,7 @@ import { Notice, Plugin } from 'obsidian';
 
 import type { NativeSessionArchiveSync } from './app/conversations/NativeSessionArchiveSync';
 import type { SessionMetadataLoader } from './app/conversations/SessionMetadataLoader';
+import type { ProjectService } from './app/projects/ProjectService';
 import { createDefaultClaudianSettings } from './app/settings/defaultSettings';
 import { EnvironmentSettingsService } from './app/settings/EnvironmentSettingsService';
 import { ProviderChatOptionsReconciler } from './app/settings/ProviderChatOptionsReconciler';
@@ -22,17 +22,29 @@ import type { SharedStorageService } from './app/storage/SharedStorageService';
 import { AgentSkillResources } from './composition/AgentSkillResources';
 import { ClaudianChatFeatureHost, ClaudianFeatureHost } from './composition/ClaudianFeatureHosts';
 import { ClaudianProviderHost } from './composition/ClaudianProviderHost';
-import { ClaudianViews, isClaudianView } from './composition/ClaudianViews';
+import { ClaudianViews } from './composition/ClaudianViews';
 import { ProviderExecutionLifecycleRegistry } from './core/execution';
+import { resolveLoginShellPath } from './core/process/loginShellPath';
 import { ProviderRegistry } from './core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from './core/providers/ProviderSettingsCoordinator';
 import { ProviderWorkspaceRegistry } from './core/providers/ProviderWorkspaceRegistry';
 import type { ProviderId } from './core/providers/types';
+import { LoopbackSessionToolServer } from './core/session-tools/LoopbackSessionToolServer';
 import type { ClaudianSettings } from './core/types';
 import { VIEW_TYPE_CLAUDIAN } from './core/types';
 import { ClaudianView } from './features/chat/ClaudianView';
 import { ConversationLifecycle } from './features/chat/conversation/ConversationLifecycle';
 import { InactiveSessionArchiver } from './features/chat/conversation/InactiveSessionArchiver';
+import {
+  CLAUDIAN_TURN_ENDED_EVENT,
+  type ClaudianAPI,
+  type ClaudianTurnEndedEvent,
+  createClaudianAPI,
+} from './features/chat/session-messaging/ClaudianAPI';
+import { SessionMessagingService } from './features/chat/session-messaging/SessionMessagingService';
+import { createChatSessionRuntime } from './features/chat/sessions/createChatSessionRuntime';
+import { SessionRuntimePool } from './features/chat/sessions/SessionRuntimePool';
+import { createChatFocusCommand } from './features/chat/workspace/ChatFocusCommand';
 import { createChatTabCommands } from './features/chat/workspace/ChatTabCommands';
 import { ChatViewPublisher } from './features/chat/workspace/ChatViewPublisher';
 import { registerFileMenu } from './features/chat/workspace/fileMenu';
@@ -49,12 +61,17 @@ export default class ClaudianPlugin extends Plugin {
   providerHost!: ClaudianProviderHost;
   private featureHost!: ClaudianFeatureHost;
   private chatHost!: ClaudianChatFeatureHost;
+  private sessionRuntimes!: SessionRuntimePool;
+  private sessionMessaging!: SessionMessagingService;
+  /** Experimental API for other plugins; see `ClaudianAPI`. */
+  api!: ClaudianAPI;
   /** Live committed settings, following Obsidian's plugin convention. */
   settings!: Readonly<ClaudianSettings>;
   private settingsCoordinator!: SettingsCoordinator<ClaudianSettings>;
   private storage!: SharedStorageService;
   private sessionMetadata!: SessionMetadataLoader;
   private nativeSessionArchives!: NativeSessionArchiveSync;
+  private projects!: ProjectService;
   private providerChatOptions!: ProviderChatOptionsReconciler;
   private inactiveSessionArchiver!: InactiveSessionArchiver;
   private conversationLifecycle!: ConversationLifecycle;
@@ -65,7 +82,7 @@ export default class ClaudianPlugin extends Plugin {
     () => this.settings.chatViewPlacement,
   );
   private readonly agentSkills = new AgentSkillResources(() => this.views.getAllViews());
-  private readonly sessionSnapshots = new SessionSnapshotStore();
+  private readonly sessionToolEndpoint = new LoopbackSessionToolServer();
   private readonly inlineEditSessions = new InlineEditSessionOwner();
   private readonly zenMode = new ZenModeController({
     app: this.app,
@@ -86,7 +103,6 @@ export default class ClaudianPlugin extends Plugin {
   private isUnloading = false;
   private applicationShutdownPromise: Promise<void> | null = null;
   private modelMetadataMigration: Promise<void> | null = null;
-  private sessionSnapshotCleanup: Promise<void> | null = null;
   private sessionInputCleanup: Promise<void> | null = null;
   private sessionInputCleanupTimer: number | null = null;
 
@@ -115,9 +131,9 @@ export default class ClaudianPlugin extends Plugin {
 
       this.addCommand({
         id: 'open-view',
-        name: 'Open chat view',
+        name: 'Toggle chat view',
         callback: () => {
-          void this.views.activateView();
+          void this.views.toggleView(this.zenMode);
         },
       });
 
@@ -130,6 +146,10 @@ export default class ClaudianPlugin extends Plugin {
       for (const command of createChatTabCommands({ workspace: this.app.workspace, views: this.views })) {
         this.addCommand(command);
       }
+      this.addCommand(createChatFocusCommand(
+        () => this.views.getInputFocusView(this.zenMode.getActiveLeaf())?.getActiveTab()?.composer ?? null,
+      ));
+      this.addCommand(this.zenMode.createToggleHistoryCommand());
 
       this.addCommand({
         id: 'copy-startup-diagnostics',
@@ -148,10 +168,11 @@ export default class ClaudianPlugin extends Plugin {
         this.sessionInputCleanupTimer = window.setTimeout(() => {
           this.sessionInputCleanupTimer = null;
           if (this.isUnloading) return;
-          this.sessionSnapshotCleanup = this.sessionSnapshots.sweep(this.startupMaintenanceAbort.signal);
           this.sessionInputCleanup = this.storage.cleanupObsoleteSessionInputs(this.startupMaintenanceAbort.signal);
         }, 0);
       });
+      // Started early so the first provider launch rarely waits for the shell.
+      this.app.workspace.onLayoutReady(() => { void resolveLoginShellPath(); });
       this.app.workspace.onLayoutReady(() => {
         if (this.isUnloading || this.modelMetadataMigration) return;
         this.modelMetadataMigration = migrateSelectedModelMetadata(
@@ -165,6 +186,8 @@ export default class ClaudianPlugin extends Plugin {
 
   onunload(): void {
     this.isUnloading = true;
+    this.sessionMessaging?.beginShutdown();
+    this.sessionRuntimes?.beginShutdown();
     // Return any zen presentation to its view before asynchronous shutdown.
     this.zenMode.dispose();
     this.vaultContentEvents?.dispose();
@@ -187,8 +210,7 @@ export default class ClaudianPlugin extends Plugin {
       defaultSettings: createDefaultClaudianSettings(getBuiltInProviderDefaultConfigs()),
       providers: ProviderRegistry,
       providerSettings: ProviderSettingsCoordinator,
-      deferNonRestoredSessionMetadata: true,
-      isChatView: isClaudianView,
+      executionLifecycle: this.executionLifecycleRegistry,
       isUnloading: () => this.isUnloading,
       publishCommittedSettings: async (settings, previous) => this.chatViews.publishSettings(settings, previous),
       // No chat view can hold tabs before loading completes and assigns the lifecycle.
@@ -207,6 +229,9 @@ export default class ClaudianPlugin extends Plugin {
     await initUsageLedger(this.storage.getAdapter());
     this.sessionMetadata = domains.sessionMetadata;
     this.nativeSessionArchives = domains.nativeSessionArchives;
+    this.projects = domains.projects;
+    // Project sections and chips render from live records, so record changes refresh session lists.
+    domains.projects.onChanged(() => this.chatViews.notifyConversationListChanged());
 
     this.providerChatOptions = new ProviderChatOptionsReconciler({
       settings,
@@ -235,6 +260,7 @@ export default class ClaudianPlugin extends Plugin {
       app: this.app,
       manifest: this.manifest,
       executionLifecycleRegistry: this.executionLifecycleRegistry,
+      sessionToolEndpoint: this.sessionToolEndpoint,
       storage: domains.storage,
       settings,
       environment,
@@ -252,46 +278,73 @@ export default class ClaudianPlugin extends Plugin {
       notifyProviderChatOptionsChanged,
     };
     this.featureHost = new ClaudianFeatureHost(featureDomains);
+    this.sessionRuntimes = new SessionRuntimePool({
+      createRuntime: identity => createChatSessionRuntime(this.chatHost, identity),
+      releaseHistory: (id, canRelease) => domains.conversationRepository.releaseHistory(id, canRelease),
+      // Returning to a recent session skips reloading and parsing its transcript.
+      retainedDetachedSessions: 3,
+      onChanged: () => this.chatViews.notifyConversationListChanged(),
+      onSessionSettled: sessionId => {
+        this.app.workspace.trigger(CLAUDIAN_TURN_ENDED_EVENT, { sessionId } satisfies ClaudianTurnEndedEvent);
+      },
+      onError: () => { new Notice('Session state could not be saved. It remains in memory.'); },
+    });
+    this.sessionMessaging = new SessionMessagingService({
+      getHost: () => this.chatHost,
+      getActiveConversationId: () => this.views.getInputFocusView(this.zenMode.getActiveLeaf())?.getActiveTab()?.conversationId ?? null,
+      refreshModelControls: providerId => this.chatViews.refreshModelSelector(providerId),
+    });
+    this.api = createClaudianAPI(this.sessionMessaging);
     this.conversationLifecycle = new ConversationLifecycle({
       conversations: domains.conversations,
+      projects: domains.projects,
       views: this.views,
+      sessions: this.sessionRuntimes,
     });
     this.vaultContentEvents = new VaultContentEvents({
+      sessions: this.sessionRuntimes,
       vault: this.app.vault,
-      views: this.views,
       conversations: domains.conversations,
       notifyConversationListChanged: () => this.chatViews.notifyConversationListChanged(),
     });
     this.chatHost = new ClaudianChatFeatureHost({
       ...featureDomains,
+      sessionRuntimes: this.sessionRuntimes,
+      sessionMessaging: this.sessionMessaging,
       conversationLifecycle: this.conversationLifecycle,
       executionPersistence: domains.conversationRepository,
       chatModelSelection: domains.chatModelSelection,
-      sessionSnapshots: this.sessionSnapshots,
-      tabWorkspaceMigration: domains.tabWorkspaceMigration,
       zenMode: this.zenMode,
+      projects: domains.projects,
     });
     this.inactiveSessionArchiver = new InactiveSessionArchiver(this.chatHost);
   }
 
   private async shutdownApplication(): Promise<void> {
-    await Promise.allSettled([
-      this.sessionMetadata?.dispose(),
-      this.sessionInputCleanup,
-      this.sessionSnapshotCleanup,
-      ...this.views.getAllViews().map(view => view.prepareForPluginUnload()),
-    ]);
-    // Admitted native archive work needs provider services that are disposed below.
-    await this.nativeSessionArchives?.dispose();
     try {
-      await this.executionLifecycleRegistry.dispose();
-    } catch {
-      // Continue releasing provider workspaces even if execution cleanup fails.
-    }
-    try {
-      await ProviderWorkspaceRegistry.disposeInitialized();
-    } catch {
-      // Obsidian teardown has no error channel; workspace cleanup is best effort.
+      await Promise.allSettled([
+        this.sessionMetadata?.dispose(),
+        this.sessionInputCleanup,
+        ...this.views.getAllViews().map(view => view.prepareForPluginUnload()),
+      ]);
+      // Admitted native archive work needs provider services that are disposed below.
+      await this.sessionMessaging?.dispose();
+      await this.sessionRuntimes?.dispose().catch(() => undefined);
+      await this.nativeSessionArchives?.dispose();
+      await this.projects?.dispose();
+    } finally {
+      try {
+        await this.executionLifecycleRegistry.dispose();
+      } catch {
+        // Continue releasing provider workspaces even if execution cleanup fails.
+      }
+      try {
+        await ProviderWorkspaceRegistry.disposeInitialized();
+      } catch {
+        // Obsidian teardown has no error channel; workspace cleanup is best effort.
+      } finally {
+        await this.sessionToolEndpoint.close();
+      }
     }
     await this.modelMetadataMigration;
   }

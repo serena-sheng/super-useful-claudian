@@ -3,7 +3,7 @@ import type {
   ProviderExecutionSession,
   ProviderSessionConfig,
 } from '../../../core/execution';
-import type { ProviderHost } from '../../../core/providers/ProviderHost';
+import type { ProviderRuntimeHost } from '../../../core/providers/ProviderRuntimeHost';
 import type { SlashCommand } from '../../../core/types';
 import type {
   ACPLoadSessionRequest,
@@ -20,7 +20,6 @@ import type {
   ACPSetSessionModelResponse,
   ACPSetSessionModeRequest,
 } from '../../acp';
-import type { GrokCommandCatalog } from '../commands/GrokCommandCatalog';
 import { loadGrokPromptIndexAfterAssistant } from '../history/GrokHistoryStore';
 import type { GrokModelCatalogCoordinator } from '../runtime/GrokModelCatalogCoordinator';
 import { GrokExecutionNativeConnectionImpl } from './GrokExecutionNativeConnection';
@@ -103,7 +102,6 @@ export interface GrokExecutionNativeFactory {
 }
 
 export interface GrokExecutionBackendOptions {
-  readonly commandCatalog?: Pick<GrokCommandCatalog, 'setCommandSnapshot'>;
   readonly modelCatalogCoordinator?: Pick<GrokModelCatalogCoordinator, 'mergeLiveModels'>;
   readonly nativeFactory?: GrokExecutionNativeFactory;
   readonly resolvePromptIndex?: (
@@ -118,7 +116,7 @@ export class GrokExecutionBackend implements ProviderExecutionBackend {
   private readonly nativeFactory: GrokExecutionNativeFactory;
 
   constructor(
-    private readonly plugin: ProviderHost,
+    private readonly host: ProviderRuntimeHost,
     private readonly options: GrokExecutionBackendOptions = {},
   ) {
     this.nativeFactory = options.nativeFactory ?? {
@@ -127,8 +125,7 @@ export class GrokExecutionBackend implements ProviderExecutionBackend {
   }
 
   createSession(config: ProviderSessionConfig): ProviderExecutionSession {
-    return new GrokExecutionSession(this.plugin, config, {
-      commandCatalog: this.options.commandCatalog,
+    return new GrokExecutionSession(this.host, config, {
       modelCatalogCoordinator: this.options.modelCatalogCoordinator,
       nativeFactory: this.nativeFactory,
       resolvePromptIndex: this.options.resolvePromptIndex

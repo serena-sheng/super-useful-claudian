@@ -1,7 +1,9 @@
+import { DesktopVault } from '@test/helpers/core/DesktopVault';
 import { DEFAULT_CLAUDIAN_SETTINGS } from '@test/helpers/defaultSettings';
 
 import { SettingsCoordinator } from '@/app/settings/SettingsCoordinator';
 import { type ApplicationDomains, startApplication } from '@/app/startup/ApplicationStartup';
+import { ProviderExecutionLifecycleRegistry } from '@/core/execution/ProviderExecutionLifecycleRegistry';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
 import { isVersionedRuntimeInputFingerprint } from '@/core/providers/settings/RuntimeInputFingerprint';
@@ -19,27 +21,37 @@ describe('startApplication', () => {
   const disposals: Array<() => Promise<void>> = [];
 
   async function loadApplication(
-    overrides: { providers?: typeof ProviderRegistry } = {},
+    overrides: { providers?: typeof ProviderRegistry; onAllMetadataLoaded?: () => void } = {},
   ): Promise<ApplicationDomains> {
     const domains = await startApplication({
       plugin: plugin as never,
       defaultSettings: DEFAULT_CLAUDIAN_SETTINGS,
       providers: overrides.providers ?? ProviderRegistry,
       providerSettings: ProviderSettingsCoordinator,
-      deferNonRestoredSessionMetadata: false,
-      isChatView: () => false,
+      executionLifecycle: new ProviderExecutionLifecycleRegistry(),
       isUnloading: () => false,
       publishCommittedSettings: async () => undefined,
       onConversationDeleted: async () => undefined,
       onConversationListChanged: () => undefined,
-      onAllMetadataLoaded: () => undefined,
+      onAllMetadataLoaded: overrides.onAllMetadataLoaded ?? (() => undefined),
       ensureProviderWorkspace: async () => undefined,
       getSessionArchive: async () => null,
     });
     disposals.push(async () => {
       await domains.sessionMetadata.dispose();
       await domains.nativeSessionArchives.dispose();
+      await domains.projects?.dispose();
     });
+    return domains;
+  }
+
+  /** Starts the application and runs the deferred background metadata scan to completion. */
+  async function loadApplicationWithMetadata(): Promise<ApplicationDomains> {
+    let markLoaded!: () => void;
+    const loaded = new Promise<void>(resolve => { markLoaded = resolve; });
+    const domains = await loadApplication({ onAllMetadataLoaded: markLoaded });
+    domains.sessionMetadata.scheduleRemainingLoad();
+    await loaded;
     return domains;
   }
 
@@ -72,8 +84,7 @@ describe('startApplication', () => {
       },
       workspace: {
         layoutReady: true,
-        onLayoutReady: jest.fn(),
-        getLeavesOfType: jest.fn().mockReturnValue([]),
+        onLayoutReady: jest.fn((callback: () => void) => callback()),
       },
     };
     plugin = {
@@ -200,7 +211,7 @@ describe('startApplication', () => {
         return '';
       });
 
-      const domains = await loadApplication();
+      const domains = await loadApplicationWithMetadata();
 
       expect(domains.conversations.getCachedConversation(sessionMetadata.id)).toMatchObject({
         sessionId: sessionMetadata.sessionId,
@@ -247,7 +258,7 @@ describe('startApplication', () => {
         return '';
       });
 
-      const domains = await loadApplication();
+      const domains = await loadApplicationWithMetadata();
 
       expect(domains.conversations.getConversationList()).toHaveLength(1);
       expect(mockApp.vault.adapter.remove).not.toHaveBeenCalledWith(
@@ -296,7 +307,7 @@ describe('startApplication', () => {
       // data.json is minimal (no state - already migrated)
       plugin.loadData.mockResolvedValue({});
 
-      const domains = await loadApplication();
+      const domains = await loadApplicationWithMetadata();
 
       const loaded = await domains.conversations.getConversationById('conv-saved-1');
       expect(loaded?.id).toBe('conv-saved-1');
@@ -340,7 +351,7 @@ describe('startApplication', () => {
       // data.json is minimal (already migrated)
       plugin.loadData.mockResolvedValue({});
 
-      const domains = await loadApplication();
+      const domains = await loadApplicationWithMetadata();
 
       const loaded = await domains.conversations.getConversationById('conv-saved-1');
       expect(loaded?.sessionId).toBeNull();
@@ -363,7 +374,7 @@ describe('startApplication', () => {
         migrationVersion: 2,
       });
 
-      const domains = await loadApplication();
+      const domains = await loadApplicationWithMetadata();
 
       expect(domains.conversations.getConversationList()).toHaveLength(0);
     });
@@ -407,11 +418,44 @@ describe('startApplication', () => {
 
       plugin.loadData.mockResolvedValue({});
 
-      const domains = await loadApplication();
+      const domains = await loadApplicationWithMetadata();
 
       const loaded = await domains.conversations.getConversationById('conv-multi-session');
       expect((loaded?.providerState as any)?.previousProviderSessionIds).toEqual(['session-A']);
       expect((loaded?.providerState as any)?.providerSessionId).toBe('session-B');
+    });
+  });
+  describe('projects', () => {
+    it('loads project records before startup completes and keeps member metadata, preserving unparsable files', async () => {
+      const timestamp = Date.now();
+      const vault = await DesktopVault.create();
+      disposals.push(() => vault.dispose());
+      await vault.write('.super-useful-claudian/projects/project-a.json', JSON.stringify({
+        id: 'project-a', name: 'Launch', instructions: 'Ship.', memoryPath: '.super-useful-claudian/projects/launch-project.md',
+        isPinned: true, createdAt: timestamp,
+      }));
+      await vault.write('.super-useful-claudian/projects/broken.json', '{"id": "broken"');
+      await vault.write('.super-useful-claudian/sessions/conv-member.meta.json', JSON.stringify({
+        id: 'conv-member', title: 'Member', createdAt: timestamp, lastActivityAt: timestamp,
+        sessionId: null, projectId: 'project-a',
+      }));
+      mockApp.vault = vault.app.vault;
+      const projectFiles = async () => new Map([...await vault.snapshot()].filter(([path]) => (
+        path.startsWith('.super-useful-claudian/projects/')
+      )));
+      const projectsBefore = await projectFiles();
+
+      let markLoaded!: () => void;
+      const metadataLoaded = new Promise<void>(resolve => { markLoaded = resolve; });
+      const domains = await loadApplication({ onAllMetadataLoaded: markLoaded });
+
+      expect(domains.projects.list()).toEqual([expect.objectContaining({ id: 'project-a', name: 'Launch' })]);
+      domains.sessionMetadata.scheduleRemainingLoad();
+      await metadataLoaded;
+      expect(domains.conversations.getConversationList()).toEqual([
+        expect.objectContaining({ id: 'conv-member', projectId: 'project-a' }),
+      ]);
+      expect(await projectFiles()).toEqual(projectsBefore);
     });
   });
 });

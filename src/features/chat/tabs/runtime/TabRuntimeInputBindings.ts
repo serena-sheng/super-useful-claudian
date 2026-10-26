@@ -1,30 +1,32 @@
+import { getSessionCapabilities } from '@/features/chat/sessions/sessionSettings';
 import type {
   PublishedTabRuntimeRef,
   TabRuntimeConstructionContext,
-  TabRuntimeShellBundle,
+  TabRuntimeCore,
 } from '@/features/chat/tabs/runtime/TabRuntimeConstruction';
 import {
   cancelSelectedDestinationTurn,
+  handleComposerMenuKeydown,
   sendTabInputMessageFromEnterKey,
   sendTabInputMessageFromExplicitEnterShortcut,
 } from '@/features/chat/tabs/TabInputEvents';
-import { commitProvisionalTab } from '@/features/chat/tabs/TabLifecycle';
-import { getTabCapabilities } from '@/features/chat/tabs/tabProviderSettings';
-import type { TabControllers, TabInputBindings, TabUIComponents } from '@/features/chat/tabs/types';
+import type { TabControllers, TabUIComponents } from '@/features/chat/tabs/types';
 
 export function buildTabRuntimeInputBindings(
-  shell: TabRuntimeShellBundle,
+  core: TabRuntimeCore,
   ui: TabUIComponents,
   controllers: TabControllers,
   options: TabRuntimeConstructionContext,
   runtimeRef: PublishedTabRuntimeRef,
-): TabInputBindings {
-  const { dom, state } = shell;
+): void {
+  const { dom, state } = core;
   const { plugin } = options;
 
   const keydownHandler = (event: KeyboardEvent) => {
+    if (event.key === 'Escape' && event.defaultPrevented) return;
     if ((event.target as HTMLElement | null)?.closest?.('button, a')) return;
     const tab = runtimeRef.requirePublished();
+    if (!options.isRuntimeLive(tab)) return;
 
     // Bash mode owns its keys first: an armed command must never reach the
     // composer's send, dropdown or suggestion handlers.
@@ -37,7 +39,7 @@ export function buildTabRuntimeInputBindings(
       !instructionMode.isActive()
       && !ui.bangBashModeManager.isActive()
       && plugin.settings.enableInstructionMode === true
-      && getTabCapabilities(tab, plugin).supportsInstructionMode
+      && getSessionCapabilities(tab, plugin).supportsInstructionMode
       && instructionMode.handleTriggerKey(event)
     ) {
       return;
@@ -54,15 +56,7 @@ export function buildTabRuntimeInputBindings(
       return;
     }
 
-    if (controllers.builtInCommandController.handleResumeKeydown(event)) {
-      return;
-    }
-
-    if (ui.composerDropdown.handleKeydown(event)) {
-      return;
-    }
-
-    if (ui.promptSuggestion.handleKeydown(event)) return;
+    if (handleComposerMenuKeydown(tab, event)) return;
 
     if (event.key === 'Escape' && !event.isComposing) {
       if (cancelSelectedDestinationTurn(tab)) {
@@ -83,7 +77,7 @@ export function buildTabRuntimeInputBindings(
 
   const inputHandler = () => {
     const tab = runtimeRef.requirePublished();
-    commitProvisionalTab(tab);
+    tab.session.claimUserOwnership();
     controllers.sideChatController.handleComposerInput();
     // A shell command is not a completion query: `/usr/bin/env` must not open menus.
     if (!ui.bangBashModeManager.isActive()) {
@@ -266,5 +260,4 @@ export function buildTabRuntimeInputBindings(
   options.registerCleanup('tab message scroll binding', () => {
     dom.messagesEl.removeEventListener('scroll', scrollHandler);
   });
-  return { installed: true };
 }

@@ -1,12 +1,9 @@
-import * as fs from 'node:fs/promises';
+import { useClaudeSessionFiles } from '@test/helpers/providers/claudeHistory';
+import { testTime } from '@test/helpers/testClock';
 
 import { loadSDKSessionMessages } from '@/providers/claude/history/ClaudeHistoryStore';
 
-jest.mock('node:fs/promises');
-
-const readFile = jest.mocked(fs.readFile);
-
-beforeEach(() => jest.resetAllMocks());
+const writeSession = useClaudeSessionFiles();
 
 it.each([
   ['<summary>Background command completed (exit code 0).</summary>', 'Background command completed (exit code 0).'],
@@ -22,9 +19,9 @@ it.each([
     { type: 'assistant', uuid: 'a2', parentUuid: 'notification', timestamp: '2026-09-20T11:30:23Z',
       message: { content: [{ type: 'text', text: 'Task complete.' }] } },
   ];
-  readFile.mockResolvedValue(entries.map(entry => JSON.stringify(entry)).join('\n'));
+  const sessionPath = writeSession(entries.map(entry => JSON.stringify(entry)).join('\n'));
 
-  const result = await loadSDKSessionMessages('/vault', 'session', undefined, '/session.jsonl');
+  const result = await loadSDKSessionMessages('/vault', 'session', undefined, sessionPath);
 
   expect(result.error).toBeUndefined();
   expect(result.messages).toHaveLength(3);
@@ -50,9 +47,9 @@ it('retains separate notifications when the same task completes again after bein
     { type: 'assistant', uuid: 'a2', parentUuid: 'n2', timestamp: '2026-09-20T11:00:05Z',
       message: { content: [{ type: 'text', text: 'Second follow-up.' }] } },
   ];
-  readFile.mockResolvedValue(entries.map(entry => JSON.stringify(entry)).join('\n'));
+  const sessionPath = writeSession(entries.map(entry => JSON.stringify(entry)).join('\n'));
 
-  const result = await loadSDKSessionMessages('/vault', 'session', undefined, '/session.jsonl');
+  const result = await loadSDKSessionMessages('/vault', 'session', undefined, sessionPath);
 
   expect(result.messages.slice(2).map(message => message.contentBlocks)).toEqual([
     [{ type: 'task_notification', content: 'First result' }, { type: 'text', content: 'First follow-up.' }],
@@ -71,9 +68,9 @@ it('retains a new user request duration when an older task completes before its 
     { type: 'assistant', uuid: 'a2', parentUuid: 'n', timestamp: '2026-09-20T11:00:15Z',
       message: { content: [{ type: 'text', text: 'The requested answer.' }] } },
   ];
-  readFile.mockResolvedValue(entries.map(entry => JSON.stringify(entry)).join('\n'));
+  const sessionPath = writeSession(entries.map(entry => JSON.stringify(entry)).join('\n'));
 
-  const result = await loadSDKSessionMessages('/vault', 'session', undefined, '/session.jsonl');
+  const result = await loadSDKSessionMessages('/vault', 'session', undefined, sessionPath);
 
   expect(result.messages[3]).toMatchObject({
     content: 'The requested answer.', durationSeconds: 5,
@@ -97,9 +94,9 @@ it('keeps a user response active across a notification received between its nati
     { type: 'assistant', uuid: 'answer', parentUuid: 'read-result', timestamp: '2026-09-20T11:00:15Z',
       message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'The requested answer.' }] } },
   ];
-  readFile.mockResolvedValue(entries.map(entry => JSON.stringify(entry)).join('\n'));
+  const sessionPath = writeSession(entries.map(entry => JSON.stringify(entry)).join('\n'));
 
-  const result = await loadSDKSessionMessages('/vault', 'session', undefined, '/session.jsonl');
+  const result = await loadSDKSessionMessages('/vault', 'session', undefined, sessionPath);
 
   expect(result.messages).toHaveLength(2);
   expect(result.messages[1]).toMatchObject({
@@ -110,6 +107,35 @@ it('keeps a user response active across a notification received between its nati
       { type: 'text', content: 'The requested answer.' },
     ],
   });
+});
+
+// The attachment timestamp records enqueue time; its file position records where Claude folded it.
+it('replays a steer folded mid-turn after the tool call it followed', async () => {
+  const entries = [
+    { type: 'user', uuid: 'u', timestamp: testTime(), message: { content: 'Refactor the parser' } },
+    { type: 'assistant', uuid: 'a1', parentUuid: 'u', timestamp: testTime({ seconds: 2 }),
+      message: { stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 'bash', name: 'Bash', input: { command: 'sleep 8' } }] } },
+    { type: 'queue-operation', operation: 'enqueue', timestamp: testTime({ seconds: 1 }), content: 'Use tabs instead' },
+    { type: 'user', uuid: 'r1', parentUuid: 'a1', timestamp: testTime({ seconds: 10 }), toolUseResult: { stdout: 'done' },
+      message: { content: [{ type: 'tool_result', tool_use_id: 'bash', content: 'done' }] } },
+    { type: 'attachment', uuid: 'steer-attachment', parentUuid: 'r1', timestamp: testTime({ seconds: 1 }),
+      attachment: { type: 'queued_command', prompt: 'Use tabs instead', source_uuid: 'steer', commandMode: 'prompt', timestamp: testTime({ seconds: 1 }) } },
+    { type: 'queue-operation', operation: 'remove', timestamp: testTime({ seconds: 10 }), content: 'Use tabs instead' },
+    { type: 'assistant', uuid: 'a2', parentUuid: 'steer-attachment', timestamp: testTime({ seconds: 12 }),
+      message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Switched to tabs.' }] } },
+  ];
+  const sessionPath = writeSession(entries.map(entry => JSON.stringify(entry)).join('\n'));
+
+  const result = await loadSDKSessionMessages('/vault', 'session', undefined, sessionPath);
+
+  expect(result.messages.map(message => [message.role, message.content || message.contentBlocks?.[0]?.type])).toEqual([
+    ['user', 'Refactor the parser'],
+    ['assistant', 'tool_use'],
+    ['user', 'Use tabs instead'],
+    ['assistant', 'Switched to tabs.'],
+  ]);
+  expect(result.messages[2]).toMatchObject({ id: 'steer', timestamp: Date.parse(testTime({ seconds: 10 })) });
+  expect(result.messages[3]).toMatchObject({ durationSeconds: 2 });
 });
 
 it('replays a user prompt absorbed into an automatic response from its queued-command attachment', async () => {
@@ -123,9 +149,9 @@ it('replays a user prompt absorbed into an automatic response from its queued-co
       attachment: { type: 'queued_command', prompt: 'testing follow up', source_uuid: 'followup', commandMode: 'prompt' } },
     { type: 'assistant', uuid: 'final', parentUuid: 'attachment', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Bash complete: 186 files.' }] } },
   ];
-  readFile.mockResolvedValue(entries.map((entry, index) => JSON.stringify({ timestamp: new Date(Date.parse('2026-09-21T03:16:01.961Z') + index * 1000).toISOString(), ...entry })).join('\n'));
+  const sessionPath = writeSession(entries.map((entry, index) => JSON.stringify({ timestamp: new Date(Date.parse('2026-09-21T03:16:01.961Z') + index * 1000).toISOString(), ...entry })).join('\n'));
 
-  const result = await loadSDKSessionMessages('/vault', 'session', undefined, '/session.jsonl');
+  const result = await loadSDKSessionMessages('/vault', 'session', undefined, sessionPath);
 
   expect(result.messages.map(message => [message.role, message.content])).toEqual([
     ['user', 'testing follow up'],
@@ -161,9 +187,9 @@ it.each([
     { type: 'assistant', uuid: 'answer', parentUuid: 'notification-attachment', timestamp: '2026-09-21T07:29:15Z',
       message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'PROBE_FOLLOWUP_ACK' }] } },
   ];
-  readFile.mockResolvedValue(entries.map(entry => JSON.stringify(entry)).join('\n'));
+  const sessionPath = writeSession(entries.map(entry => JSON.stringify(entry)).join('\n'));
 
-  const result = await loadSDKSessionMessages('/vault', 'session', undefined, '/session.jsonl');
+  const result = await loadSDKSessionMessages('/vault', 'session', undefined, sessionPath);
 
   expect(result.error).toBeUndefined();
   expect(result.messages).toHaveLength(2);
@@ -192,7 +218,37 @@ it.each([false, true])('counts each main response once across blocks and tools (
     { type: 'assistant', uuid: 'final', parentUuid: 'tool-result', timestamp: '2026-09-20T11:00:02.500Z',
       message: { id: 'response2', usage: { output_tokens: 25 }, stop_reason: 'end_turn', content: [{ type: 'text', text: 'Done' }] } },
   ];
-  readFile.mockResolvedValue(entries.map(entry => JSON.stringify(entry)).join('\n'));
-  const result = await loadSDKSessionMessages('/vault', 'session', undefined, '/session.jsonl');
+  const sessionPath = writeSession(entries.map(entry => JSON.stringify(entry)).join('\n'));
+  const result = await loadSDKSessionMessages('/vault', 'session', undefined, sessionPath);
   expect(result.messages.at(-1)?.turnStats).toEqual(missing ? undefined : { outputTokens: 125, durationMs: 2500 });
+});
+
+// A native turn split for display (at compaction or a later notification) is still one turn:
+// only its interruption clears the completion the split gave earlier parts.
+it.each([
+  ['compaction', true], ['compaction', false], ['notification', true], ['notification', false],
+] as const)('clears completion of a %s-split turn only when it is interrupted (interrupted: %s)', async (split, interrupted) => {
+  const notification = (id: string) => `<task-notification><task-id>${id}</task-id><status>completed</status><result>${id} result</result></task-notification>`;
+  const entries = [
+    split === 'compaction'
+      ? { type: 'user', uuid: 'u', timestamp: testTime({ seconds: 10 }), message: { content: 'Long task' } }
+      : { type: 'user', uuid: 'u', timestamp: testTime({ seconds: 10 }), message: { content: notification('trigger') } },
+    { type: 'assistant', uuid: 'tool', parentUuid: 'u', timestamp: testTime({ seconds: 11 }),
+      message: { stop_reason: 'tool_use', content: [{ type: 'text', text: 'Before.' }, { type: 'tool_use', id: 'read', name: 'Read', input: { file_path: 'note.md' } }] } },
+    { type: 'user', uuid: 'read-result', parentUuid: 'tool', timestamp: testTime({ seconds: 12 }),
+      toolUseResult: { type: 'text', file: { content: 'The note.' } },
+      message: { content: [{ type: 'tool_result', tool_use_id: 'read', content: 'The note.' }] } },
+    split === 'compaction'
+      ? { type: 'system', subtype: 'compact_boundary', uuid: 'compact', parentUuid: 'read-result', timestamp: testTime({ seconds: 13 }), content: 'Conversation compacted', compactMetadata: { trigger: 'auto' } }
+      : { type: 'user', uuid: 'compact', parentUuid: 'read-result', timestamp: testTime({ seconds: 13 }), message: { content: notification('later') } },
+    { type: 'assistant', uuid: 'after', parentUuid: 'compact', timestamp: testTime({ seconds: 15 }),
+      message: { ...(!interrupted ? { stop_reason: 'end_turn' } : {}), content: [{ type: 'text', text: 'After.' }] } },
+    ...(interrupted ? [{ type: 'user', uuid: 'stop', parentUuid: 'after', timestamp: testTime({ seconds: 16 }),
+      message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } }] : []),
+  ];
+  const result = await loadSDKSessionMessages('/vault', 'session', undefined, writeSession(entries.map(entry => JSON.stringify(entry)).join('\n')));
+  const before = result.messages.find(message => message.content.includes('Before.'))!;
+  const cleared = before.durationSeconds === undefined && before.completedAt === undefined && before.turnStats === undefined;
+  expect(cleared).toBe(interrupted);
+  expect(result.messages.filter(message => message.role === 'assistant').length).toBeGreaterThan(1);
 });

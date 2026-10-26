@@ -30,45 +30,12 @@ export interface ImageAttachment {
 
 export interface ExecutionInputLinkedContentSnapshot {
   path: string;
-  content?: string;
-}
-
-export interface ExecutionInputCursorSnapshot {
-  beforeCursor: string;
-  afterCursor: string;
-  isInbetween: boolean;
-  line: number;
-  column: number;
-}
-
-export interface ExecutionInputEditorSnapshot {
-  notePath: string;
-  mode: 'selection' | 'cursor' | 'none';
-  selectedText?: string;
-  cursorContext?: ExecutionInputCursorSnapshot;
-  lineCount?: number;
-  startLine?: number;
-}
-
-export interface ExecutionInputBrowserSnapshot {
-  source: string;
-  selectedText: string;
-  title?: string;
-  url?: string;
-}
-
-export interface ExecutionInputCanvasSnapshot {
-  canvasPath: string;
-  nodeIds: string[];
 }
 
 export interface ExecutionInputContextSnapshot {
   selections?: readonly ProviderSelectionSnapshot[];
   sessionReferences?: readonly ProviderSessionReference[];
   linkedContent?: ExecutionInputLinkedContentSnapshot;
-  editorSelection?: ExecutionInputEditorSnapshot | null;
-  browserSelection?: ExecutionInputBrowserSnapshot | null;
-  canvasSelection?: ExecutionInputCanvasSnapshot | null;
 }
 
 /** Canonical feature-owned input, before provider-native prompt formatting. */
@@ -121,6 +88,12 @@ export interface ChatMessage {
   isAutomaticResponse?: boolean;
   /** Previous transcript segment of this response, retained across history copies. */
   responseContinuationOf?: string;
+  /**
+   * Native turn this message belongs to: the provider's turn ID in history, the event
+   * scope's turn in live output. Opaque, compared only for equality. A turn may display
+   * as several messages (notifications, compaction); a user message still bounds it.
+   */
+  turnId?: string;
   toolCalls?: ToolCallInfo[];
   contentBlocks?: ContentBlock[];
   linkedContentPath?: string;
@@ -144,12 +117,38 @@ export interface ChatMessage {
   treeBranches?: readonly string[];
   /** Provider-native assistant message identifier used for rewind/fork checkpoints. */
   assistantMessageId?: string;
+  /** Sender of a user message delivered from another Claudian session; set live and on history replay. */
+  sessionMessage?: SessionMessageSender;
+}
+
+export interface SessionMessageSender {
+  /** Sender session title at delivery time. */
+  readonly from: string;
+  /** Sender conversation id. */
+  readonly sessionId: string;
 }
 
 export function isCanonicalUserMessage(message: ChatMessage): boolean {
   return message.role === 'user'
     && !message.isInterrupt
     && !message.isRebuiltContext;
+}
+
+/**
+ * Messages a history loader displayed one interrupted native turn as: all carry the
+ * turn's provenance (by default its first message's), and none keeps the completion
+ * a split gave it.
+ */
+export function settleInterruptedTurn(
+  segments: readonly ChatMessage[],
+  automatic = segments[0]?.isAutomaticResponse === true,
+): void {
+  segments.forEach(segment => {
+    segment.isAutomaticResponse = automatic ? true : undefined;
+    segment.durationSeconds = undefined;
+    segment.completedAt = undefined;
+    segment.turnStats = undefined;
+  });
 }
 
 /** Persisted conversation with messages and session state. */
@@ -169,6 +168,8 @@ export interface Conversation {
   modelRecoverySource?: ConversationModelRecoverySource;
   messages: ChatMessage[];
   readonly linkedContentPath?: string;
+  /** Raw project membership; resolve it through `ProjectReader.get` before use. */
+  readonly projectId?: string;
   /** Whether the session is pinned in the dual-pane session manager. */
   isPinned?: boolean;
   /** Whether the session is archived and hidden from active session lists. */
@@ -179,18 +180,29 @@ export interface Conversation {
   titleGenerationStatus?: 'pending' | 'success' | 'failed';
   /** Assistant checkpoint identifier for resumeAtMessageId after rewind. */
   resumeAtMessageId?: string;
+  /** Display turns came from the local archive because native history could not provide them. */
+  restoredFromArchive?: boolean;
 }
 
 /** Detached metadata for controls that do not need transcript or native session state. */
-export type ConversationSummary = Readonly<Pick<Conversation, 'id' | 'providerId' | 'title' | 'selectedModel' | 'isPinned'> & {
+export type ConversationSummary = Readonly<Pick<Conversation, 'id' | 'providerId' | 'title' | 'selectedModel' | 'isPinned' | 'projectId'> & {
   capabilities?: Readonly<ProviderCapabilities>;
   usage?: Readonly<Pick<UsageInfo, 'model'>>;
 }>;
 
 export type ConversationMutablePatch = Partial<Omit<
   Conversation,
-  'id' | 'providerId' | 'createdAt' | 'linkedContentPath'
+  'id' | 'providerId' | 'createdAt' | 'linkedContentPath' | 'projectId'
 >>;
+
+/**
+ * Where a conversation sits in the session list. `projectId: null` leaves any project; a string joins that live
+ * project (an unknown id throws at the write). Omitted fields stay unchanged.
+ */
+export interface ConversationPlacement {
+  readonly projectId?: string | null;
+  readonly isPinned?: boolean;
+}
 
 /** Native session locator that must never make an invalidated session resumable. */
 export interface ConversationModelRecoverySource {
@@ -213,6 +225,8 @@ export interface ConversationMeta {
   preview: string;
   /** Vault-relative path of the file or directory linked to this session. */
   linkedContentPath?: string;
+  /** Raw project membership; resolve it through `ProjectReader.get` before use. */
+  projectId?: string;
   /** Whether the session is pinned in the dual-pane session manager. */
   isPinned?: boolean;
   /** Whether the session is archived and hidden from active session lists. */
@@ -245,11 +259,14 @@ export interface SessionMetadata {
   /** Read-only native locator retained solely for historical model recovery. */
   modelRecoverySource?: ConversationModelRecoverySource;
   linkedContentPath?: string;
+  projectId?: string;
   isPinned?: boolean;
   isArchived?: boolean;
   usage?: UsageInfo;
   /** Assistant checkpoint identifier for resumeAtMessageId after rewind. */
   resumeAtMessageId?: string;
+  /** Display turns came from the local archive because native history could not provide them. */
+  restoredFromArchive?: boolean;
 }
 
 /**

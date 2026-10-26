@@ -183,7 +183,7 @@ function getCodexSubagentDescription(
 ): string {
   const role = firstString(input, ['agent_type']);
   const effort = firstString(input, ['reasoning_effort']);
-  const label = nickname ?? role ?? 'Codex CLI subagent';
+  const label = nickname ?? role ?? 'Codex subagent';
   const details = [nickname ? role : undefined, model, effort].filter(Boolean);
   return details.length ? `${label} (${details.join(', ')})` : label;
 }
@@ -294,10 +294,6 @@ export function buildCodexSubagentInfo(
     toolCalls: [],
     ...(spawnResult.agentId ? { agentId: spawnResult.agentId } : {}),
   };
-}
-
-export function isCodexSubagentSpawnToolCall(toolCall: ToolCallInfo): boolean {
-  return toolCall.name === TOOL_SPAWN_AGENT;
 }
 
 function getCodexLifecycleTargetIds(toolCall: ToolCallInfo): string[] {

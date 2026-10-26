@@ -4,6 +4,7 @@ import * as path from 'node:path';
 
 import { capturedSelectionPrompt, capturedSelections } from '@test/helpers/capturedSelections';
 import { createProviderRecoveryTestHarness } from '@test/helpers/features/chat/ProviderRecoveryTestHarness';
+import { runtimeHostFor, withRuntimeHosts } from '@test/helpers/providerRuntimeHost';
 import { testDate, testTime } from '@test/helpers/testClock';
 
 import type {
@@ -28,6 +29,7 @@ import {
 } from '@/providers/pi/execution';
 import { PiConversationHistoryService } from '@/providers/pi/history/PiConversationHistoryService';
 import type { PiLaunchSpec } from '@/providers/pi/runtime/PiLaunchSpecBuilder';
+import { PiRPCResponseError } from '@/providers/pi/runtime/PiRPCTransport';
 
 class FakeKernel implements PiExecutionKernel {
   readonly requests: Array<{ payload: Record<string, unknown>; type: string }> = [];
@@ -84,7 +86,7 @@ class FakeKernel implements PiExecutionKernel {
 
 function createHost(): any {
   return {
-    app: { vault: { adapter: { basePath: '/vault' } } },
+    workingDirectory: '/vault',
     executionLifecycleRegistry: new ProviderExecutionLifecycleRegistry(),
     getResolvedProviderCliPath: jest.fn(async () => '/bin/pi'),
     settings: {
@@ -119,7 +121,7 @@ function createConfig(
     interactionPort: createInteractionPort(),
     lifecycle: 'persistent',
     nativePersistence: 'enabled',
-    vaultWorkingDirectory: '/vault',
+    workingDirectory: '/vault',
     ...overrides,
   };
 }
@@ -139,7 +141,7 @@ function createRequest(
     configuration: {
       model: 'pi:anthropic/claude-sonnet-4',
       reasoning: 'high',
-      systemInstructions: { kind: 'provider-default' },
+      systemInstructions: { kind: 'main-agent' as const, instructions: 'Main Agent prompt.' },
     },
     input: [{ text: 'Hello Pi', type: 'text' }],
     signal: new AbortController().signal,
@@ -229,9 +231,6 @@ function createHarness(
   const host = createHost();
   const kernels: FakeKernel[] = [];
   const responses = new Map<string, unknown>([
-    ['get_commands', {
-      commands: [{ description: 'Compact context', name: 'compact', source: 'runtime' }],
-    }],
     ['get_session_stats', {
       contextWindow: 200_000,
       inputTokens: 10,
@@ -248,15 +247,7 @@ function createHarness(
     ['set_thinking_level', {}],
     ['steer', { disposition: 'queued' }],
   ]);
-  const commandCatalog = {
-    getDropdownConfig: jest.fn(),
-    listDropdownEntries: jest.fn(async () => []),
-    refresh: jest.fn(async () => undefined),
-    setCommandSnapshot: jest.fn(),
-  };
-  const backend = new PiExecutionBackend(
-    host,
-    { commandCatalog },
+  const backend = new PiExecutionBackend(runtimeHostFor(host, 'pi'),
     {
       createKernel: (spec, callbacks) => {
         const kernel = new FakeKernel(spec, callbacks, responses, requestHandler);
@@ -269,7 +260,6 @@ function createHarness(
   );
   return {
     backend,
-    commandCatalog,
     config,
     host,
     kernels,
@@ -292,7 +282,7 @@ describe('PiExecutionBackend', () => {
           mediaType: 'image/png', size: 5, source: 'paste',
         } }],
         context: { ...capturedSelections, linkedContent: { path: 'note.md' },
-          sessionReferences: [{ id: 'ref', title: 'Review', providerId: 'pi', updatedAt: 'updated', snapshotPath: '/tmp/ref.md' }],
+          sessionReferences: [{ id: 'ref', title: 'Review', providerId: 'pi', updatedAt: 'updated' }],
         },
       })).events);
       expect(kernels[0].requests.filter(request => request.type === 'compact' || request.type === 'prompt'))
@@ -361,7 +351,7 @@ describe('PiExecutionBackend', () => {
       { type: 'message', id: 'a', parentId: 'u', timestamp: testTime({ milliseconds: 2500 }),
         message: { role: 'assistant', content: [{ type: 'text', text: 'Done' }], stopReason: 'stop', usage: { output: 125 } } },
     ].map(record => JSON.stringify(record)).join('\n');
-    const harness = createHarness(createConfig({ vaultWorkingDirectory: tempDir }));
+    const harness = createHarness(createConfig({ workingDirectory: tempDir }));
     harness.responses.set('get_state', { sessionId: 'pi-session-1', sessionFile });
     try {
       const eventsPromise = collect(harness.session.execute(createRequest()).events);
@@ -402,7 +392,7 @@ describe('PiExecutionBackend', () => {
     ];
     await fs.writeFile(sessionFile, records.map(r => JSON.stringify(r)).join('\n') + '\n');
     const harness = createHarness(createConfig({
-      vaultWorkingDirectory: tempDir,
+      workingDirectory: tempDir,
       resumeSeed: { providerSessionId: 'pi-session-1', providerState: {
         sessionId: 'pi-session-1', sessionFile, ...(storedLeaf ? { leafEntryId: 'assistant-1' } : {}),
       } },
@@ -430,12 +420,64 @@ describe('PiExecutionBackend', () => {
     }
   });
 
+  it('persists a stopped turn so reload replays its prompt and interrupted reply', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-stop-'));
+    const sessionFile = path.join(tempDir, 'session.jsonl');
+    const records = [
+      { type: 'session', version: 3, id: 'pi-session-1', cwd: tempDir },
+      { type: 'message', id: 'user-1', parentId: null, message: { role: 'user', content: 'First' } },
+      { type: 'message', id: 'assistant-1', parentId: 'user-1', message: { role: 'assistant', content: 'First answer' } },
+    ];
+    await fs.writeFile(sessionFile, records.map(r => JSON.stringify(r)).join('\n') + '\n');
+    const harness = createHarness(createConfig({
+      workingDirectory: tempDir,
+      resumeSeed: { providerSessionId: 'pi-session-1', providerState: {
+        sessionId: 'pi-session-1', sessionFile, leafEntryId: 'assistant-1',
+      } },
+    }));
+    harness.responses.set('get_state', { sessionId: 'pi-session-1', sessionFile });
+    const sessionEvents: ProviderSessionEvent[] = [];
+    harness.session.onEvent(event => sessionEvents.push(event));
+    try {
+      const run = harness.session.execute(createRequest());
+      const eventsPromise = collect(run.events);
+      await waitFor(() => harness.kernels[0]?.requests.some(r => r.type === 'prompt') ?? false);
+      harness.kernels[0].emit({ type: 'agent_start' });
+      await fs.appendFile(sessionFile, [
+        { type: 'message', id: 'user-2', parentId: 'assistant-1', message: { role: 'user', content: 'Second' } },
+        { type: 'message', id: 'assistant-2', parentId: 'user-2', message: {
+          role: 'assistant', content: 'Partial', stopReason: 'aborted', errorMessage: 'Request was aborted',
+        } },
+      ].map(r => JSON.stringify(r)).join('\n') + '\n');
+      run.cancel();
+      expect((await eventsPromise).at(-1)).toMatchObject({ type: 'cancelled' });
+
+      // Reload from the state announced for persistence, not the live session.
+      const announced = () => sessionEvents.find(event => event.type === 'session_state_changed'
+        && event.snapshot.providerState?.leafEntryId === 'assistant-2');
+      await waitFor(() => announced() !== undefined);
+      const settled = announced()!;
+      const conversation = {
+        id: 'conversation-1', providerId: 'pi', title: 'Stopped', createdAt: 1, lastActivityAt: 1,
+        sessionId: 'pi-session-1', messages: [],
+        providerState: settled.type === 'session_state_changed' ? settled.snapshot.providerState : undefined,
+      } as Conversation;
+      const reloaded = await new PiConversationHistoryService().hydrateConversationHistory(conversation, tempDir);
+      expect(reloaded.messages?.map(message => [message.content, message.isInterrupt === true])).toEqual([
+        ['First', false], ['First answer', false], ['Second', false], ['Partial', true],
+      ]);
+    } finally {
+      await harness.session.dispose();
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('restores a saved tree edit position before model configuration and input after restart', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-tree-resume-'));
     const sessionFile = path.join(root, 'session.jsonl');
     await fs.writeFile(sessionFile, JSON.stringify({ type: 'session', id: 'pi-session-1', cwd: root }) + '\n');
     const harness = createHarness(createConfig({
-      vaultWorkingDirectory: root,
+      workingDirectory: root,
       resumeSeed: { providerSessionId: 'pi-session-1', providerState: {
         sessionId: 'pi-session-1', sessionFile,
         treeCursor: { targetId: 'first-user', leafId: null },
@@ -474,7 +516,7 @@ describe('PiExecutionBackend', () => {
     let renderer: unknown = 'unset';
     let kernel: FakeKernel | null = null;
     const probe = new PiCommandMetadataProbe(
-      createHost(),
+      runtimeHostFor(createHost(), 'pi'),
       (spec, callbacks, suppliedRenderer) => {
         renderer = suppliedRenderer;
         kernel = new FakeKernel(spec, callbacks, responses);
@@ -500,8 +542,7 @@ describe('PiExecutionBackend', () => {
     let staleRequestStarted = false;
     host.getResolvedProviderCliPath.mockImplementation(async () => cliPath);
     const kernels: FakeKernel[] = [];
-    const probe = new PiCommandMetadataProbe(
-      host,
+    const probe = new PiCommandMetadataProbe(runtimeHostFor(host, 'pi'),
       (spec, callbacks) => {
         const kernel = new FakeKernel(
           spec,
@@ -531,7 +572,7 @@ describe('PiExecutionBackend', () => {
       },
     );
     const quiesce = jest.spyOn(probe, 'quiesceForEnvironmentChange');
-    const services = await createPiWorkspaceServices(host, {
+    const services = await createPiWorkspaceServices(withRuntimeHosts(host), {
       commandMetadataProbe: probe,
     });
     const context = {
@@ -570,7 +611,7 @@ describe('PiExecutionBackend', () => {
     let cliPath = '/bin/pi-a';
     host.getResolvedProviderCliPath.mockImplementation(async () => cliPath);
     const kernels: FakeKernel[] = [];
-    const probe = new PiCommandMetadataProbe(host, (spec, callbacks) => {
+    const probe = new PiCommandMetadataProbe(runtimeHostFor(host, 'pi'), (spec, callbacks) => {
       const kernel = new FakeKernel(
         spec,
         callbacks,
@@ -581,7 +622,7 @@ describe('PiExecutionBackend', () => {
       kernels.push(kernel);
       return kernel;
     });
-    const services = await createPiWorkspaceServices(host, {
+    const services = await createPiWorkspaceServices(withRuntimeHosts(host), {
       commandMetadataProbe: probe,
     });
     const context = {
@@ -626,12 +667,12 @@ describe('PiExecutionBackend', () => {
   it('does not strand a command metadata waiter when the workspace is disposed while fenced', async () => {
     const host = createHost();
     const kernels: FakeKernel[] = [];
-    const probe = new PiCommandMetadataProbe(host, (spec, callbacks) => {
+    const probe = new PiCommandMetadataProbe(runtimeHostFor(host, 'pi'), (spec, callbacks) => {
       const kernel = new FakeKernel(spec, callbacks, new Map());
       kernels.push(kernel);
       return kernel;
     });
-    const services = await createPiWorkspaceServices(host, {
+    const services = await createPiWorkspaceServices(withRuntimeHosts(host), {
       commandMetadataProbe: probe,
     });
     const mutationEntered = createDeferred();
@@ -731,9 +772,6 @@ describe('PiExecutionBackend', () => {
       status: 'idle',
     });
     expect(harness.session.getSnapshot().providerStateDeletes).toBeUndefined();
-    expect(harness.commandCatalog.setCommandSnapshot).toHaveBeenCalledWith([
-      expect.objectContaining({ id: 'pi:runtime:compact', name: 'compact' }),
-    ]);
     expect(new Set(events.map(event => event.scope.sequence)).size).toBe(events.length);
   });
 
@@ -994,6 +1032,13 @@ describe('PiExecutionBackend', () => {
     expect(events).not.toContainEqual(expect.objectContaining({
       type: 'turn_completed',
     }));
+    const retry = collect(harness.session.execute(createRequest()).events);
+    await waitFor(() => getPromptMessages(kernel).length === 2);
+    completeTurn(kernel);
+    expect((await retry).at(-1)).toMatchObject({ type: 'turn_completed' });
+    expect(harness.kernels).toHaveLength(1);
+    expect(kernel.shutdown).not.toHaveBeenCalled();
+    await harness.session.dispose();
   });
 
   it('preserves a pending native Pi error when the process exits before agent end', async () => {
@@ -1085,8 +1130,8 @@ describe('PiExecutionBackend', () => {
     },
     {
       text: '/skill:review',
-      context: { sessionReferences: [{ id: 'ref', title: 'Review', providerId: 'pi', updatedAt: 'updated', snapshotPath: '/tmp/ref.md' }] },
-      expected: '/skill:review \n\n<context_sessions>\n<context_session title="Review" id="ref" provider="pi" updated="updated" path="/tmp/ref.md" />\n</context_sessions>',
+      context: { sessionReferences: [{ id: 'ref', title: 'Review', providerId: 'pi', updatedAt: 'updated' }] },
+      expected: '/skill:review \n\n<context_sessions>\n<context_session title="Review" id="ref" provider="pi" updated="updated" />\n</context_sessions>',
     },
     {
       text: '/skill:review task', context: { linkedContent: { path: 'note.md' } },
@@ -1126,7 +1171,7 @@ describe('PiExecutionBackend', () => {
   it('encodes path-only Linked content without changing the Vault-root process CWD', async () => {
     const harness = createHarness();
     const run = harness.session.execute(createRequest({
-      context: { ...capturedSelections, sessionReferences: [{ id: 'conv-1-ref', title: 'Review', providerId: 'codex', updatedAt: 'updated', snapshotPath: '/tmp/claudian-sessions/ref.md' }], linkedContent: { path: 'Projects/Research' } },
+      context: { ...capturedSelections, sessionReferences: [{ id: 'conv-1-ref', title: 'Review', providerId: 'codex', updatedAt: 'updated' }], linkedContent: { path: 'Projects/Research' } },
       input: [{ text: 'Inspect linked content', type: 'text' }],
     }));
     const eventsPromise = collect(run.events);
@@ -1136,7 +1181,7 @@ describe('PiExecutionBackend', () => {
 
     expect(harness.kernels[0].launchSpec.cwd).toBe('/vault');
     expect(getPromptMessages(harness.kernels[0])).toEqual([
-      'Inspect linked content\n\n<linked_content path="Projects/Research" />\n\n' + capturedSelectionPrompt + '\n\n<context_sessions>\n<context_session title="Review" id="conv-1-ref" provider="codex" updated="updated" path="/tmp/claudian-sessions/ref.md" />\n</context_sessions>',
+      'Inspect linked content\n\n<linked_content path="Projects/Research" />\n\n' + capturedSelectionPrompt + '\n\n<context_sessions>\n<context_session title="Review" id="conv-1-ref" provider="codex" updated="updated" />\n</context_sessions>',
     ]);
     expect(getPromptMessages(harness.kernels[0])[0]).not.toMatch(
       /<(?:linked_note|current_note)\b/,
@@ -1156,7 +1201,7 @@ describe('PiExecutionBackend', () => {
           sessionId: 'pi-session-1',
         },
       },
-      vaultWorkingDirectory: sessionDir,
+      workingDirectory: sessionDir,
     }));
     harness.responses.set('get_state', {
       leafEntryId: 'assistant-1',
@@ -1209,7 +1254,7 @@ describe('PiExecutionBackend', () => {
           sessionId: 'session-a',
         },
       },
-      vaultWorkingDirectory: sessionDir,
+      workingDirectory: sessionDir,
     }));
     harness.host.settings.providerConfigs.pi.environmentVariables =
       `PI_CODING_AGENT_SESSION_DIR=${sessionDir}`;
@@ -1259,7 +1304,7 @@ describe('PiExecutionBackend', () => {
           sessionId: 'session-a',
         },
       },
-      vaultWorkingDirectory: sessionDir,
+      workingDirectory: sessionDir,
     }), undefined, async <T>(type: string): Promise<T> => {
       if (type === 'get_state') return getState.promise as Promise<T>;
       return {} as T;
@@ -1316,7 +1361,7 @@ describe('PiExecutionBackend', () => {
           sessionId: 'session-a',
         },
       },
-      vaultWorkingDirectory: sessionDir,
+      workingDirectory: sessionDir,
     }), undefined, async <T>(type: string): Promise<T> => {
       if (type !== 'get_state') return {} as T;
       getStateCount += 1;
@@ -1374,7 +1419,7 @@ describe('PiExecutionBackend', () => {
           sessionFile: missingSessionFile,
         },
       },
-      vaultWorkingDirectory: sessionDir,
+      workingDirectory: sessionDir,
     }), kernel => {
       kernel.start.mockImplementation(() => kernel.close());
     });
@@ -1404,7 +1449,7 @@ describe('PiExecutionBackend', () => {
     const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-coordinator-missing-'));
     const missingSessionFile = path.join(sessionDir, 'missing.jsonl');
     const harness = createHarness(createConfig({
-      vaultWorkingDirectory: sessionDir,
+      workingDirectory: sessionDir,
     }));
     harness.host.settings.providerConfigs.pi.environmentVariables =
       `PI_CODING_AGENT_SESSION_DIR=${sessionDir}`;
@@ -1425,7 +1470,7 @@ describe('PiExecutionBackend', () => {
     const recovery = createProviderRecoveryTestHarness({
       backend: harness.backend,
       conversation,
-      vaultWorkingDirectory: sessionDir,
+      workingDirectory: sessionDir,
       configuration: createRequest().configuration,
       resolveMissingProviderSession: async (current, missingSessionId) => {
         const resolution = await historyService.resolveMissingConversationSession(
@@ -1446,6 +1491,7 @@ describe('PiExecutionBackend', () => {
     });
     expect(conversation.sessionId).toBeNull();
     expect(conversation.providerState).toEqual({
+      bindingRetired: true,
       futureResumeCursor: { token: 'keep-me' },
       previousSessions: [{
         sessionFile: missingSessionFile,
@@ -1520,7 +1566,7 @@ describe('PiExecutionBackend', () => {
     };
     const harness = createHarness(createConfig({
       resumeSeed: { providerState: { previousSessions: [previousSession] } },
-      vaultWorkingDirectory: sessionDir,
+      workingDirectory: sessionDir,
     }));
     const run = harness.session.execute(createRequest({
       conversationHistory: createConversationHistory('recovered'),
@@ -1592,7 +1638,7 @@ describe('PiExecutionBackend', () => {
           sessionId: 'missing-session-id',
         },
       },
-      vaultWorkingDirectory: sessionDir,
+      workingDirectory: sessionDir,
     }), kernel => {
       kernel.start.mockImplementation(() => {
         kernel.stderr = "No session found matching 'missing-session-id'";
@@ -1643,7 +1689,7 @@ describe('PiExecutionBackend', () => {
     await fs.writeFile(outsideSessionFile, '{"type":"session","id":"legacy"}\n');
     const harness = createHarness(createConfig({
       resumeSeed: createResumeSeed(outsideSessionFile),
-      vaultWorkingDirectory: trustedDir,
+      workingDirectory: trustedDir,
     }), kernel => {
       kernel.start.mockImplementation(() => kernel.close());
     });
@@ -1682,7 +1728,7 @@ describe('PiExecutionBackend', () => {
           sessionId: sessionFile,
         },
       },
-      vaultWorkingDirectory: sessionDir,
+      workingDirectory: sessionDir,
     }), undefined, async <T>(type: string): Promise<T> => {
       if (type === 'set_model') throw new Error('stop after startup validation');
       return {} as T;
@@ -1749,7 +1795,7 @@ describe('PiExecutionBackend', () => {
     const requestHandler = async <T>(type: string): Promise<T> => {
       if (type === failureType && rejectRequest) {
         rejectRequest = false;
-        throw new Error(`${failureType} failed`);
+        throw new PiRPCResponseError(type, `${failureType} failed`);
       }
       const responses: Record<string, unknown> = {
         get_commands: { commands: [] },
@@ -1799,6 +1845,63 @@ describe('PiExecutionBackend', () => {
     expect(getPromptMessages(harness.kernels[0]).at(-1)).toEqual(
       expect.stringContaining('pre-handoff question'),
     );
+  });
+
+  it.each([false, true])('fences an ambiguous prompt failure before retrying (native run started: %s)', async started => {
+    const prompt = createRejectableDeferred<unknown>();
+    const shutdown = createDeferred();
+    let promptCount = 0;
+    const harness: ReturnType<typeof createHarness> = createHarness(createConfig(), (kernel, index) => {
+      if (index === 0) kernel.shutdown.mockImplementation(() => shutdown.promise);
+    }, async <T>(type: string): Promise<T> => {
+      if (type === 'prompt' && promptCount++ === 0) return await prompt.promise as T;
+      return harness.responses.get(type) as T;
+    });
+    const first = collect(harness.session.execute(createRequest()).events);
+    let retry: ProviderExecutionRun | undefined;
+    let retryConsumption: Promise<void> | undefined;
+    try {
+      await waitFor(() => promptCount === 1);
+      const oldKernel = harness.kernels[0];
+      oldKernel.stderr = 'Pi extension is still processing the request';
+      if (started) oldKernel.emit({ type: 'agent_start' });
+      prompt.reject(new Error('Request timeout: prompt (30000ms)'));
+      expect((await first).at(-1)).toMatchObject({
+        type: 'execution_error',
+        message: expect.stringContaining(oldKernel.stderr),
+      });
+
+      const retryEvents: ProviderExecutionEvent[] = [];
+      retry = harness.session.execute(createRequest({ input: [{ type: 'text', text: 'Retry' }] }));
+      retryConsumption = (async () => {
+        for await (const event of retry!.events) retryEvents.push(event);
+      })();
+      await flush();
+      oldKernel.emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Late first answer' } });
+      completeTurn(oldKernel);
+      await flush();
+      expect(retryEvents).not.toContainEqual(expect.objectContaining({ type: 'text_delta', text: 'Late first answer' }));
+      expect(retryEvents).not.toContainEqual(expect.objectContaining({ type: 'turn_completed' }));
+      expect(oldKernel.shutdown).toHaveBeenCalledTimes(1);
+      expect(getPromptMessages(oldKernel)).toHaveLength(1);
+      expect(harness.kernels).toHaveLength(1);
+
+      shutdown.resolve();
+      await waitFor(() => harness.kernels[1]?.requests.some(request => request.type === 'prompt') ?? false);
+      const replacement = harness.kernels[1];
+      replacement.emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Retry answer' } });
+      completeTurn(replacement);
+      await retryConsumption;
+      expect(retryEvents.filter(event => event.type === 'text_delta')).toEqual([
+        expect.objectContaining({ text: 'Retry answer' }),
+      ]);
+      expect(retryEvents.at(-1)).toMatchObject({ type: 'turn_completed' });
+    } finally {
+      shutdown.resolve();
+      retry?.cancel();
+      await retryConsumption;
+      await harness.session.dispose();
+    }
   });
 
   it.each([
@@ -1958,9 +2061,9 @@ describe('PiExecutionBackend', () => {
       configuration: {
         model: 'pi:anthropic/claude-sonnet-4',
         reasoning: 'high',
-        systemInstructions: { kind: 'provider-default' },
+        systemInstructions: { kind: 'main-agent', instructions: 'Caller-resolved Main Agent prompt.' },
       },
-    }));
+    } as never));
     const eventsPromise = collect(run.events);
     await waitFor(() => harness.kernels.length === 1);
     completeTurn(harness.kernels[0]);
@@ -1968,10 +2071,35 @@ describe('PiExecutionBackend', () => {
 
     const args = harness.kernels[0].launchSpec.args;
     const promptIndex = args.indexOf('--system-prompt');
-    const systemPrompt = args[promptIndex + 1] ?? '';
-    expect(systemPrompt).toContain('## Runtime Context');
-    expect(systemPrompt).toContain('Use `bash: date`');
-    expect(systemPrompt).toContain('## Vault Media');
+    expect(args[promptIndex + 1]).toBe('Caller-resolved Main Agent prompt.');
+  });
+
+  it('relaunches with the Main Agent instructions when they change', async () => {
+    const harness = createHarness();
+    const promptOf = (kernel: { launchSpec: { args: string[] } }) =>
+      kernel.launchSpec.args[kernel.launchSpec.args.indexOf('--system-prompt') + 1] ?? '';
+    const send = async (instructions: string, expectedKernels: number) => {
+      const run = harness.session.execute(createRequest({
+        configuration: {
+          model: 'pi:anthropic/claude-sonnet-4',
+          reasoning: 'high',
+          systemInstructions: { kind: 'main-agent', instructions },
+        },
+      }));
+      const eventsPromise = collect(run.events);
+      await waitFor(() => harness.kernels.length === expectedKernels);
+      completeTurn(harness.kernels.at(-1)!);
+      await eventsPromise;
+    };
+
+    await send('Main Agent prompt Alpha', 1);
+    expect(harness.kernels).toHaveLength(1);
+    expect(promptOf(harness.kernels[0])).toBe('Main Agent prompt Alpha');
+
+    await send('Main Agent prompt Beta', 2);
+    expect(harness.kernels).toHaveLength(2);
+    expect(promptOf(harness.kernels[1])).toBe('Main Agent prompt Beta');
+    await harness.session.dispose();
   });
 
   it('maps an explicit allow-list exactly and falls back to provider model settings', async () => {
@@ -1979,7 +2107,7 @@ describe('PiExecutionBackend', () => {
     const run = harness.session.execute(createRequest({
       configuration: {
         reasoning: 'high',
-        systemInstructions: { kind: 'provider-default' },
+        systemInstructions: { kind: 'main-agent' as const, instructions: 'Main Agent prompt.' },
       },
       toolPolicy: {
         kind: 'allow-list',
@@ -2013,6 +2141,23 @@ describe('PiExecutionBackend', () => {
     const events = await collect(harness.session.execute(createRequest()).events);
     expect(events).toContainEqual(expect.objectContaining({ type: 'execution_error', category: 'configuration' }));
     expect(events.some(event => event.type === 'turn_started' && event.accepted)).toBe(false);
+    expect(harness.kernels[0].requests.some(request => request.type === 'prompt')).toBe(false);
+    await harness.session.dispose();
+  });
+
+  it('reports a saved model the current Pi environment rejects as an actionable configuration error', async () => {
+    const harness = createHarness(createConfig(), undefined, async <T>(type: string): Promise<T> => {
+      if (type === 'set_model') {
+        throw new PiRPCResponseError(type, 'Model not found: anthropic/claude-sonnet-4');
+      }
+      return harness.responses.get(type) as T;
+    });
+    const events = await collect(harness.session.execute(createRequest()).events);
+    expect(events.at(-1)).toMatchObject({
+      category: 'configuration',
+      message: expect.stringMatching(/anthropic\/claude-sonnet-4[\s\S]*Model not found[\s\S]*click Discover/),
+      type: 'execution_error',
+    });
     expect(harness.kernels[0].requests.some(request => request.type === 'prompt')).toBe(false);
     await harness.session.dispose();
   });
@@ -2567,15 +2712,22 @@ describe('PiExecutionBackend', () => {
     await harness.session.dispose();
   });
 
-  it('terminates an immediate retry when prior rollback fails and blocks further execution', async () => {
+  it('leaves a failed rollback target behind and lets an immediate retry materialize its own fork', async () => {
     const firstTarget = {
       leafEntryId: 'assistant-1',
       parentSession: '/tmp/source.jsonl',
       sessionFile: '/tmp/fork-a.jsonl',
       sessionId: 'fork-a',
     };
+    const retryTarget = {
+      ...firstTarget,
+      sessionFile: '/tmp/fork-b.jsonl',
+      sessionId: 'fork-b',
+    };
     const firstCreation = createRejectableDeferred<typeof firstTarget>();
-    const createForkSessionFile = jest.fn(() => firstCreation.promise);
+    const createForkSessionFile = jest.fn()
+      .mockImplementationOnce(() => firstCreation.promise)
+      .mockResolvedValueOnce(retryTarget);
     const rollbackForkSessionFile = jest.fn(async () => {
       throw new Error('fork rollback failed');
     });
@@ -2590,6 +2742,7 @@ describe('PiExecutionBackend', () => {
       createForkSessionFile,
       rollbackForkSessionFile,
     });
+    harness.responses.set('get_state', retryTarget);
     const firstRun = harness.session.execute(createRequest({
       input: [{ text: 'A', type: 'text' }],
     }));
@@ -2601,48 +2754,25 @@ describe('PiExecutionBackend', () => {
     const retryEventsPromise = collect(harness.session.execute(createRequest({
       input: [{ text: 'B', type: 'text' }],
     })).events);
-    let retrySettled = false;
-    void retryEventsPromise.then(() => {
-      retrySettled = true;
-    });
     firstCreation.resolve(firstTarget);
-    await waitFor(() => rollbackForkSessionFile.mock.calls.length === 1, 100);
-    await flush();
-
-    expect(retrySettled).toBe(true);
+    await waitFor(() => harness.kernels.length === 1, 100);
+    harness.kernels[0].emit({ type: 'agent_start' });
+    harness.kernels[0].emit({ type: 'agent_end' });
+    harness.kernels[0].emit({ type: 'agent_settled' });
     const retryEvents = await retryEventsPromise;
+
     expect(firstEvents.filter(event => (
       event.type === 'cancelled'
       || event.type === 'execution_error'
       || event.type === 'turn_completed'
     ))).toEqual([expect.objectContaining({ type: 'cancelled' })]);
-    expect(retryEvents.filter(event => (
-      event.type === 'cancelled'
-      || event.type === 'execution_error'
-      || event.type === 'turn_completed'
-    ))).toEqual([
-      expect.objectContaining({
-        category: 'provider',
-        recoverable: false,
-        type: 'execution_error',
-      }),
-    ]);
-    expect(retryEvents.at(-2)).toMatchObject({
-      snapshot: expect.objectContaining({
-        invalidation: expect.objectContaining({ recoverable: false }),
-        status: 'invalidated',
-      }),
-      type: 'session_state_changed',
-    });
-    expect(harness.session.getStatus()).toBe('invalidated');
-    expect(() => harness.session.execute(createRequest())).toThrow(
-      'cleanup failed and requires disposal',
-    );
-    await expect(harness.session.dispose()).rejects.toThrow('fork rollback failed');
-    expect(harness.session.getStatus()).toBe('disposed');
-    expect(createForkSessionFile).toHaveBeenCalledTimes(1);
-    expect(rollbackForkSessionFile).toHaveBeenCalledTimes(1);
-    expect(harness.kernels).toHaveLength(0);
+    expect(retryEvents.at(-1)).toMatchObject({ type: 'turn_completed' });
+    expect(rollbackForkSessionFile).toHaveBeenCalledWith(firstTarget);
+    expect(createForkSessionFile).toHaveBeenCalledTimes(2);
+    const sessionTargetIndex = harness.kernels[0].launchSpec.args.indexOf('--session') + 1;
+    expect(harness.kernels[0].launchSpec.args[sessionTargetIndex]).toBe('/tmp/fork-b.jsonl');
+    expect(harness.session.getStatus()).toBe('idle');
+    await expect(harness.session.dispose()).resolves.toBeUndefined();
   });
 
   it('retries the preserved fork seed after an ordinary prior creation failure', async () => {
@@ -2696,7 +2826,7 @@ describe('PiExecutionBackend', () => {
     await harness.session.dispose();
   });
 
-  it('keeps cancellation primary while lifecycle disposal surfaces rollback failure', async () => {
+  it('keeps cancellation primary and disposes cleanly when rollback fails', async () => {
     const createdFork = {
       leafEntryId: 'assistant-1',
       parentSession: '/tmp/source.jsonl',
@@ -2732,7 +2862,7 @@ describe('PiExecutionBackend', () => {
       || event.type === 'execution_error'
       || event.type === 'turn_completed'
     ))).toEqual([expect.objectContaining({ type: 'cancelled' })]);
-    await expect(disposePromise).rejects.toThrow('fork rollback failed');
+    await expect(disposePromise).resolves.toBeUndefined();
     expect(rollbackForkSessionFile).toHaveBeenCalledTimes(1);
     expect(harness.session.getSnapshot()).toMatchObject({
       providerState: {
@@ -2772,7 +2902,7 @@ describe('PiExecutionBackend', () => {
           futureState: { retained: true },
         },
       },
-      vaultWorkingDirectory: tempDir,
+      workingDirectory: tempDir,
     }), kernel => {
       harness.responses.set('get_state', {
         sessionFile: kernel.launchSpec.sessionTarget,
@@ -3131,7 +3261,7 @@ describe('PiExecutionBackend', () => {
       await harness.session.dispose();
     });
 
-    it('aborts a background turn on Stop and completes it when Pi settles without restarting Pi', async () => {
+    it('aborts a background turn on Stop and completes it as interrupted when Pi settles without restarting Pi', async () => {
       const harness = createHarness();
       const { events, kernel } = await startIdleSession(harness);
       emitWake(kernel);
@@ -3139,11 +3269,13 @@ describe('PiExecutionBackend', () => {
       harness.session.cancel();
       expect(kernel.sent).toContainEqual({ type: 'abort' });
       expect(harness.session.getStatus()).toBe('cancelling');
+      // Pi persists the stopped reply as `stopReason: aborted`, which history replays as interrupted.
+      kernel.emit({ type: 'message_end', message: { role: 'assistant', content: [], stopReason: 'aborted', errorMessage: 'Operation aborted' } });
       kernel.emit({ type: 'agent_end' });
       kernel.emit({ type: 'agent_settled' });
       await waitFor(() => events.some(event => event.type === 'background_turn_completed'));
 
-      expect(backgroundEvents(events).at(-1)).toMatchObject({ reason: 'provider-ended', type: 'background_turn_completed' });
+      expect(backgroundEvents(events).at(-1)).toMatchObject({ reason: 'interrupted', type: 'background_turn_completed' });
       expect(harness.session.getStatus()).toBe('idle');
       expect(kernel.shutdown).not.toHaveBeenCalled();
       await harness.session.dispose();

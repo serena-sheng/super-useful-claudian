@@ -1,3 +1,5 @@
+import { runtimeHostFor } from '@test/helpers/providerRuntimeHost';
+
 import type { ProviderCommandLoaderContext } from '@/core/providers/types';
 import { OpencodeCommandLoader } from '@/providers/opencode/app/OpencodeCommandLoader';
 import { OpencodeMetadataService } from '@/providers/opencode/metadata/OpencodeMetadataService';
@@ -92,8 +94,7 @@ describe('OpencodeMetadataService command update timeout', () => {
 
   it('reports retryable command discovery when no command update arrives', async () => {
     const plugin = createPlugin();
-    const commandCatalog = { setCommandSnapshot: jest.fn() };
-    const service = new OpencodeMetadataService(plugin, { commandCatalog });
+    const service = new OpencodeMetadataService(runtimeHostFor(plugin, 'opencode'), plugin.executionLifecycleRegistry);
     const loader = new OpencodeCommandLoader(service);
 
     try {
@@ -106,7 +107,6 @@ describe('OpencodeMetadataService command update timeout', () => {
         retryable: true,
         status: 'error',
       });
-      expect(commandCatalog.setCommandSnapshot).not.toHaveBeenCalled();
     } finally {
       await service.dispose();
     }
@@ -114,8 +114,7 @@ describe('OpencodeMetadataService command update timeout', () => {
 
   it('still publishes model metadata when the command update is absent', async () => {
     const plugin = createPlugin();
-    const commandCatalog = { setCommandSnapshot: jest.fn() };
-    const service = new OpencodeMetadataService(plugin, { commandCatalog });
+    const service = new OpencodeMetadataService(runtimeHostFor(plugin, 'opencode'), plugin.executionLifecycleRegistry);
 
     try {
       const loaded = service.loadCatalog();
@@ -126,7 +125,6 @@ describe('OpencodeMetadataService command update timeout', () => {
       expect(getOpencodeProviderSettings(plugin.settings).discoveredModels).toEqual([
         { label: 'Claude', rawId: 'anthropic/claude' },
       ]);
-      expect(commandCatalog.setCommandSnapshot).not.toHaveBeenCalled();
     } finally {
       await service.dispose();
     }
@@ -134,8 +132,7 @@ describe('OpencodeMetadataService command update timeout', () => {
 
   it('treats an observed empty command update as a valid empty catalog', async () => {
     const plugin = createPlugin();
-    const commandCatalog = { setCommandSnapshot: jest.fn() };
-    const service = new OpencodeMetadataService(plugin, { commandCatalog });
+    const service = new OpencodeMetadataService(runtimeHostFor(plugin, 'opencode'), plugin.executionLifecycleRegistry);
     const loader = new OpencodeCommandLoader(service);
 
     try {
@@ -150,7 +147,6 @@ describe('OpencodeMetadataService command update timeout', () => {
       });
 
       await expect(result).resolves.toEqual({ status: 'empty' });
-      expect(commandCatalog.setCommandSnapshot).toHaveBeenCalledWith([]);
     } finally {
       await service.dispose();
     }

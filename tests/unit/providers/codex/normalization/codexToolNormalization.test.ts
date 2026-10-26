@@ -19,9 +19,21 @@ it('renders non-JSON tool outputs without losing primitive values or throwing on
   expect(stringifyCodexToolOutput(BigInt(42))).toBe('42');
   expect(stringifyCodexToolOutput({ ok: true })).toBe('{"ok":true}');
   expect(stringifyCodexToolOutput([{ text: 'first' }, { text: 'second' }])).toBe('firstsecond');
+  expect(stringifyCodexToolOutput([
+    { type: 'input_image', image_url: 'data:image/png;base64,aW1hZ2VCeXRlcw==' },
+  ])).toBe('');
+  expect(stringifyCodexToolOutput([
+    { type: 'input_image', image_url: 'data:image/png;base64,aW1hZ2VCeXRlcw==' },
+    { type: 'output_file', name: 'a.txt' },
+  ])).toBe('[{"type":"output_file","name":"a.txt"}]');
 });
 
 describe('normalizeCodexToolName', () => {
+  it.each(['claudian_list_destinations', 'claudian_send_message'])('normalizes the session namespace for %s', name => {
+    expect(normalizeCodexToolName(`claudian_sessions__${name}`)).toBe(name);
+    expect(normalizeCodexToolName(name)).toBe(name);
+  });
+
   it.each([
     ['command_execution', 'Bash'],
     ['shell_command', 'Bash'],
@@ -49,8 +61,15 @@ describe('normalizeCodexToolName', () => {
     expect(normalizeCodexToolName(name)).toBe(name);
   });
 
-  it('passes through unknown tool names', () => {
-    expect(normalizeCodexToolName('custom_tool')).toBe('custom_tool');
+  it.each([
+    ['custom_tool', 'custom_tool'],
+    ['constructor', 'constructor'],
+    ['__proto__', '__proto__'],
+    ['toString', 'toString'],
+    [' Constructor ', ' Constructor '],
+  ])('passes through unknown tool name %j as its literal string %j', (raw, expected) => {
+    expect(typeof normalizeCodexToolName(raw)).toBe('string');
+    expect(normalizeCodexToolName(raw)).toBe(expected);
   });
 
   it('returns "tool" for undefined', () => {

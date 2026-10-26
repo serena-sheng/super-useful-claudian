@@ -4,6 +4,7 @@ import type { DiffStats } from '@/core/types/diff';
 import { renderDiffContent, renderDiffStats } from '@/features/chat/rendering/tools/DiffRenderer';
 import { fileNameOnly, renderEmptyResult, renderLinesExpanded } from '@/features/chat/rendering/tools/toolContentPrimitives';
 import { setToolStatus } from '@/features/chat/rendering/tools/toolStatus';
+import { t } from '@/i18n/i18n';
 
 type ApplyPatchFileDiffs = ReturnType<typeof parseApplyPatchDiffs>;
 
@@ -22,9 +23,9 @@ export function getApplyPatchSummary(input: Record<string, unknown>): string {
     : [];
 
   const files = [...new Set([...patchFiles, ...changeFiles])];
-  if (files.length === 0) return patchText ? 'patch' : '';
+  if (files.length === 0) return patchText ? t('chat.tools.patch') : '';
   if (files.length === 1) return fileNameOnly(files[0]);
-  return `${files.length} files`;
+  return t('chat.tools.files', { count: files.length });
 }
 
 function getApplyPatchFileDiffs(input: Record<string, unknown>): ApplyPatchFileDiffs {
@@ -59,7 +60,7 @@ export function setApplyPatchStatus(statusEl: HTMLElement, toolCall: ToolCallInf
 
   statusEl.className = 'claudian-tool-status claudian-write-edit-stats';
   statusEl.empty();
-  statusEl.setAttribute('aria-label', `Changes: +${stats.added} -${stats.removed}`);
+  statusEl.setAttribute('aria-label', t('chat.tools.changes', { added: stats.added, removed: stats.removed }));
   renderDiffStats(statusEl, stats);
 }
 
@@ -73,15 +74,20 @@ function readMoveTarget(kind: unknown): string | undefined {
 
 function renderApplyPatchDiffSections(container: HTMLElement, fileDiffs: ApplyPatchFileDiffs): void {
   for (const fileDiff of fileDiffs) {
-    const sectionEl = container.createDiv({ cls: 'claudian-tool-patch-section' });
+    const path = fileDiff.movedTo ? `${fileDiff.filePath} -> ${fileDiff.movedTo}` : fileDiff.filePath;
+    const sectionEl = container.createDiv({
+      cls: 'claudian-tool-patch-section',
+      attr: { role: 'group', 'aria-label': path },
+    });
+    sectionEl.createDiv({ cls: 'claudian-tool-line', text: path });
 
     if (fileDiff.operation === 'delete' && fileDiff.diffLines.length === 0) {
-      renderEmptyResult(sectionEl, 'File deleted');
+      renderEmptyResult(sectionEl, t('chat.tools.fileDeleted'));
       continue;
     }
 
     if (fileDiff.diffLines.length === 0) {
-      renderEmptyResult(sectionEl, 'No textual diff available');
+      renderEmptyResult(sectionEl, t('chat.tools.noTextDiff'));
       continue;
     }
 

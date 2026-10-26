@@ -39,7 +39,7 @@ export function createCodexSettingsTabRenderer(
 
       const enablement: Omit<ProviderEnablementSettingOptions, 'container' | 'description'> = {
         getValue: () => getCodexProviderSettings(settingsBag).enabled,
-        name: t('settings.providerEnablement.name', { provider: 'Codex CLI' }),
+        name: t('settings.providerEnablement.name', { provider: 'Codex' }),
         onChange: async (value) => {
           if (!ProviderSettingsCoordinator.canApplyProviderEnablement(
             settingsBag,
@@ -74,13 +74,13 @@ export function createCodexSettingsTabRenderer(
       const lastProviderWarning = renderLastEnabledProviderWarning(container);
 
       const modelWarning = renderProviderModelEnablementWarning(container, context, {
-        getHasEnabledModels: () => getCodexModelOptions(settingsBag).length > 0,
+        getHasEnabledModels: () => getCodexModelOptions(getCodexProviderSettings(settingsBag)).length > 0,
         getIsEnabled: () => getCodexProviderSettings(settingsBag).enabled,
         providerId: 'codex',
-        providerName: 'Codex CLI',
+        providerName: 'Codex',
       });
 
-      const inspectInstallation = () => inspectCodexInstallation(context.plugin);
+      const inspectInstallation = () => inspectCodexInstallation(context.plugin.getRuntimeHost('codex'));
       const readiness = renderProviderReadinessPanel({
         container: readinessContainer,
         metadata: CLI_PROVIDER_METADATA.codex,
@@ -101,16 +101,22 @@ export function createCodexSettingsTabRenderer(
               .addOption('wsl', t('settings.codex.installationMethod.wsl'))
               .setValue(installationMethod)
               .onChange(async (value) => {
-                installationMethod = value === 'wsl' ? 'wsl' : 'native-windows';
-                await context.plugin.applyProviderRuntimeSettings(
-                  ['codex'],
-                  (settings) => {
-                    updateCodexProviderSettings(settings, { installationMethod });
-                  },
-                  () => codexWorkspace.cliResolver.reset(),
-                );
-                refreshInstallationMethodUI();
-                void cliPathControl.refresh();
+                const requestedMethod = value === 'wsl' ? 'wsl' : 'native-windows';
+                installationMethod = requestedMethod;
+                try {
+                  await context.plugin.applyProviderRuntimeSettings(
+                    ['codex'],
+                    (settings) => {
+                      updateCodexProviderSettings(settings, { installationMethod: requestedMethod });
+                    },
+                    () => codexWorkspace.cliResolver.reset(),
+                  );
+                } finally {
+                  installationMethod = getCodexProviderSettings(settingsBag).installationMethod;
+                  dropdown.setValue(installationMethod);
+                  refreshInstallationMethodUI();
+                  void cliPathControl.refresh();
+                }
               });
           });
       }
@@ -164,7 +170,7 @@ export function createCodexSettingsTabRenderer(
       const cliPathControl = renderCLIInstallationSetting({
         cliName: 'Codex CLI',
         icon: OPENAI_PROVIDER_ICON,
-        inspect: inspectInstallation,
+        inspect: () => inspectCodexInstallation(context.plugin.getRuntimeHost('codex')),
         container: installationContainer,
         enablement,
         getValue: () => {
@@ -239,7 +245,7 @@ export function createCodexSettingsTabRenderer(
 
       new Setting(container).setName(t('settings.models')).setHeading();
 
-      const modelPicker = renderProviderModelsSection(container, 'codex', 'Codex CLI', codexWorkspace.modelCatalog, () => modelWarning.refresh());
+      const modelPicker = renderProviderModelsSection(container, 'codex', 'Codex', codexWorkspace.modelCatalog, () => modelWarning.refresh());
 
       new Setting(container)
         .setName(t('settings.codex.ultraEffort.name'))

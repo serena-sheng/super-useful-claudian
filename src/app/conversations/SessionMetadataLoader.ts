@@ -8,12 +8,7 @@ import type {
   SessionMetadataReadResult,
 } from '../storage/SessionStorage';
 import type { ConversationRepository } from './ConversationRepository';
-
-export interface InitialSessionMetadataScan {
-  records: SessionMetadataReadResult[];
-  complete: boolean;
-  invalidMetadataCount: number;
-}
+import { migrateLegacyDshConversation } from './migrateLegacyDshConversation';
 
 export interface SessionMetadataLoaderOptions {
   sessions: SessionMetadataReader;
@@ -27,16 +22,15 @@ export interface SessionMetadataLoaderOptions {
 }
 
 /**
- * Loads session metadata for the conversation repository. It reads the
- * startup scan for application startup, which adopts those records itself,
- * and owns the deferred background scan after layout and on-demand loading
- * of individual conversations.
+ * Loads session metadata for the conversation repository: the deferred
+ * background scan after layout and on-demand loading of individual
+ * conversations.
  */
 export class SessionMetadataLoader {
   private stopped = false;
   private disposal: Promise<void> | null = null;
   private readonly requestedLoads = new Set<Promise<void>>();
-  private pendingScan = false;
+  private pendingScan = true;
   private loadedAll = false;
   private scheduledLoadTimer: number | null = null;
   private remainingLoad: Promise<void> | null = null;
@@ -45,20 +39,6 @@ export class SessionMetadataLoader {
 
   get hasLoadedAll(): boolean {
     return this.loadedAll;
-  }
-
-  async readInitialMetadata(): Promise<InitialSessionMetadataScan> {
-    const scan = await this.options.sessions.scan();
-    return {
-      records: await this.options.sessions.revalidate(scan.records),
-      complete: scan.complete,
-      invalidMetadataCount: scan.invalidMetadataCount,
-    };
-  }
-
-  finishStartup(complete: boolean, deferRemaining: boolean): void {
-    this.loadedAll = complete;
-    this.pendingScan = deferRemaining;
   }
 
   scheduleRemainingLoad(): void {
@@ -72,7 +52,7 @@ export class SessionMetadataLoader {
       }
       this.scheduledLoadTimer = window.setTimeout(() => {
         this.scheduledLoadTimer = null;
-        this.startRemainingLoad();
+        void this.startRemainingLoad().catch(() => undefined);
       }, 0);
     };
 
@@ -222,33 +202,41 @@ export class SessionMetadataLoader {
       ),
     );
     StartupProfiler.recordCount('background-session-metadata-count', currentAddedConversations.length);
-    let recoveredModels: Conversation[] = [];
-    if (!this.isStopped()) {
-      recoveredModels = await conversations
-        .recoverMissingSelectedModels();
-      StartupProfiler.recordCount(
-        'recovered-session-model-count',
-        recoveredModels.length,
-      );
-    }
+    const recoveredModels = await conversations
+      .recoverMissingSelectedModels();
+    StartupProfiler.recordCount(
+      'recovered-session-model-count',
+      recoveredModels.length,
+    );
     if (this.isStopped()) return;
     await conversations.persistConversations(
       uniqueCurrentInvalidatedConversations,
     );
-    if (
-      !this.isStopped()
-      && (didChangeConversationList || recoveredModels.length > 0)
-    ) {
+    if (this.isStopped()) return;
+    if (didChangeConversationList || recoveredModels.length > 0) {
       this.options.onConversationListChanged();
     }
     if (scan.complete) {
       this.loadedAll = true;
+      await runtimeSettings.completePendingSessionInvalidations(
+        runtimeSettings.getPendingGenerations(),
+      );
+      if (!this.isStopped()) this.options.onAllMetadataLoaded?.();
       if (!this.isStopped()) {
-        await runtimeSettings.completePendingSessionInvalidations(
-          runtimeSettings.getCompletablePendingSessionInvalidations(),
+        StartupProfiler.recordCount(
+          'compacted-session-metadata-count',
+          await conversations.compactPersistedProviderState(() => this.isStopped()),
         );
       }
-      if (!this.isStopped()) this.options.onAllMetadataLoaded?.();
+    }
+  }
+
+  /** Loads complete membership before operations that target an entire project. */
+  async ensureAllLoaded(): Promise<void> {
+    if (this.loadedAll) return;
+    await this.startRemainingLoad();
+    if (!this.loadedAll || this.isStopped()) {
+      throw new Error('Session metadata could not be fully loaded');
     }
   }
 
@@ -266,7 +254,7 @@ export class SessionMetadataLoader {
   private async loadConversations(conversationIds: readonly string[]): Promise<void> {
     const { conversations, runtimeSettings } = this.options;
     const missingIds = Array.from(new Set(conversationIds)).filter(
-      id => !conversations.getCachedConversation(id),
+      id => !conversations.getSummary(id),
     );
     if (missingIds.length === 0) return;
 
@@ -297,7 +285,8 @@ export class SessionMetadataLoader {
     );
   }
 
-  createShell(meta: SessionMetadata): Conversation {
+  createShell(source: SessionMetadata): Conversation {
+    const meta = migrateLegacyDshConversation(source).metadata;
     return {
       id: meta.id,
       providerId: meta.providerId ?? DEFAULT_CHAT_PROVIDER_ID,
@@ -310,6 +299,7 @@ export class SessionMetadataLoader {
       modelRecoverySource: meta.modelRecoverySource,
       messages: [],
       linkedContentPath: meta.linkedContentPath,
+      projectId: meta.projectId,
       isPinned: meta.isPinned,
       isArchived: meta.isArchived,
       usage: meta.usage,
@@ -318,27 +308,24 @@ export class SessionMetadataLoader {
     };
   }
 
-  private startRemainingLoad(): void {
-    if (
-      !this.pendingScan
-      || this.isStopped()
-      || this.remainingLoad
-    ) {
-      return;
-    }
+  private startRemainingLoad(): Promise<void> {
+    if (this.remainingLoad) return this.remainingLoad;
+    if (this.loadedAll || this.isStopped()) return Promise.resolve();
 
     this.pendingScan = false;
     const load = StartupProfiler.runAsync(
       'session-metadata-background-load',
       () => this.loadRemaining(),
-    ).catch(() => {
+    ).catch((error: unknown) => {
       StartupProfiler.increment('session-metadata-background-failures');
+      throw error;
     }).finally(() => {
       if (this.remainingLoad === load) {
         this.remainingLoad = null;
       }
     });
     this.remainingLoad = load;
+    return load;
   }
 
 }

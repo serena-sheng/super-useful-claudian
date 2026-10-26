@@ -1,25 +1,31 @@
 import { Notice } from 'obsidian';
 
 import { parseCompactCommand } from '@/core/commands/compactCommand';
-import type { ProviderExecutionEvent } from '@/core/execution';
-import { captureSelectionSnapshots } from '@/core/prompt/promptContext';
+import type { ProviderExecutionEvent, ProviderTurnEventScope } from '@/core/execution';
 import type { ProviderId } from '@/core/providers/types';
+import { decodeSessionMessage } from '@/core/session-tools/sessionMessageEnvelope';
 import type { ChatMessage, ImageAttachment } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import type { ChatSettings } from '@/features/chat/ChatSettings';
-import type { ComposerDraftController } from '@/features/chat/composer/ComposerDraftController';
 import type { ConversationController } from '@/features/chat/conversation/ConversationController';
 import type { FirstTurnAdmission } from '@/features/chat/conversation/FirstTurnAdmission';
-import { buildChatExecutionConfiguration } from '@/features/chat/execution/chatExecutionConfiguration';
+import {
+  buildChatExecutionConfiguration,
+  getChatWorkingDirectory,
+  resolveChatSystemInstructions,
+} from '@/features/chat/execution/chatExecutionConfiguration';
 import {
   type ChatExecutionCoordinator,
   ChatExecutionPreHandoffError,
   type ChatTurnSubmission,
 } from '@/features/chat/execution/ChatExecutionCoordinator';
+import { resolveSessionInstructions } from '@/features/chat/execution/projectInstructions';
 import type { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
+import { SessionMessageDeferredError, type SessionMessageUnsentReason } from '@/features/chat/session-messaging/SessionMailbox';
+import type { SessionComposerPort } from '@/features/chat/sessions/SessionComposer';
 import type { ChatState } from '@/features/chat/state/ChatState';
-import { cloneQueuedMessage, createQueuedMessage } from '@/features/chat/state/chatTurnRequest';
-import type { ChatTurnRequest, QueuedMessage, TabReviewOutcome } from '@/features/chat/state/types';
+import { captureSelectionSnapshots, createQueuedMessage } from '@/features/chat/state/chatTurnRequest';
+import type { ChatTurnRequest, TabReviewOutcome } from '@/features/chat/state/types';
 import { ResponseStream } from '@/features/chat/turns/ResponseStream';
 import type { StreamController } from '@/features/chat/turns/StreamController';
 import type { TurnCoordinator } from '@/features/chat/turns/TurnCoordinator';
@@ -29,6 +35,8 @@ import { toError } from '@/utils/error';
 
 /** A main turn admitted for execution, with everything captured when it was admitted. */
 export interface MainTurn {
+  origin: 'user' | 'session-message';
+  onUnsent?: (reason: SessionMessageUnsentReason) => void;
   displayContent: string;
   request: ChatTurnRequest;
   images?: ImageAttachment[];
@@ -45,16 +53,16 @@ export interface MainTurn {
 export interface MainTurnExecutionDeps {
   plugin: ChatFeatureHost;
   state: ChatState;
-  renderer: MessageRenderer;
+  renderer: MessageRenderer | null;
   streamController: StreamController;
   conversationController: ConversationController;
-  drafts: ComposerDraftController;
+  drafts: SessionComposerPort;
   turns: TurnCoordinator;
   steering: TurnSteering;
   queue: TurnQueue;
   firstTurn: FirstTurnAdmission;
   getWelcomeEl: () => HTMLElement | null;
-  getMessagesEl: () => HTMLElement;
+  getMessagesEl: () => HTMLElement | null;
   generateId: () => string;
   getSettings: () => Readonly<ChatSettings>;
   getExecutionCoordinator: () => ChatExecutionCoordinator | null;
@@ -79,6 +87,8 @@ export class MainTurnExecution {
   private sawInitialProviderUserMessage = false;
   private awaitingProviderAssistantStart = false;
   private activeDelivery: MainTurn['onDelivery'];
+  #running = false;
+  #activeTurnStart: ChatMessage | null = null;
   private deferredReviewableSettlement: {
     conversationId: string | null;
     report: () => void;
@@ -86,7 +96,7 @@ export class MainTurnExecution {
 
   constructor(private readonly deps: MainTurnExecutionDeps) {
     this.responseStream = new ResponseStream({
-      state: deps.state, renderer: deps.renderer, stream: deps.streamController, turns: deps.turns,
+      state: deps.state, get renderer() { return deps.renderer; }, stream: deps.streamController, turns: deps.turns,
       createMessageId: () => deps.generateId(),
     });
   }
@@ -95,22 +105,48 @@ export class MainTurnExecution {
     if (event.type === 'turn_started' && event.accepted) this.activeDelivery?.(true);
     const assistant = this.responseStream.active;
     if (!assistant) return;
+    if (event.type === 'user_message_started' || event.type === 'assistant_message_started') this.responseStream.observe(event);
     if (event.type === 'user_message_started') {
-      await this.#handleProviderUserMessageStart(event.content ?? '', event.nativeUserMessageId);
+      await this.#handleProviderUserMessageStart(event.content ?? '', event.nativeUserMessageId, event.inputId, event.scope);
       return;
     }
     if (event.type === 'assistant_message_started') {
-      await this.#handleProviderAssistantMessageStart();
+      await this.#handleProviderAssistantMessageStart(event.scope);
       return;
     }
     await this.responseStream.handleEvent(event);
   }
 
+  /**
+   * Where settled history ends in `messages`: before this turn's submission, or everything when no turn
+   * runs here yet. Null while a running turn may still rewrite the transcript before placing its submission.
+   */
+  settledTranscriptEnd(messages: readonly ChatMessage[]): number | null {
+    if (!this.#running) return messages.length;
+    const start = this.#activeTurnStart ? messages.indexOf(this.#activeTurnStart) : -1;
+    return start < 0 ? null : start;
+  }
+
   async run(turn: MainTurn, signal: AbortSignal): Promise<void> {
-    const { plugin, state, renderer, streamController, conversationController } = this.deps;
+    this.#running = true;
+    try {
+      await this.#run(turn, signal);
+    } finally {
+      this.#running = false;
+      this.#activeTurnStart = null;
+    }
+  }
+
+  async #run(turn: MainTurn, signal: AbortSignal): Promise<void> {
+    const { plugin, state, streamController, conversationController } = this.deps;
     const { displayContent, request: turnRequest, images: imagesForMessage } = turn;
     const isCompact = parseCompactCommand(turnRequest.text) !== null;
-    const restoreUnsentInput = (request: ChatTurnRequest, merge = true): void => {
+    const restoreUnsentInput = (request: ChatTurnRequest, merge = true, unsentReason: SessionMessageUnsentReason = 'failed'): void => {
+      if (turn.origin === 'session-message') {
+        const reason: unknown = signal.aborted ? signal.reason : unsentReason;
+        turn.onUnsent?.(reason === 'user' || reason === 'shutdown' || reason === 'new-conversation' || reason === 'deferred' ? reason : 'failed');
+        return;
+      }
       // Unadmitted interaction replies stay with their prompt; queued replies use normal draft recovery.
       if (turn.assertBeforeHandoff) return;
       this.deps.queue.returnMessageToComposer(createQueuedMessage(displayContent, request), { merge });
@@ -128,10 +164,10 @@ export class MainTurnExecution {
       }
     }
 
-    state.acknowledgeReview();
+    if (turn.origin === 'user') state.acknowledgeReview();
 
     let turnConversationId = state.currentConversationId;
-    this.deps.steering.delegateCorrelationToHistory(turnConversationId);
+    this.deps.steering.finishTurn(turnConversationId);
 
     const streamGeneration = this.deps.turns.beginResponse();
     streamController.beginResponse();
@@ -147,22 +183,40 @@ export class MainTurnExecution {
     const admission = this.deps.firstTurn.begin(messagesBeforeTurn, isCompact);
     const hadPendingConversationSave = state.hasPendingConversationSave;
 
+    const sender = turn.origin === 'session-message' ? decodeSessionMessage(turnRequest.text) : null;
     const userMsg: ChatMessage = {
       id: this.deps.generateId(),
       role: 'user',
+      ...(sender ? { sessionMessage: { from: sender.from, sessionId: sender.sessionId } } : {}),
       content: displayContent,
       displayContent,                // Original user input (for UI display)
       timestamp: Date.now(),
       images: imagesForMessage,
     };
     state.addMessage(userMsg);
+    this.#activeTurnStart = userMsg;
     state.hasPendingConversationSave = true;
-    renderer.addMessage(userMsg);
+    this.deps.renderer?.addMessage(userMsg);
 
-    const restoreCancelledInput = (): boolean => {
+    const rollbackFailedTurn = (assistantMsg?: ChatMessage): void => {
+      // Admission can overlap independent background output. Only this unaccepted submission is rolled back.
+      const owned = new Set([userMsg.id, assistantMsg?.id]);
+      const retained = state.messages.filter(message => {
+        if (!owned.has(message.id)) return true;
+        this.deps.renderer?.removeMessage(message.id);
+        return false;
+      });
+      state.messages = retained;
+      state.hasPendingConversationSave = hadPendingConversationSave
+        || retained.some(message => !messagesBeforeTurn.includes(message));
+      this.#resetTurnStreamingState();
+      if (retained.length === 0) this.deps.getWelcomeEl()?.removeClass('claudian-hidden');
+    };
+
+    const restoreCancelledInput = (assistantMsg?: ChatMessage): boolean => {
       if (!signal.aborted) return false;
       restoreUnsentInput(turnRequest);
-      this.#rollbackFailedTurn(messagesBeforeTurn, hadPendingConversationSave);
+      rollbackFailedTurn(assistantMsg);
       this.responseStream.clear();
       this.#resetProviderMessageBoundaryState();
       this.reportDeferredReview();
@@ -174,13 +228,13 @@ export class MainTurnExecution {
         providerId: this.deps.getProviderId(),
         model: this.deps.getSettings().model || undefined,
       }));
-      if (this.#retainUnsentTurnOnClose(signal) || restoreCancelledInput()) return;
+      if ((turn.origin === 'user' && this.#retainUnsentTurnOnClose(signal)) || restoreCancelledInput()) return;
       await admission.titleFirstTurn();
-      if (this.#retainUnsentTurnOnClose(signal) || restoreCancelledInput()) return;
+      if ((turn.origin === 'user' && this.#retainUnsentTurnOnClose(signal)) || restoreCancelledInput()) return;
     } catch (error) {
       admission.rollbackIfUncreated();
       restoreUnsentInput(turnRequest, false);
-      this.#rollbackFailedTurn(messagesBeforeTurn, hadPendingConversationSave);
+      rollbackFailedTurn();
       throw error;
     }
     turnConversationId = state.currentConversationId;
@@ -209,7 +263,7 @@ export class MainTurnExecution {
 
     const rollbackUnstartedTurn = (): void => {
       restoreUnsentInput(admittedTurnRequest);
-      this.#rollbackFailedTurn(messagesBeforeTurn, hadPendingConversationSave);
+      rollbackFailedTurn(assistantMsg);
       this.responseStream.clear();
       this.#resetProviderMessageBoundaryState();
       this.reportDeferredReview();
@@ -217,9 +271,9 @@ export class MainTurnExecution {
 
     // Lazy initialization: bind and prepare execution on the first provider action.
     const ready = await this.deps.ensureExecutionInitialized();
-    if (this.#retainUnsentTurnOnClose(signal, assistantMsg.id) || restoreCancelledInput()) return;
+    if ((turn.origin === 'user' && this.#retainUnsentTurnOnClose(signal, assistantMsg.id)) || restoreCancelledInput(assistantMsg)) return;
     if (!ready) {
-      if (this.#retainUnsentTurnOnClose(signal, assistantMsg.id)) return;
+      if ((turn.origin === 'user' && this.#retainUnsentTurnOnClose(signal, assistantMsg.id))) return;
       new Notice('Failed to initialize agent execution. Please try again.');
       rollbackUnstartedTurn();
       return;
@@ -257,6 +311,11 @@ export class MainTurnExecution {
           finalAssistant.assistantMessageId = checkpoint;
         }
       }
+      if (!result.accepted && turn.origin === 'session-message' && result.status !== 'missing-session') {
+        restoreUnsentInput(admittedTurnRequest);
+        rollbackFailedTurn(assistantMsg);
+        didRollbackUnsentTurn = true;
+      }
       didEnqueueToSdk = result.accepted;
       if (result.accepted) turn.onDelivery?.(true);
       shouldReportReviewableSettlement = result.status === 'completed'
@@ -272,24 +331,25 @@ export class MainTurnExecution {
         this.deps.onInvalidated();
         wasInvalidated = true;
       } else if (result.status === 'missing-session') {
-        const retryMessage = result.accepted || turn.assertBeforeHandoff
+        const retryMessage = result.accepted || turn.assertBeforeHandoff || turn.origin === 'session-message'
           ? null
           : createQueuedMessage(displayContent, {
             ...admittedTurnRequest,
             images: imagesForMessage ?? admittedTurnRequest.images,
           });
-        const queued = this.deps.queue.message;
-        const pendingMessagesToRestore = queued ? cloneQueuedMessage(queued) : null;
-        const composerDraftToRestore = this.#captureComposerDraft();
         const resolution = result.missingSessionResolution ?? 'not_found';
+        if (!result.accepted && turn.origin === 'session-message') turn.onUnsent?.(resolution === 'deleted' ? 'deleted' : 'failed');
         const { queue } = this.deps;
         if (resolution === 'deleted') {
-          queue.returnMessageToComposer(composerDraftToRestore, { merge: true });
-          queue.returnMessageToComposer(pendingMessagesToRestore, { merge: true });
+          // The composer keeps its draft; the deleted session's tabs reset after this turn settles
+          // and carry the composer, so queued and unsent input must reach it first. Settling first
+          // sends steers that become definitely unsent later to the composer, not a dead queue.
+          this.deps.turns.settle();
+          queue.restoreToComposer();
           queue.returnMessageToComposer(retryMessage, { merge: true });
         } else if (!result.accepted) {
           queue.returnMessageToComposer(retryMessage, { merge: true });
-          this.#rollbackFailedTurn(messagesBeforeTurn, hadPendingConversationSave);
+          rollbackFailedTurn(assistantMsg);
         }
         if (result.accepted) {
           this.#finishAcceptedMissingSession(streamGeneration);
@@ -309,11 +369,13 @@ export class MainTurnExecution {
       }
     } catch (error) {
       if (error instanceof ChatExecutionPreHandoffError) {
-        if (!turn.assertBeforeHandoff && this.#retainUnsentTurnOnClose(signal, assistantMsg.id)) return;
-        restoreUnsentInput(admittedTurnRequest);
-        this.#rollbackFailedTurn(messagesBeforeTurn, hadPendingConversationSave);
+        if (!turn.assertBeforeHandoff && (turn.origin === 'user' && this.#retainUnsentTurnOnClose(signal, assistantMsg.id))) return;
+        const deferred = error.cause instanceof SessionMessageDeferredError;
+        restoreUnsentInput(admittedTurnRequest, true, deferred ? 'deferred' : 'failed');
+        rollbackFailedTurn(assistantMsg);
         didRollbackUnsentTurn = true;
-        if (!signal.aborted) new Notice('Message was not sent. Please try again.');
+        if (deferred) scheduledContinuation = this.deps.queue.scheduleContinuation();
+        if (!signal.aborted && !deferred) new Notice(error.userMessage ?? 'Message was not sent. Please try again.');
         this.reportDeferredReview();
       } else {
         hadExecutionError = true;
@@ -333,7 +395,7 @@ export class MainTurnExecution {
       else state.clearFlavorTimerInterval();
 
       try {
-        // Skip remaining cleanup if stream was invalidated (tab closed or conversation switched)
+        // Only the response generation that still owns the stream may finalize it.
         if (
           !wasInvalidated
           && !didRollbackUnsentTurn
@@ -347,7 +409,7 @@ export class MainTurnExecution {
           const saveExtras = didEnqueueToSdk ? { resumeAtMessageId: undefined } : undefined;
           await conversationController.save(true, saveExtras);
           const userMsgIndex = state.messages.indexOf(userMsg);
-          renderer.refreshActionButtons(userMsg, state.messages, userMsgIndex >= 0 ? userMsgIndex : undefined);
+          this.deps.renderer?.refreshActionButtons(userMsg, state.messages, userMsgIndex >= 0 ? userMsgIndex : undefined);
           scheduledContinuation = this.deps.queue.scheduleContinuation();
         }
 
@@ -371,7 +433,7 @@ export class MainTurnExecution {
           this.reportDeferredReview();
         }
 
-        this.deps.steering.delegateCorrelationToHistory(turnConversationId);
+        this.deps.steering.finishTurn(turnConversationId);
         this.responseStream.clear();
         this.#resetProviderMessageBoundaryState();
       }
@@ -384,29 +446,36 @@ export class MainTurnExecution {
     user?: ChatMessage,
     assistant?: ChatMessage,
   ): ChatTurnSubmission {
+    const { plugin, state } = this.deps;
     const settings = this.deps.getSettings();
     const images = [...(request.images ?? [])];
+    const selections = captureSelectionSnapshots(request);
+    // Membership and project edits apply from the next submission; a steer joins with the same prompt.
+    const conversationId = state.currentConversationId;
+    const sessionInstructions = resolveSessionInstructions(
+      plugin.projects,
+      conversationId ? plugin.getConversationSummary(conversationId) : null,
+    );
 
     return {
       canonicalText: request.text,
       configuration: {
-        ...buildChatExecutionConfiguration(settings, this.deps.plugin.getSessionSnapshotDirectory()),
+        ...buildChatExecutionConfiguration(
+          settings,
+          resolveChatSystemInstructions(
+            plugin.settings,
+            // The prompt names the directory the session runs in, not a later host value.
+            this.deps.getExecutionCoordinator()?.workingDirectory ?? getChatWorkingDirectory(plugin),
+            sessionInstructions,
+          ),
+        ),
         promptSuggestions: true,
       },
       context: {
-        ...(request.selections !== undefined ? { selections: captureSelectionSnapshots(request) } : {}),
+        ...(selections.length ? { selections } : {}),
         ...(request.sessionReferences?.length ? { sessionReferences: request.sessionReferences } : {}),
-        ...(request.browserSelection
-          ? { browserSelection: request.browserSelection }
-          : {}),
-        ...(request.canvasSelection
-          ? { canvasSelection: request.canvasSelection }
-          : {}),
         ...(request.linkedContentPath
           ? { linkedContent: { path: request.linkedContentPath } }
-          : {}),
-        ...(request.editorSelection
-          ? { editorSelection: request.editorSelection }
           : {}),
       },
       conversationHistory: user && assistant
@@ -480,14 +549,20 @@ export class MainTurnExecution {
     this.awaitingProviderAssistantStart = false;
   }
 
-  async #handleProviderUserMessageStart(content: string, nativeUserMessageId: string | undefined): Promise<void> {
+  async #handleProviderUserMessageStart(
+    content: string,
+    nativeUserMessageId: string | undefined,
+    inputId: string | undefined,
+    scope: ProviderTurnEventScope,
+  ): Promise<void> {
     // The turn's own input echo is already projected.
     if (!this.sawInitialProviderUserMessage) {
       this.sawInitialProviderUserMessage = true;
       return;
     }
 
-    const echo = await this.deps.steering.claimProviderEcho(nativeUserMessageId);
+    const echo = this.deps.steering.claimProviderEcho(nativeUserMessageId, inputId);
+    const acceptanceError = await echo.acceptance;
     const expected = echo.expected;
 
     const previousAssistant = this.responseStream.active;
@@ -505,9 +580,12 @@ export class MainTurnExecution {
     const persistedContent = expected?.persistedContent ?? displayContent;
     const images = expected?.images;
     if (displayContent || expected?.persistedContent || (images?.length ?? 0) > 0) {
+      // A steered session message keeps its sender, as history replay decodes it.
+      const sender = decodeSessionMessage(persistedContent);
       const userMessage: ChatMessage = {
         id: this.deps.generateId(),
         role: 'user',
+        ...(sender ? { sessionMessage: { from: sender.from, sessionId: sender.sessionId } } : {}),
         content: persistedContent,
         displayContent,
         timestamp: Date.now(),
@@ -516,18 +594,18 @@ export class MainTurnExecution {
         ...(nativeUserMessageId ? { userMessageId: nativeUserMessageId } : {}),
       };
       this.deps.state.addMessage(userMessage);
-      this.deps.renderer.addMessage(userMessage);
+      this.deps.renderer?.addMessage(userMessage);
     }
     echo.settle();
 
-    this.responseStream.start();
+    this.responseStream.start(scope);
     this.deps.streamController.thinkingIndicator.show();
     this.deps.state.responseStartTime = performance.now();
     this.awaitingProviderAssistantStart = true;
-    if (echo.acceptanceError) throw toError(echo.acceptanceError, 'Provider user message failed');
+    if (acceptanceError) throw toError(acceptanceError, 'Provider user message failed');
   }
 
-  async #handleProviderAssistantMessageStart(): Promise<void> {
+  async #handleProviderAssistantMessageStart(scope: ProviderTurnEventScope): Promise<void> {
     if (this.awaitingProviderAssistantStart) {
       this.awaitingProviderAssistantStart = false;
       return;
@@ -538,7 +616,7 @@ export class MainTurnExecution {
       await this.responseStream.flush(previousAssistant);
     }
 
-    this.responseStream.start();
+    this.responseStream.start(scope);
     this.deps.streamController.thinkingIndicator.show();
   }
 
@@ -554,12 +632,6 @@ export class MainTurnExecution {
   // Rollback
   // ============================================
 
-  #captureComposerDraft(): QueuedMessage | null {
-    const { content, images } = this.deps.drafts.capture('main');
-    if (!content.trim() && !images.length) return null;
-    return createQueuedMessage(content, { text: content, images });
-  }
-
   #retainUnsentTurnOnClose(signal: AbortSignal, assistantMessageId?: string): boolean {
     if (!this.deps.isClosing() && signal.reason !== 'shutdown') return false;
     // Teardown retains submitted input in the in-memory conversation projection.
@@ -574,29 +646,8 @@ export class MainTurnExecution {
   #discardStreamingAssistantMessage(messageId: string): void {
     const { state, renderer } = this.deps;
     state.messages = state.messages.filter((message) => message.id !== messageId);
-    renderer.removeMessage(messageId);
+    renderer?.removeMessage(messageId);
     state.resetStreamingPresentation();
-  }
-
-  #rollbackFailedTurn(
-    messagesBeforeTurn: ChatMessage[],
-    hadPendingConversationSave: boolean,
-  ): void {
-    const { state, renderer } = this.deps;
-    const retainedMessageIds = new Set(messagesBeforeTurn.map(message => message.id));
-    for (const message of state.messages) {
-      if (!retainedMessageIds.has(message.id)) {
-        renderer.removeMessage(message.id);
-      }
-    }
-
-    state.messages = messagesBeforeTurn;
-    state.hasPendingConversationSave = hadPendingConversationSave;
-    this.#resetTurnStreamingState();
-
-    if (messagesBeforeTurn.length === 0) {
-      this.deps.getWelcomeEl()?.removeClass('claudian-hidden');
-    }
   }
 
   #finishAcceptedMissingSession(streamGeneration: number): void {
@@ -617,11 +668,14 @@ export class MainTurnExecution {
     if (!(plugin.settings.enableAutoScroll ?? true)) return;
     if (!state.autoScrollEnabled) return;
 
-    window.requestAnimationFrame(() => {
+    const messagesEl = this.deps.getMessagesEl();
+    const view = messagesEl?.ownerDocument.defaultView;
+    if (!messagesEl || !view) return;
+    view.requestAnimationFrame(() => {
+      if (this.deps.getMessagesEl() !== messagesEl) return;
       if (!(this.deps.plugin.settings.enableAutoScroll ?? true)) return;
       if (!this.deps.state.autoScrollEnabled) return;
 
-      const messagesEl = this.deps.getMessagesEl();
       messagesEl.scrollTop = messagesEl.scrollHeight;
     });
   }

@@ -3,10 +3,10 @@ const mockGetHostnameKey = jest.fn(() => 'host-a');
 import '@/providers';
 
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
+import { normalizePiVisibleModels } from '@/providers/pi/config';
 import { piSettingsReconciler } from '@/providers/pi/env/PiSettingsReconciler';
 import {
   getPiProviderSettings,
-  normalizePiVisibleModels,
   updatePiProviderSettings
 } from '@/providers/pi/settings';
 
@@ -79,7 +79,7 @@ describe('Pi settings normalization', () => {
       'pi:anthropic/claude-sonnet-4',
       'pi:missing/model',
       'openai/gpt-5',
-    ], discoveredModels)).toEqual(['pi:anthropic/claude-sonnet-4', 'pi:missing/model']);
+    ])).toEqual(['pi:anthropic/claude-sonnet-4', 'pi:missing/model']);
   });
 
   it('normalizes aliases and defaults unsupported preferred thinking to High', () => {

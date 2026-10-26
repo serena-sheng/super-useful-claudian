@@ -1,11 +1,20 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+import { runtimeHostFor } from '@test/helpers/providerRuntimeHost';
 
 import { type ProviderExecutionEvent, ProviderExecutionLifecycleRegistry, type ProviderExecutionRequest, type ProviderSessionConfig } from '@/core/execution';
+import { findNodeExecutable, getEnhancedPath } from '@/core/process/env';
+import type { ManagedStdioProcessOptions } from '@/core/process/ManagedStdioProcess';
+import type * as ProcessProbe from '@/core/process/ProcessProbe';
 import { normalizeProviderCommandDiscoveryItems } from '@/core/providers/commands/ProviderCommandDiscoveryResult';
 import { ProviderCommandDiscoveryStore } from '@/core/providers/commands/ProviderCommandDiscoveryStore';
+import { createProviderHistoryPathContext } from '@/core/providers/historyPathContext';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
+import { LoopbackSessionToolServer } from '@/core/session-tools/LoopbackSessionToolServer';
 import { SideChatSession } from '@/features/chat/side-chat/SideChatSession';
 import { createOpencodeWorkspaceServices } from '@/providers/opencode/app/OpencodeWorkspaceServices';
 import { opencodeSettingsReconciler } from '@/providers/opencode/env/OpencodeSettingsReconciler';
@@ -15,6 +24,16 @@ import { opencodeProviderRegistration } from '@/providers/opencode/registration'
 import { buildOpencodeRuntimeEnv } from '@/providers/opencode/runtime/OpencodeRuntimeEnvironment';
 import { getOpencodeProviderSettings } from '@/providers/opencode/settings';
 import { SlashCommandSource } from '@/shared/composer-dropdown/SlashCommandSource';
+
+// Spawning the fake server is slow on Windows CI runners.
+jest.setTimeout(45_000);
+
+// A cold Windows runner can exceed the product's 5-second version probe deadline even after the
+// warmup below. This suite is not about that deadline, so give probes a budget under the test timeout.
+jest.mock('@/core/process/ProcessProbe', () => {
+  const actual: typeof ProcessProbe = jest.requireActual('@/core/process/ProcessProbe');
+  return { ...actual, runProcessProbe: (options: ManagedStdioProcessOptions) => actual.runProcessProbe(options, 30_000) };
+});
 
 const fixture = `#!/usr/bin/env node
 const fs = require('node:fs'), http = require('node:http');
@@ -33,7 +52,7 @@ const store = process.env.OPENCODE_DB + '.sessions.json';
 const saved = process.env.OPENCODE_DB !== ':memory:' && fs.existsSync(store) ? JSON.parse(fs.readFileSync(store, 'utf8')) : {sessions:[],deleted:[],sequence:0};
 const sessions = new Map(saved.sessions), deleted = saved.deleted; sequence = saved.sequence; let held = null;
 const save = () => { if (process.env.OPENCODE_DB !== ':memory:') fs.writeFileSync(store, JSON.stringify({sessions:[...sessions],deleted,sequence})); };
-const config = () => { const a=JSON.parse(fs.readFileSync(process.env.OPENCODE_CONFIG, 'utf8')), b=JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || '{}'); return {...a,...b,agent:{...a.agent,...b.agent},agents:{...a.agents,...b.agents}}; };
+const config = () => { const a=JSON.parse(fs.readFileSync(process.env.OPENCODE_CONFIG, 'utf8')), b=JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || '{}'); return {...a,...b,plugins:[...(a.plugins||[]),...(b.plugins||[])],agent:{...a.agent,...b.agent},agents:{...a.agents,...b.agents}}; };
 const agents = () => { const c = config(); return Object.entries(c.agent || {}).map(([id, a]) => ({id, system:a.prompt})).concat(Object.entries(c.agents || {}).map(([id,a]) => ({id,...a}))).filter(a => !a.disabled && !c.agents?.[a.id]?.disabled); };
 const server = http.createServer(async (req, res) => {
  let raw = ''; for await (const c of req) raw += c;
@@ -42,7 +61,17 @@ const server = http.createServer(async (req, res) => {
  res.setHeader('Content-Type', 'application/json');
  const reply = data => res.end(JSON.stringify({data}));
  if (route === '/api/event') { feeds.add(res); res.on('close',()=>feeds.delete(res)); res.setHeader('Content-Type','text/event-stream'); res.write('data: ' + JSON.stringify({type:'server.connected',data:{}}) + '\\n\\n'); return; }
- if (route === '/fixture/config') return reply({ config:config(), path:process.env.OPENCODE_CONFIG });
+ if (route === '/fixture/config') return reply({ config:config(), path:process.env.OPENCODE_CONFIG, url:process.env.CLAUDIAN_SESSION_TOOLS_URL, routeId:process.env.CLAUDIAN_SESSION_TOOLS_ROUTE_ID });
+ if (route === '/fixture/session-tool') {
+   const entry = config().plugins?.find(p => p.package?.includes('/session-tools'));
+   if (!entry) return reply({isError:true,text:'missing plugin'});
+   const plugin = await import(entry.package + '/index.js');
+   const tools = [], controller = new AbortController();
+   if (body.aborted) controller.abort();
+   await plugin.default.setup({tool:{transform:async f=>f({add:d=>tools.push(d)})}});
+   try { return reply({specs:tools.map(t=>({name:t.name,options:t.options})), result:await tools.find(t=>t.name===body.tool).execute(body.args,{sessionID:body.sessionID,signal:controller.signal})}); }
+   catch(error) { return reply({isError:true,text:error.message}); }
+ }
  if (route === '/fixture/event') { emit(body.type, body.data); res.writeHead(204).end(); return; }
  if (route === '/fixture/disconnect') { for(const f of feeds) f.end(); res.writeHead(204).end(); return; }
  if (route === '/api/session/global/form/form_owned' && req.method==='DELETE') { emit('form.cancelled',{sessionID:'global',id:'form_owned'}); res.writeHead(204).end(); return; }
@@ -55,6 +84,7 @@ const server = http.createServer(async (req, res) => {
  if (route === '/api/command') { commandReads++; return setTimeout(() => reply(fs.existsSync(process.env.PROCESS_LOG + '.commands') ? JSON.parse(fs.readFileSync(process.env.PROCESS_LOG + '.commands','utf8')) : [{ name: 'init' }]), 30); }
  if (route === '/api/agent') return reply(agents());
  if (route === '/fixture/sessions') return reply({ ids:[...sessions.keys()], held:held?.length ?? 0, deleted });
+ if (route === '/fixture/system') return reply({ sessions:Object.fromEntries([...sessions].map(([id,s]) => [id, agents().find(a => a.id === s.agent)?.system ?? null])), agents:agents().map(a => a.id) });
  if (route === '/fixture/hold-sessions') { held = []; res.writeHead(204).end(); return; }
  if (route === '/fixture/release-sessions') { const pending = held ?? []; held = null; for (const send of pending) send(); res.writeHead(204).end(); return; }
  if (route === '/api/session') { const id = 'ses_' + (++sequence); const session = {id, agent:body.agent}; sessions.set(id,session); save(); if (held) { held.push(() => reply(session)); return; } return reply(session); }
@@ -81,6 +111,18 @@ server.listen(0,'127.0.0.1',()=>console.log(JSON.stringify({url:'http://127.0.0.
 process.stdin.resume(); process.stdin.on('end',()=>{ for(const f of feeds) f.end(); server.close(); });
 `;
 
+// On a cold Windows runner the first Node launch alone can take seconds, so pay that cost once here,
+// without a deadline, before any test probes or starts the CLI.
+beforeAll(() => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'claudian-shared-v2-warmup-')));
+  try {
+    const cli = path.join(root, 'opencode.cjs');
+    writeFileSync(cli, fixture, { mode: 0o700 });
+    const node = findNodeExecutable(getEnhancedPath(process.env.PATH, cli));
+    if (node) execFileSync(node, [cli, '--version'], { env: { ...process.env, PROCESS_LOG: path.join(root, 'processes') }, stdio: 'ignore' });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 const turn = (text: string): ProviderExecutionRequest => ({
   input: [{ type: 'text', text }],
   configuration: { model: 'opencode:local/chat', permissionMode: 'normal', systemInstructions: { kind: 'explicit', instructions: `Instructions for ${text}` } },
@@ -92,8 +134,11 @@ async function createFixture(version = '2.0.14') {
   const cli = path.join(root, 'opencode.cjs'), log = path.join(root, 'processes');
   writeFileSync(cli, fixture.replace("console.log('2.0.14')", `console.log('${version}')`), { mode: 0o700 });
   writeFileSync(path.join(root, 'native.db'), '');
+  const endpoint = new LoopbackSessionToolServer();
+  const register = jest.spyOn(endpoint, 'registerCallRoute');
   const plugin: any = {
-    app: { vault: { adapter: { basePath: root } } },
+    sessionToolEndpoint: endpoint,
+    workingDirectory: root,
     settings: { providerConfigs: { opencode: { enabled: true, cliPath: cli, visibleModels: ['local/chat'], environmentVariables: `OPENCODE_DB=${path.join(root, 'native.db')}\nPROCESS_LOG=${log}\nOPENCODE_CONFIG_CONTENT={}` } } },
     executionLifecycleRegistry: new ProviderExecutionLifecycleRegistry(),
     getResolvedProviderCliPath: async () => cli,
@@ -101,16 +146,18 @@ async function createFixture(version = '2.0.14') {
     mutateSettingsConditionally: async (fn: (settings: any) => boolean) => fn(plugin.settings),
     notifyProviderChatOptionsChanged() {},
   };
+  const runtimeHost = runtimeHostFor(plugin, 'opencode');
+  plugin.getRuntimeHost = () => runtimeHost;
   const workspace = await createOpencodeWorkspaceServices(plugin);
-  const backend = new OpencodeExecutionBackend(plugin, workspace);
+  const backend = new OpencodeExecutionBackend(runtimeHost, workspace);
   const createSession = (config: Partial<ProviderSessionConfig> = {}) => backend.createSession({
-    vaultWorkingDirectory: root, lifecycle: 'persistent', nativePersistence: 'provider-default', ...config,
+    workingDirectory: root, lifecycle: 'persistent', nativePersistence: 'provider-default', ...config,
     interactionPort: { requestApproval: async r => ({ interactionId: r.interactionId, decision: 'deny' }), askUserQuestion: async r => ({ interactionId: r.interactionId, answers: null }), dismissInteraction() {} },
   });
-  return { root, cli, log, plugin, workspace, backend, createSession,
-    environment: buildOpencodeRuntimeEnv(plugin.settings, cli),
+  return { root, cli, log, plugin, workspace, backend, createSession, register,
+    environment: buildOpencodeRuntimeEnv(runtimeHost.environmentText, cli),
     processes: () => readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { pid: number; db: string; generation?: string }),
-    async dispose() { await workspace.dispose?.(); rmSync(root, { recursive: true, force: true }); },
+    async dispose() { await workspace.dispose?.(); await endpoint.close(); rmSync(root, { recursive: true, force: true }); },
   };
 }
 
@@ -148,7 +195,7 @@ it('retains the current server after launch changes while disabled and re-enabli
 
 it('keeps old native work through a launch transition, drains it, and resumes on the replacement', async () => {
   const f = await createFixture();
-  const config: ProviderSessionConfig = { vaultWorkingDirectory: f.root, lifecycle: 'persistent', nativePersistence: 'provider-default',
+  const config: ProviderSessionConfig = { workingDirectory: f.root, lifecycle: 'persistent', nativePersistence: 'provider-default',
     interactionPort: { requestApproval: async r => ({ interactionId: r.interactionId, decision: 'deny' }), askUserQuestion: async r => ({ interactionId: r.interactionId, answers: null }), dismissInteraction() {} } };
   await f.workspace.metadataService.loadCatalog();
   const owned = f.plugin.executionLifecycleRegistry.acquire(f.backend, config, 'chat');
@@ -188,7 +235,7 @@ it('keeps old native work through a launch transition, drains it, and resumes on
 
 it('fences a new turn on a retained idle session until the settings transition commits', async () => {
   const f = await createFixture();
-  const config: ProviderSessionConfig = { vaultWorkingDirectory: f.root, lifecycle: 'persistent', nativePersistence: 'provider-default',
+  const config: ProviderSessionConfig = { workingDirectory: f.root, lifecycle: 'persistent', nativePersistence: 'provider-default',
     interactionPort: { requestApproval: async r => ({ interactionId: r.interactionId, decision: 'deny' }), askUserQuestion: async r => ({ interactionId: r.interactionId, answers: null }), dismissInteraction() {} } };
   const owned = f.plugin.executionLifecycleRegistry.acquire(f.backend, config, 'chat');
   let release!: () => void;
@@ -244,7 +291,7 @@ require('node:readline').createInterface({input: process.stdin}).on('line', line
       f.plugin.settings.providerConfigs.opencode.cliPath = cliV1;
     });
     owned = f.plugin.executionLifecycleRegistry.acquire(f.backend, {
-      vaultWorkingDirectory: f.root, lifecycle: 'persistent', nativePersistence: 'provider-default',
+      workingDirectory: f.root, lifecycle: 'persistent', nativePersistence: 'provider-default',
       interactionPort: { requestApproval: async r => ({ interactionId: r.interactionId, decision: 'deny' }), askUserQuestion: async r => ({ interactionId: r.interactionId, answers: null }), dismissInteraction() {} },
     } satisfies ProviderSessionConfig, 'chat');
     const events: ProviderExecutionEvent[] = [];
@@ -263,9 +310,8 @@ require('node:readline').createInterface({input: process.stdin}).on('line', line
 it('retains a v2 conversation database binding when runtime settings move to another database', () => {
   const conversation: any = { providerId: 'opencode', sessionId: 'original', providerState: { sessionId: 'original', nativeVersion: 2, databasePath: '/original.db' } };
   const settings = { providerConfigs: { opencode: { enabled: true, environmentHash: 'old', environmentVariables: 'OPENCODE_DB=/replacement.db' } } };
-  const result = opencodeSettingsReconciler.reconcileModelWithEnvironment(settings, [conversation]);
-  expect(result.changed).toBe(true);
-  expect(result.invalidatedConversations).toEqual([]);
+  expect(opencodeSettingsReconciler.reconcileModelWithEnvironment(settings)).toEqual({ changed: true });
+  expect(opencodeSettingsReconciler.invalidateConversationSessions([conversation])).toEqual([]);
   expect(conversation).toMatchObject({ sessionId: 'original', providerState: { nativeVersion: 2, databasePath: '/original.db' } });
 });
 
@@ -325,6 +371,45 @@ it('shares discovery and independent chat sessions, retaining the server after o
 }, 20000);
 
 
+it('gives each conversation its own resolved system prompt and applies a change at its next turn', async () => {
+  const f = await createFixture();
+  const explicit = f.createSession(), defaults = f.createSession();
+  const mainAgent = (text: string, instructions: string): ProviderExecutionRequest => ({ ...turn(text), configuration: { ...turn(text).configuration, systemInstructions: { kind: 'main-agent', instructions } } });
+  const control = await f.workspace.serverService.acquire(f.cli, f.root, f.environment);
+  const native = async () => (await control.request<{ data: { sessions: Record<string, string | null>; agents: string[] } }>('/fixture/system')).data;
+  const complete = async (session: typeof explicit, request: ProviderExecutionRequest) => {
+    const events: ProviderExecutionEvent[] = [];
+    for await (const event of session.execute(request).events) events.push(event);
+    expect(events.at(-1)).toMatchObject({ type: 'turn_completed' });
+  };
+  try {
+    expect(await f.workspace.metadataService.loadCatalog()).toBe(true);
+    await complete(explicit, turn('alpha'));
+    await complete(defaults, mainAgent('beta', 'First project paragraph'));
+    expect((await native()).sessions.ses_1).toBe('Instructions for alpha');
+    expect((await native()).sessions.ses_2).toContain('First project paragraph');
+    await complete(defaults, mainAgent('beta edited', 'Second project paragraph'));
+    expect((await native()).sessions.ses_2).toContain('Second project paragraph');
+
+    // A running turn keeps the prompt it started with.
+    const run = defaults.execute(mainAgent('hold', 'Second project paragraph'));
+    let started!: () => void;
+    const active = new Promise<void>(resolve => { started = resolve; });
+    const consume = (async () => { for await (const event of run.events) if (event.type === 'text_delta') started(); })();
+    await active;
+    expect((await native()).sessions.ses_2).toContain('Second project paragraph');
+    run.cancel(); await consume;
+
+    await complete(defaults, mainAgent('beta again', 'Third project paragraph'));
+    const after = await native();
+    expect(after.sessions.ses_2).toContain('Third project paragraph');
+    expect(after.sessions.ses_2).not.toContain('Second project paragraph');
+    expect(after.sessions.ses_1).toBe('Instructions for alpha');
+    // The replaced conversation agent is unregistered; only the two live conversations keep one each.
+    expect(after.agents.filter(id => id.startsWith('build-'))).toHaveLength(2);
+  } finally { await control.dispose(); await explicit.dispose(); await defaults.dispose(); await f.dispose(); }
+}, 20000);
+
 it('runs auxiliary sessions with saved credentials without persisting them or replacing the catalog', async () => {
   const f = await createFixture();
   const session = f.createSession({ lifecycle: 'ephemeral', nativePersistence: 'disabled-if-supported' });
@@ -377,7 +462,7 @@ it('shares native history and fork operations with catalog and chat transport', 
     ProviderWorkspaceRegistry.setServices('opencode', f.workspace);
     const history = opencodeProviderRegistration.historyService!;
     const conversation: any = { sessionId: native.data.id, messages: [], providerState: { nativeVersion: 2, databasePath: f.environment.OPENCODE_DB } };
-    expect(await history.recoverConversationModelSelection!(conversation, f.root, { settings: f.plugin.settings, environment: { ...f.environment, PATH: process.env.PATH }, vaultPath: f.root })).toBe('opencode:local/chat');
+    expect(await history.recoverConversationModelSelection!(conversation, f.root, { ...createProviderHistoryPathContext(f.plugin.settings, 'opencode', f.root), environment: { ...f.environment, PATH: process.env.PATH }, vaultPath: f.root })).toBe('opencode:local/chat');
     const child = await forkOpencodeSession({ cliPath: f.cli, cwd: f.root, environment: f.environment, nativeVersion: 2, sourceSessionId: native.data.id, resolveServerService: async () => service });
     expect(child).not.toBe(native.data.id);
     expect(await lease.request(`/api/session/${child}`)).toMatchObject({ data: { id: child } });
@@ -400,10 +485,11 @@ it.each([false, true])('keeps history, model recovery and forks on the bound dat
     writeFileSync(nextDatabase, '');
     await f.plugin.executionLifecycleRegistry.runTransition(['opencode'], async () => {
       f.plugin.settings.providerConfigs.opencode.environmentVariables += `\nOPENCODE_DB=${nextDatabase}`;
-      opencodeSettingsReconciler.reconcileModelWithEnvironment(f.plugin.settings, [conversation]);
+      opencodeSettingsReconciler.reconcileModelWithEnvironment(f.plugin.settings);
+      opencodeSettingsReconciler.invalidateConversationSessions([conversation]);
     });
     if (missing) rmSync(f.environment.OPENCODE_DB!);
-    const context = { settings: f.plugin.settings, environment: buildOpencodeRuntimeEnv(f.plugin.settings, f.cli), vaultPath: f.root };
+    const context = { ...createProviderHistoryPathContext(f.plugin.settings, 'opencode', f.root), environment: buildOpencodeRuntimeEnv(f.plugin.getRuntimeHost('opencode').environmentText, f.cli), vaultPath: f.root };
     expect(await history.recoverConversationModelSelection!(conversation, f.root, context)).toBe('opencode:local/chat');
     const hydrated = await history.hydrateConversationHistory(conversation, f.root, context);
     expect(hydrated.providerState?.databasePath).toBe(f.environment.OPENCODE_DB);
@@ -446,12 +532,19 @@ it('dispatches global forms once and fans out stream failure before replacing th
     const b = await f.workspace.serverService.acquire(f.cli, f.root, f.environment);
     let failed!: () => void;
     const disconnected = new Promise<void>(resolve => { failed = resolve; });
-    await a.subscribe(event => eventsA.push(event.type), () => { failures.push('a'); }, () => true);
+    let reachedBarrier!: () => void;
+    const eventsDrained = new Promise<void>(resolve => { reachedBarrier = resolve; });
+    await a.subscribe(event => {
+      eventsA.push(event.type);
+      if (event.type === 'fixture.barrier') reachedBarrier();
+    }, () => { failures.push('a'); }, () => true);
     await b.subscribe(event => eventsB.push(event.type), () => { failures.push('b'); failed(); }, () => true);
     const form = { type: 'form.created', data: { form: { id: 'form_owned', sessionID: 'global', metadata: { kind: 'mcp-elicitation' } } } };
     await a.request('/fixture/event', { method: 'POST', body: form });
     await a.request('/fixture/event', { method: 'POST', body: form });
-    await new Promise(resolve => setTimeout(resolve, 20));
+    // A marker after both creates proves delivery completed while the form remains active.
+    await a.request('/fixture/event', { method: 'POST', body: { type: 'fixture.barrier', data: {} } });
+    await eventsDrained;
     expect(eventsA.filter(type => type === 'form.created')).toHaveLength(1);
     expect(eventsB.filter(type => type === 'form.created')).toHaveLength(0);
     await a.request('/fixture/disconnect', { method: 'POST' }).catch(() => undefined);
@@ -541,7 +634,7 @@ it('preserves explicit user config references and watches edits without overwrit
     const lease = await f.workspace.serverService.acquire(f.cli, f.root, { ...f.environment, OPENCODE_CONFIG: source });
     const effective = await lease.request<{ data: { config: any; path: string } }>('/fixture/config');
     expect(effective.data.path.startsWith(f.root + path.sep)).toBe(false);
-    expect(effective.data.config.plugins[0]).toEqual({ package: new URL(`file://${path.join(f.root, 'plugin.ts')}`).href, options: { unchanged: true } });
+    expect(effective.data.config.plugins[0]).toEqual({ package: pathToFileURL(path.join(f.root, 'plugin.ts')).href, options: { unchanged: true } });
     expect(effective.data.config.agent.user.prompt).toBe('User prompt with {env:LITERAL_TEXT}');
     expect(readFileSync(source, 'utf8')).toBe(content);
     const updated = JSON.stringify({ agent: { user: { prompt: 'Updated user instructions' } } });
@@ -604,10 +697,10 @@ async function createSideFixture() {
   const side = new SideChatSession({
     providerId: 'opencode', ephemeral: capabilities.supportsEphemeralFork ?? capabilities.supportsEphemeralSessions,
     lifecycleRegistry: f.plugin.executionLifecycleRegistry, resolveBackend: () => f.backend,
-    vaultWorkingDirectory: f.root,
+    workingDirectory: f.root,
     interactionPort: { requestApproval: async r => ({ interactionId: r.interactionId, decision: 'deny' }), askUserQuestion: async r => ({ interactionId: r.interactionId, answers: null }), dismissInteraction() {} },
     buildChildResumeState: () => Promise.resolve(history.buildForkProviderState(source.data.id, 'msg_source', sourceState, f.root,
-      { settings: f.plugin.settings, environment: f.environment, vaultPath: f.root }, { lifecycle: 'ephemeral' })),
+      { ...createProviderHistoryPathContext(f.plugin.settings, 'opencode', f.root), environment: f.environment, vaultPath: f.root }, { lifecycle: 'ephemeral' })),
   });
   return { ...f, control, side, sourceId: source.data.id,
     send: (text: string) => side.execute({ text, images: [], configuration: turn(text).configuration }),
@@ -677,17 +770,21 @@ it('initializes the provider-owned service for early history and reuses it for l
   f.plugin.runProviderExecutionTransition = (ids: string[], mutation: any) => f.plugin.executionLifecycleRegistry.runTransition(ids, mutation);
   writeFileSync(f.environment.OPENCODE_DB! + '.sessions.json', JSON.stringify({ sessions: [['source', { id: 'source', model: { providerID: 'local', id: 'chat' } }]], deleted: [], sequence: 1 }));
   const context = {
-    settings: f.plugin.settings, environment: { ...f.environment, PATH: process.env.PATH }, vaultPath: f.root,
+    ...createProviderHistoryPathContext(f.plugin.settings, 'opencode', f.root),
+    environment: { ...f.environment, PATH: process.env.PATH },
     ensureWorkspace: () => ProviderWorkspaceRegistry.ensureInitialized(f.plugin, 'opencode', 'history'),
   };
-  const conversation: any = { sessionId: 'source', messages: [], providerState: { nativeVersion: 2, databasePath: f.environment.OPENCODE_DB } };
+  const previousSessions = [{ sessionId: 'ses_invalidated', databasePath: f.environment.OPENCODE_DB, nativeVersion: 1 }];
+  const conversation: any = { sessionId: 'source', messages: [], providerState: { nativeVersion: 2, databasePath: f.environment.OPENCODE_DB, previousSessions } };
   try {
     const history = opencodeProviderRegistration.historyService;
     expect(await history.recoverConversationModelSelection!(conversation, f.root, context)).toBe('opencode:local/chat');
     const workspace = ProviderWorkspaceRegistry.getIfInitialized('opencode');
     expect(workspace).not.toBeNull();
     await workspace?.startRuntime?.();
-    expect(await history.buildForkProviderState!('source', 'msg_source', conversation.providerState, f.root, context)).toMatchObject({ sessionId: 'ses_2', databasePath: f.environment.OPENCODE_DB });
+    // A fork keeps the source's earlier native sessions as history only.
+    expect(await history.buildForkProviderState!('source', 'msg_source', conversation.providerState, f.root, context))
+      .toMatchObject({ sessionId: 'ses_2', databasePath: f.environment.OPENCODE_DB, previousSessions });
     expect(f.processes()).toHaveLength(1);
   } finally { await ProviderWorkspaceRegistry.disposeInitialized(); ProviderWorkspaceRegistry.clear(); await f.dispose(); }
 });
@@ -871,7 +968,7 @@ it('disables without deadlocking cleanup for an ephemeral session whose original
   const f = await createFixture();
   await f.workspace.startRuntime?.();
   await f.workspace.metadataService.loadCatalog();
-  const config: ProviderSessionConfig = { vaultWorkingDirectory: f.root, lifecycle: 'ephemeral', nativePersistence: 'disabled-if-supported',
+  const config: ProviderSessionConfig = { workingDirectory: f.root, lifecycle: 'ephemeral', nativePersistence: 'disabled-if-supported',
     interactionPort: { requestApproval: async r => ({ interactionId: r.interactionId, decision: 'deny' }), askUserQuestion: async r => ({ interactionId: r.interactionId, answers: null }), dismissInteraction() {} } };
   const owned = f.plugin.executionLifecycleRegistry.acquire(f.backend, config, 'chat');
   let disabling: Promise<void> | undefined;
@@ -1010,10 +1107,62 @@ it.each([
       await f.workspace.startRuntime?.();
     }
     const before = probes();
-    const context = { settings: f.plugin.settings, environment: f.environment, vaultPath: f.root };
+    const context = { ...createProviderHistoryPathContext(f.plugin.settings, 'opencode', f.root), environment: f.environment, vaultPath: f.root };
     const state = { ...(nativeVersion ? { nativeVersion } : {}), databasePath: f.environment.OPENCODE_DB };
     expect(await opencodeProviderRegistration.historyService.buildForkProviderState!('source', 'msg_source', state, f.root, context))
       .toMatchObject({ sessionId: 'ses_2', nativeVersion: 2, databasePath: f.environment.OPENCODE_DB });
     expect({ probes: probes() - before, processes: f.processes().length }).toEqual({ probes: 1, processes: 1 });
   } finally { ProviderWorkspaceRegistry.clear(); await f.dispose(); }
+});
+
+
+it('loads a module plugin folder once per shared server and forwards the native caller to its port', async () => {
+  const f = await createFixture();
+  await f.workspace.metadataService.loadCatalog();
+  const list = jest.fn().mockResolvedValue({ sessions: [{ sessionId: 'target' }] });
+  const send = jest.fn().mockResolvedValue({ sessionId: 'target', title: 'Review', provider: 'codex', status: 'queued' });
+  const session = f.createSession({ sessionTools: { list, send, read: jest.fn() } });
+  const control = await f.workspace.serverService.acquire(f.cli, f.root, f.environment);
+  const events: ProviderExecutionEvent[] = [];
+  const run = (async () => { for await (const e of session.execute(turn('hold')).events) events.push(e); })();
+  try {
+    await waitFor(() => events.some(e => e.type === 'text_delta'));
+    const { data } = await control.request<any>('/fixture/config');
+    const configPath = data.path;
+    expect(data.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/call$/);
+    expect(data.routeId).toEqual(expect.any(String));
+    const entry = data.config.plugins.find((p: any) => p.package.includes('/session-tools'));
+    const dir = fileURLToPath(entry.package);
+    expect(path.dirname(dir)).toBe(path.dirname(data.path));
+    expect(JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'))).toEqual({ type: 'module' });
+    expect(existsSync(path.join(dir, 'index.js'))).toBe(true);
+    const call = (sessionID: string) => control.request<any>('/fixture/session-tool', { method: 'POST', body: { tool: 'claudian_list_destinations', args: {}, sessionID } });
+    expect((await call('ses_1')).data).toMatchObject({ specs: [
+      { name: 'claudian_list_destinations', options: { codemode: false } },
+      { name: 'claudian_send_message', options: { codemode: false } },
+      { name: 'claudian_read_session', options: { codemode: false } },
+    ], result: { output: '{"sessions":[{"sessionId":"target"}]}' } });
+    expect(list).toHaveBeenCalledTimes(1);
+    expect((await call('unknown')).data.isError).toBe(true);
+    expect(list).toHaveBeenCalledTimes(1);
+    const aborted = await control.request<any>('/fixture/session-tool', { method: 'POST', body: { tool: 'claudian_list_destinations', args: {}, sessionID: 'ses_1', aborted: true } });
+    expect(aborted.data.isError).toBe(true);
+    expect(list).toHaveBeenCalledTimes(1);
+    const sent = await control.request<any>('/fixture/session-tool', { method: 'POST', body: { tool: 'claudian_send_message', args: { sessionId: 'target', text: 'Hello' }, sessionID: 'ses_1' } });
+    expect(sent.data.result.output).toBe('{"sessionId":"target","title":"Review","provider":"codex","status":"queued"}');
+    expect(send).toHaveBeenCalledWith({ sessionId: 'target', text: 'Hello' }, expect.any(AbortSignal));
+    const peer = await f.workspace.serverService.acquire(f.cli, f.root, f.environment);
+    await peer.dispose();
+    expect(f.register).toHaveBeenCalledTimes(1);
+    const signal = list.mock.calls[0][1] as AbortSignal;
+    await session.dispose();
+    await run;
+    expect(signal.aborted).toBe(true);
+    expect((await call('ses_1')).data.isError).toBe(true);
+    await control.dispose();
+    await f.workspace.dispose?.();
+    expect(existsSync(path.dirname(configPath))).toBe(false);
+    const response = await fetch(data.url, {method:'POST',headers:{'Content-Type':'application/json','X-Claudian-Route':data.routeId},body:JSON.stringify({tool:'claudian_list_destinations',args:{},callerNativeId:'ses_1'})});
+    expect(response.status).toBe(404);
+  } finally { await session.dispose(); await run; await control.dispose(); await f.dispose(); }
 });

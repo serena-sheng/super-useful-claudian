@@ -7,6 +7,7 @@ import { normalizeLinkedContentPath } from '../../core/path/LinkedContentPath';
 import {
   migrateHiddenCommands,
 } from '../../core/providers/commands/hiddenCommands';
+import { decodeModelAliases } from '../../core/providers/models/modelAliases';
 import { decodeProviderModelSelectionId, toProviderRuntimeModelId } from '../../core/providers/modelSelection';
 import {
   getSharedEnvironmentVariables
@@ -24,9 +25,11 @@ import {
   type ProviderConfigMap,
   type SessionManagerOrganization,
   type StoredChatModelSelection,
+  type StoredInlineEditModelSelection,
   type ZenModePosition,
 } from '../../core/types/settings';
 import { DEFAULT_CLAUDIAN_SETTINGS } from './defaultSettings';
+import { migrateLegacyDshProviderSettings } from './migrateLegacyDshProvider';
 
 export {
   CLAUDIAN_SETTINGS_PATH
@@ -312,35 +315,10 @@ function normalizeContextLimits(value: unknown): Record<string, number> | undefi
     return undefined;
   }
 
-  const result: Record<string, number> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (typeof entry === 'number' && Number.isFinite(entry) && entry > 0) {
-      result[key] = entry;
-    }
-  }
-
-  return Object.keys(result).length > 0 ? result : undefined;
-}
-
-function normalizeModelAliases(value: unknown): Record<string, string> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return {};
-  }
-
-  const result: Record<string, string> = {};
-  for (const [key, alias] of Object.entries(value)) {
-    if (typeof alias !== 'string') {
-      continue;
-    }
-
-    const modelId = key.trim();
-    const normalizedAlias = alias.trim();
-    if (modelId && normalizedAlias) {
-      result[modelId] = normalizedAlias;
-    }
-  }
-
-  return result;
+  const entries = Object.entries(value).filter((entry): entry is [string, number] => (
+    typeof entry[1] === 'number' && Number.isFinite(entry[1]) && entry[1] > 0
+  ));
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
 function normalizeEnvSnippets(value: unknown): EnvSnippet[] {
@@ -365,7 +343,7 @@ function normalizeEnvSnippets(value: unknown): EnvSnippet[] {
     }
 
     const modelAliases = 'modelAliases' in candidate
-      ? normalizeModelAliases(candidate.modelAliases)
+      ? decodeModelAliases(candidate.modelAliases)
       : undefined;
 
     snippets.push({
@@ -405,6 +383,15 @@ function normalizeStoredChatModelSelection(
   }
 
   return { providerId, model };
+}
+
+function normalizeStoredInlineEditModelSelection(
+  value: unknown,
+): StoredInlineEditModelSelection | null {
+  const selection = normalizeStoredChatModelSelection(value);
+  if (!selection) return null;
+  const reasoning = trimStoredString((value as Record<string, unknown>).reasoning);
+  return reasoning ? { ...selection, reasoning } : selection;
 }
 
 function migrateLegacyChatModelSelection(
@@ -452,6 +439,7 @@ export class ClaudianSettingsStorage {
       : migrateLegacyChatModelSelection(stored);
     const didNormalizeChatModelSelection = !hasStoredChatModelSelection
       || JSON.stringify(lastSelectedChatModel) !== JSON.stringify(stored.lastSelectedChatModel);
+    const didMigrateLegacyDsh = migrateLegacyDshProviderSettings(stored);
     const hiddenCommands = migrateHiddenCommands(stored);
     const envSnippets = normalizeEnvSnippets(stored.envSnippets);
     const {
@@ -510,6 +498,7 @@ export class ClaudianSettingsStorage {
       sessionManagerOrganization,
       pinnedLinkedContentPaths,
       lastSelectedChatModel,
+      inlineEditModel: normalizeStoredInlineEditModelSelection(stored.inlineEditModel),
     };
 
     const merged = {
@@ -560,6 +549,7 @@ export class ClaudianSettingsStorage {
         'hiddenCommands' in stored
         && JSON.stringify(hiddenCommands) !== JSON.stringify(stored.hiddenCommands)
       )
+      || didMigrateLegacyDsh
       || didNormalizeProviderSettings
       || didStripRuntimeProviderConfig
       || didMigrateCurrentDeviceProviderConfigs

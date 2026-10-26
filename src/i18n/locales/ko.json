@@ -1,5 +1,6 @@
 {
   "common": {
+    "inputSuggestions": "입력 제안",
     "save": "저장",
     "cancel": "취소",
     "delete": "삭제",
@@ -8,7 +9,9 @@
     "clearAll": "모두 지우기",
     "error": "오류",
     "confirm": "확인",
-    "refresh": "새로고침"
+    "refresh": "새로고침",
+    "retry": "다시 시도",
+    "none": "없음"
   },
   "chat": {
     "promptSuggestionHint": "Tab으로 수락",
@@ -51,9 +54,14 @@
     "quote": {
       "buttonLabel": "인용"
     },
+    "codeBlock": {
+      "copyAriaLabel": "{language} 코드 복사",
+      "copied": "복사됨!"
+    },
     "sideChat": {
       "title": "사이드 채팅",
       "collapse": "접기",
+      "fullHeight": "전체 높이",
       "discard": "버리기",
       "statusPreparing": "준비 중",
       "statusQueued": "{count}개 대기 중",
@@ -89,6 +97,343 @@
       "toolCompleted": "{tool} · 완료",
       "toolFailed": "{tool} · 실패",
       "toolBlocked": "{tool} · 차단됨"
+    },
+    "composer": {
+      "placeholder": "변경 요청, @로 파일 언급, /명령 실행",
+      "message": "메시지",
+      "dropImage": "여기에 이미지 놓기",
+      "moreContext": "컨텍스트 항목 {count}개 더 표시",
+      "showLess": "접기",
+      "moreItems": "+{count}개 더"
+    },
+    "worked": "작업 완료",
+    "taskNotification": "작업 알림",
+    "copyMessage": "메시지 복사",
+    "showEarlierMessages": "이전 메시지 표시",
+    "renderFailed": "메시지 내용을 표시하지 못했습니다.",
+    "interruptedHint": "· Claudian이 대신 무엇을 해야 하나요?",
+    "sessions": {
+      "empty": "대화 없음",
+      "noMatch": "일치하는 세션 없음",
+      "resume": "대화 이어가기",
+      "loading": "대화 불러오는 중…",
+      "current": "현재 세션",
+      "loadFailed": "대화를 불러오지 못했습니다"
+    },
+    "linkedContent": {
+      "label": "연결된 콘텐츠:",
+      "choices": "연결된 콘텐츠 선택 항목",
+      "noMatch": "일치하는 파일 또는 폴더 없음",
+      "missing": "콘텐츠 없음",
+      "path": "연결된 콘텐츠: {path}",
+      "missingPath": "연결된 콘텐츠: {path}. 콘텐츠 없음",
+      "noContent": "연결된 콘텐츠 없음",
+      "missingNotice": "연결된 콘텐츠 없음: {path}",
+      "openFailed": "연결된 콘텐츠를 열지 못했습니다: {error}"
+    },
+    "questions": {
+      "title": "질문",
+      "submit": "제출",
+      "review": "답변 검토",
+      "ready": "답변을 제출할 준비가 되었나요?",
+      "sending": "보내는 중…",
+      "submitAnswers": "답변 제출",
+      "notAnswered": "답변 없음",
+      "customAnswer": "직접 답변 입력…",
+      "secret": "비밀 정보 입력…",
+      "editAnswer": "{question} 답변 수정",
+      "waiting": "답변 기다리는 중…",
+      "noOptions": "기록된 선택 항목 없음",
+      "sendFailed": "답변을 보내지 못했습니다. 다시 시도하세요.",
+      "answerBelow": "아래 질문 패널에서 답변하세요.",
+      "expired": "질문이 만료되었습니다.",
+      "notSent": "답변이 전송되지 않았습니다. 다시 시도하세요.",
+      "unsupportedReply": "이 질문은 해당 답변을 받을 수 없습니다.",
+      "uncertainDelivery": "답변 전달을 확인할 수 없습니다. 중복 전송을 피하기 위해 다시 대기열에 넣지 않았습니다.",
+      "differentConversation": "이 질문은 다른 대화에 속합니다.",
+      "sideUnavailable": "이 보조 대화는 더 이상 사용할 수 없습니다."
+    },
+    "tools": {
+      "calls": "도구 호출",
+      "output": "출력",
+      "noResult": "결과 없음",
+      "noMatches": "일치하는 항목 없음",
+      "tasksUpdated": "작업 업데이트됨",
+      "noChanges": "변경 없음",
+      "moreLines": "…{count}줄 더",
+      "moreCharacters": "…{count}자 더",
+      "running": "실행 중…",
+      "noOutput": "출력 없음",
+      "status": {
+        "running": "상태: 실행 중",
+        "completed": "상태: 완료",
+        "error": "상태: 오류",
+        "cancelled": "상태: 취소됨",
+        "blocked": "상태: 차단됨"
+      },
+      "inProgress": "상태: 진행 중",
+      "writing": "쓰는 중…",
+      "done": "완료",
+      "errorResult": "오류",
+      "tasks": "작업",
+      "taskProgress": "작업 {completed}/{total}",
+      "taskProgressLabel": "작업 ({completed}/{total})",
+      "changes": "변경: +{added} -{removed}",
+      "fileDeleted": "파일 삭제됨",
+      "noTextDiff": "텍스트 차이 없음",
+      "patch": "패치",
+      "files": "파일 {count}개",
+      "file": "파일",
+      "enteringPlan": "계획 모드로 전환 중",
+      "planComplete": "계획 완료",
+      "messageAgent": "에이전트에 메시지 보내기",
+      "listDestinations": "대상 목록 보기",
+      "messageSession": "세션에 메시지 보내기",
+      "stopSession": "세션 중지",
+      "readSession": "세션 읽기",
+      "continueAgent": "에이전트 계속",
+      "listAgents": "에이전트 목록",
+      "interruptAgent": "에이전트 중단",
+      "allAgents": "모든 에이전트",
+      "commandPlaceholder": "명령",
+      "filesPlaceholder": "파일",
+      "patternPlaceholder": "패턴",
+      "toolsPlaceholder": "도구",
+      "agentCount": "에이전트 {count}개",
+      "agentCountPlural": "에이전트 {count}개"
+    },
+    "citations": {
+      "memoryUsed": "사용된 메모리",
+      "source": "출처 {count}개",
+      "sources": "출처 {count}개"
+    },
+    "web": {
+      "findInPage": "페이지에서 찾기",
+      "openPage": "페이지 열기",
+      "urlUnavailable": "URL 없음",
+      "clickLink": "링크 {id} 클릭",
+      "pattern": "패턴: {pattern}",
+      "query": "검색어: {query}",
+      "altQuery": "다른 검색어: {query}",
+      "search": "웹 검색",
+      "moreQueries": "…검색어 {count}개 더",
+      "clickInPage": "{url}에서 링크 {id} 클릭",
+      "open": "{url} 열기",
+      "find": "\"{pattern}\" 찾기",
+      "inPage": "{url}에서 {action}",
+      "operations": "웹 작업 {count}개",
+      "searchTerm": "검색"
+    },
+    "permissionMode": {
+      "label": "권한 모드",
+      "current": "권한 모드: {mode}",
+      "changeFailed": "권한 모드를 변경하지 못했습니다",
+      "claude": {
+        "auto": "자동",
+        "manual": "수동",
+        "acceptEdits": "편집 허용",
+        "yolo": "YOLO",
+        "autoDesc": "Claude가 권한 결정",
+        "manualDesc": "변경 전에 항상 확인",
+        "acceptEditsDesc": "모든 파일 편집 자동 허용",
+        "yoloDesc": "확인 없이 모든 권한 허용"
+      },
+      "codex": {
+        "autoReview": "대신 승인",
+        "normal": "승인 요청",
+        "yolo": "전체 액세스",
+        "autoReviewDesc": "추가 액세스 자동 검토.",
+        "readOnlyDesc": "편집 또는 인터넷 사용 전에 확인.",
+        "normalDesc": "추가 액세스 전에 확인.",
+        "yoloDesc": "파일 및 인터넷 무제한 액세스."
+      }
+    },
+    "thinking": {
+      "active": "생각 중 {seconds}초…",
+      "completed": "{seconds}초 동안 생각함",
+      "label": "생각"
+    },
+    "suggestions": {
+      "loading": "불러오는 중…",
+      "noMatches": "일치하는 항목 없음",
+      "loadFailed": "추천을 불러오지 못했습니다",
+      "retryHint": "다시 입력하여 재시도",
+      "providerLoading": "제공업체 명령 불러오는 중…",
+      "providerRetry": "제공업체 명령 검색 다시 시도"
+    },
+    "approval": {
+      "title": "권한 필요",
+      "question": "이 작업을 허용할까요?",
+      "deny": "거부",
+      "allowOnce": "한 번 허용",
+      "alwaysAllow": "항상 허용",
+      "mcpRequest": "MCP 요청",
+      "mcpServer": "MCP 서버: {server}",
+      "decline": "거절",
+      "allow": "허용",
+      "cancelRequest": "이 요청 취소.",
+      "declineRequest": "이 요청 거절.",
+      "acceptRequest": "이 요청 수락.",
+      "fileChange": "파일 변경",
+      "fileChangeReason": "파일 변경: {reason}",
+      "permissionRequest": "권한 요청",
+      "permissionReason": "권한 요청: {reason}",
+      "networkAccess": "{host}에 {protocol} 액세스 허용",
+      "execute": "실행: {command}",
+      "executeCommand": "명령 실행",
+      "allowSimilar": "유사한 명령 허용",
+      "execPolicy": "실행 정책 변경 승인 및 저장.",
+      "host": "호스트",
+      "allowHost": "이 세션에서 {host} 허용",
+      "denyHost": "이 세션에서 {host} 거부",
+      "allowRule": "{host}에 허용 규칙 적용.",
+      "denyRule": "{host}에 거부 규칙 적용.",
+      "details": "{tool} 승인 세부 정보",
+      "unexpectedSelection": "예상치 못한 승인 선택: \"{value}\"",
+      "runCommand": "명령 실행: {pattern}",
+      "readFile": "파일 읽기: {pattern}",
+      "writeFile": "파일 쓰기: {pattern}",
+      "editFile": "파일 편집: {pattern}",
+      "searchFiles": "일치하는 파일 검색: {pattern}",
+      "searchContent": "일치하는 내용 검색: {pattern}",
+      "unknownPattern": "(알 수 없음)",
+      "deepseekRequest": "DeepSeek이 권한을 요청합니다."
+    },
+    "disclosure": {
+      "expand": "{label} - 클릭하여 펼치기",
+      "collapse": "{label} - 클릭하여 접기"
+    },
+    "removeItem": "{item} 제거",
+    "agent": "에이전트: {agent}",
+    "images": {
+      "unsupportedProvider": "이 제공업체는 이미지 첨부를 지원하지 않습니다.",
+      "tooLarge": "이미지가 {size} 제한을 초과합니다.",
+      "unsupportedType": "지원하지 않는 이미지 형식입니다.",
+      "attachFailed": "이미지를 첨부하지 못했습니다.",
+      "label": "이미지",
+      "numbered": "이미지 {number}",
+      "attachment": "이미지 첨부: {name} · {size}",
+      "fileNotFound": "{message} (파일 없음)",
+      "permissionDenied": "{message} (권한 거부됨)",
+      "preview": "이미지 미리보기: {name}",
+      "closePreview": "이미지 미리보기 닫기"
+    },
+    "pi": {
+      "extension": "Pi 확장",
+      "notification": "Pi 확장 알림."
+    },
+    "sessionMessage": {
+      "undelivered": "{senders}의 메시지를 전달하지 못했습니다.",
+      "fromLabel": "보낸 세션:"
+    },
+    "sessionTools": {
+      "noSessions": "세션 없음",
+      "thisSession": "이 세션",
+      "truncated": "표시되지 않은 세션이 더 있습니다",
+      "recipient": "받는 세션",
+      "model": "모델",
+      "reasoning": "추론",
+      "message": "메시지",
+      "openSession": "세션 {sessionId} 열기",
+      "openProviderSession": "{provider} 세션 {sessionId} 열기",
+      "sessionMissing": "해당 세션이 더 이상 존재하지 않습니다.",
+      "openFailed": "세션을 열지 못했습니다: {message}",
+      "openUnavailable": "여기에서는 세션을 열 수 없습니다.",
+      "providersIncluded": "사용 가능한 공급자와 모델 포함",
+      "newSession": "새 세션",
+      "session": "세션",
+      "turns": "턴",
+      "turnRange": "{from}–{to} / {total}",
+      "noTurns": "아직 없음",
+      "mode": "전달",
+      "modeSteer": "실행 중인 턴에 추가",
+      "modeInterrupt": "현재 작업 중단"
+    },
+    "navigation": {
+      "scrollToTop": "맨 위로 스크롤",
+      "previousMessage": "이전 메시지",
+      "directory": "대화 목차",
+      "nextMessage": "다음 메시지",
+      "scrollToBottom": "맨 아래로 스크롤",
+      "emptyDirectory": "이 대화에는 사용자 프롬프트가 없습니다"
+    },
+    "projects": {
+      "header": "프로젝트",
+      "options": "프로젝트 옵션",
+      "sortBy": "프로젝트 정렬 기준",
+      "sort": {
+        "lastActivity": "마지막 활동",
+        "created": "생성일"
+      },
+      "noSessions": "세션 없음",
+      "newSessionIn": "{name}에서 새 세션",
+      "actionsFor": "{name} 작업",
+      "newProjectAction": "새 프로젝트",
+      "chipLabel": "프로젝트: {name}",
+      "noProject": "프로젝트 없음",
+      "menu": {
+        "edit": "프로젝트 편집",
+        "openMemory": "프로젝트 메모리 열기",
+        "archive": "프로젝트 보관",
+        "restore": "프로젝트 복원",
+        "pin": "프로젝트 고정",
+        "unpin": "프로젝트 고정 해제",
+        "delete": "프로젝트 삭제",
+        "moveTo": "프로젝트로 이동…",
+        "moveSelectionTo": "세션 {count}개를 프로젝트로 이동…",
+        "removeFrom": "프로젝트에서 제거",
+        "removeSelectionFrom": "세션 {count}개를 프로젝트에서 제거",
+        "newProject": "새 프로젝트…"
+      },
+      "deleteConfirm": "“{name}” 프로젝트를 삭제하고 메모리 파일을 휴지통으로 옮길까요? 세션은 프로젝트 없이 유지됩니다.",
+      "errors": {
+        "create": "프로젝트를 만들지 못했습니다",
+        "update": "프로젝트를 업데이트하지 못했습니다",
+        "delete": "프로젝트를 삭제하지 못했습니다",
+        "archive": "프로젝트를 보관하지 못했습니다",
+        "restore": "프로젝트를 복원하지 못했습니다",
+        "pin": "프로젝트 고정 상태를 업데이트하지 못했습니다",
+        "move": "세션을 프로젝트로 이동하지 못했습니다",
+        "remove": "세션을 프로젝트에서 제거하지 못했습니다",
+        "start": "이 프로젝트에서 세션을 시작하지 못했습니다",
+        "sort": "프로젝트 정렬을 업데이트하지 못했습니다"
+      },
+      "editor": {
+        "titleNew": "새 프로젝트",
+        "titleEdit": "프로젝트 편집",
+        "name": "이름",
+        "nameDesc": "세션 관리자와 멤버 세션에 표시됩니다.",
+        "namePlaceholder": "프로젝트 이름",
+        "instructions": "지침",
+        "instructionsDesc": "다음 턴부터 모든 멤버 세션의 시스템 프롬프트에 추가됩니다.",
+        "memoryPath": "메모리 파일",
+        "memoryPathDesc": "프로젝트 메모리 파일의 볼트 경로입니다. .md 확장자가 없으면 추가됩니다. 변경하면 파일이 이동됩니다.",
+        "memoryPathPlaceholder": "폴더/MEMORY.md",
+        "memoryPathInvalid": "볼트 안의 파일 경로를 입력하세요(예: Projects/MEMORY.md).",
+        "memoryPathTaken": "{path}은(는) 이미 파일 또는 다른 프로젝트에서 사용 중입니다.",
+        "openMemory": "열기",
+        "nameRequired": "프로젝트 이름을 입력하세요."
+      },
+      "memory": {
+        "title": "프로젝트 메모리: {name}",
+        "reload": "다시 불러오기",
+        "overwrite": "덮어쓰기",
+        "recreate": "템플릿에서 다시 만들기",
+        "edit": "편집",
+        "preview": "미리보기",
+        "missing": "프로젝트 메모리 파일이 없습니다.",
+        "conflict": "불러온 뒤 메모리 파일이 변경되었습니다. 다시 불러오면 편집 내용이 사라지고, 덮어쓰면 편집 내용이 유지됩니다.",
+        "loadFailed": "프로젝트 메모리를 불러오지 못했습니다",
+        "saveFailed": "프로젝트 메모리를 저장하지 못했습니다",
+        "saved": "프로젝트 메모리를 저장했습니다",
+        "loading": "불러오는 중…",
+        "updated": "{time} 업데이트됨",
+        "changedOutside": "메모리 파일이 이 창 밖에서 업데이트되었습니다. 에이전트가 수정했을 가능성이 높습니다.",
+        "keepMine": "내 편집 유지",
+        "discardConfirm": "프로젝트 메모리의 저장되지 않은 변경 사항을 버릴까요?",
+        "discard": "버리기",
+        "emptyHint": "프로젝트가 진행되면서 에이전트가 채워 넣습니다."
+      }
     },
     "instructionMode": {
       "placeholder": "# Refine an instruction into a prompt",
@@ -126,110 +471,13 @@
       "noDetails": "This tool call did not include the plan details.",
       "approveMessage": "Implement the plan.",
       "rejectMessage": "Please revise the plan before implementing."
+    },
+    "transcriptRestored": {
+      "banner": "에이전트 CLI가 원본 기록을 제공하지 못해 이 대화를 로컬 아카이브에서 복원했습니다. 저장된 모든 턴이 아래에 표시됩니다.",
+      "label": "로컬 아카이브에서 복원됨"
     }
   },
   "settings": {
-      "capabilityMatrix": {
-          "title": "Provider capabilities",
-          "desc": "What each agent harness can actually do, read straight from the capabilities the providers declare rather than a table kept here.",
-          "providerColumn": "Provider",
-          "unsupported": "Not supported",
-          "reasoningEffort": "effort",
-          "reasoningNone": "none",
-          "columns": {
-              "imageAttachments": "Images",
-              "fork": "Fork",
-              "rewind": "Rewind",
-              "turnSteer": "Steer",
-              "planMode": "Plan",
-              "instructionMode": "Instruct",
-              "providerCommands": "Commands",
-              "reasoningControl": "Reasoning"
-          }
-      },
-      "gettingStarted": {
-          "title": "Getting started",
-          "install": {
-              "name": "1. Install an agent CLI",
-              "desc": "Install at least one harness: the OMP install script, or npm install -g @deepseek-ai/dsh. The plugin never installs anything for you."
-          },
-          "provider": {
-              "name": "2. Enable it here",
-              "desc": "Enable the provider in the Providers tab and pick a model. Its readiness panel says what is still missing."
-          },
-          "chat": {
-              "name": "3. Start a chat",
-              "desc": "Open the chat view from the ribbon icon or the command palette and send a message."
-          }
-      },
-      "hotkeys": {
-          "title": "Hotkeys",
-          "desc": "This plugin sets no default hotkeys. Bind them in Obsidian's Settings, Hotkeys - search for \"Super Useful Claudian\" to see every command it registers."
-      },
-      "usage": {
-          "title": "Token usage",
-          "today": "Today",
-          "total": "Total",
-          "input": "Input",
-          "output": "Output",
-          "cache": "Cache",
-          "date": "Date",
-          "sessions": "Top sessions",
-          "empty": "No usage recorded yet.",
-          "note": "Figures are best-effort, as reported by each provider.",
-          "last7days": "Last 7 days"
-      },
-    "readiness": {
-      "heading": "준비 상태",
-      "refresh": "다시 확인",
-      "checking": "확인 중…",
-      "checkFailed": "준비 상태를 확인할 수 없습니다",
-      "status": {
-        "ready": "준비됨",
-        "attention": "확인 필요",
-        "blocked": "사용 불가",
-        "disabled": "사용 안 함"
-      },
-      "check": {
-        "enabled": "제공자 활성화",
-        "cli": "CLI 사용 가능",
-        "models": "모델 카탈로그",
-        "selection": "모델 선택됨"
-      },
-      "detail": {
-        "enabled": "활성화됨",
-        "disabled": "사용 안 함",
-        "cliFound": "v{version} · {path}",
-        "cliNoVersion": "{path} · 버전을 읽을 수 없음",
-        "cliMissing": "PATH에서 찾을 수 없음",
-        "models": "모델 {count}개 발견",
-        "modelsNone": "아직 발견된 모델이 없음",
-        "selection": "모델 {count}개 활성화됨",
-        "selectionNone": "활성화된 모델이 없음"
-      },
-      "remedy": {
-        "enable": "{provider}를 켜면 사용할 수 있습니다.",
-        "cliMissing": "{name}을(를) 찾을 수 없습니다. 설치한 뒤 다시 확인하세요. Claudian은 설치를 대신 실행하지 않습니다:",
-        "cliUnreadable": "CLI를 찾았지만 버전을 읽지 못했습니다. 아래 경로를 확인하세요.",
-        "refreshModels": "아래 '모델'을 열고 모델 카탈로그를 새로 고치세요.",
-        "selectModel": "아래 '모델'에서 모델을 하나 이상 활성화하세요."
-      },
-      "action": {
-        "copy": "복사",
-        "copied": "복사됨",
-        "checkUpdate": "업데이트 확인"
-      },
-      "update": {
-        "checking": "npm 확인 중…",
-        "available": "새 버전 {version}이 있습니다. 다음 명령으로 업데이트하세요:",
-        "latest": "최신 버전입니다(최신 {version}).",
-        "unavailable": "npm 레지스트리에 연결할 수 없습니다."
-      }
-    },
-    "cliUpdates": {
-      "name": "Check CLI updates",
-      "desc": "Show a \"Check for update\" button in each provider's readiness panel. Pressing it queries registry.npmjs.org for the latest published version of that provider's CLI package. Off by default: Claudian makes no registry request unless you enable this."
-    },
     "tabs": {
       "general": "일반",
       "providers": "제공자",
@@ -277,14 +525,6 @@
       "select": "모델 선택",
       "unavailableWarning": "자동 제목 생성이 일시 중지되었습니다. 사용 가능한 제목 모델을 선택하세요."
     },
-    "instructionMode": {
-      "name": "Instruction mode",
-      "desc": "Type # in an empty composer to refine a rough instruction into a polished prompt before sending."
-    },
-    "bangBash": {
-      "name": "Bash 모드",
-      "desc": "빈 입력창에서 ! 를 입력하면 Bash 모드로 들어가 자신의 shell 로 vault 에서 명령을 하나 실행합니다. 명령 출력은 이 대화에 추가됩니다."
-    },
     "navMappings": {
       "name": "Vim 스타일 네비게이션 매핑",
       "desc": "한 줄에 하나의 매핑. 형식: \"map <키> <동작>\" (동작: scrollUp, scrollDown, focusInput)."
@@ -300,7 +540,7 @@
     },
     "codexSandbox": {
       "name": "샌드박스",
-      "desc": "Approve for me 및 Ask for approval 모드의 파일 접근 권한입니다. 읽기 전용은 편집할 때마다 확인을 요청하며, Full access에서는 무시됩니다."
+      "desc": "대신 승인 및 승인 요청 모드의 파일 접근 권한입니다. 읽기 전용은 편집할 때마다 확인을 요청하며, 전체 액세스에서는 무시됩니다."
     },
     "environment": "환경",
     "sharedEnvironment": {
@@ -384,6 +624,10 @@
     "deferMathRenderingDuringStreaming": {
       "name": "스트리밍 중 수식 렌더링 지연",
       "desc": "응답이 스트리밍되는 동안 원본 LaTeX를 표시하고 각 텍스트 블록이 완료되면 수식을 한 번 렌더링합니다."
+    },
+    "pluginRenderedFenceLanguages": {
+      "name": "플러그인으로 렌더링할 코드 블록 언어",
+      "desc": "한 줄에 하나씩 지정한 코드 블록 언어를 노트에서 렌더링하는 플러그인에 전달합니다(예: vega-lite). 응답이 완료된 후 렌더링됩니다. 다른 코드 블록은 항상 코드로 표시됩니다."
     },
     "expandFileEditsByDefault": {
       "name": "파일 편집을 기본적으로 펼치기",
@@ -477,7 +721,7 @@
     "codex": {
       "installationMethod": {
         "name": "설치 방식",
-        "desc": "Windows에서 Claudian이 Codex CLI를 실행하는 방식입니다. 네이티브 Windows는 Windows 실행 파일 경로를 사용하고, WSL은 선택한 배포판 안에서 Linux CLI를 실행합니다.",
+        "desc": "Windows에서 Claudian이 Codex를 실행하는 방식입니다. 네이티브 Windows는 Windows 실행 파일 경로를 사용하고, WSL은 선택한 배포판 안에서 Linux CLI를 실행합니다.",
         "nativeWindows": "네이티브 Windows",
         "wsl": "WSL"
       },
@@ -497,7 +741,7 @@
       },
       "responseStyle": {
         "name": "응답 스타일",
-        "desc": "지원되는 모델에서 Codex CLI의 대화 스타일을 선택합니다.",
+        "desc": "지원되는 모델에서 Codex의 대화 스타일을 선택합니다.",
         "pragmatic": "실용적",
         "friendly": "친근함",
         "neutral": "중립적"
@@ -523,8 +767,8 @@
         "desc": "Ultra를 지원하는 Codex 모델의 추론 강도 선택기에 표시합니다. Ultra는 최대 추론과 자동 작업 위임을 사용합니다."
       },
       "environment": {
-        "name": "Codex CLI 환경",
-        "desc": "Codex CLI 전용 런타임 변수만 입력하세요. OPENAI_* 및 CODEX_* 설정에 사용합니다. Codex CLI 자동 감지에 도움이 필요하면 이 공급자 섹션 대신 공유 PATH에 설치 디렉터리를 추가하세요."
+        "name": "Codex 환경",
+        "desc": "Codex 전용 런타임 변수만 입력하세요. OPENAI_* 및 CODEX_* 설정에 사용합니다. Codex 자동 감지에 도움이 필요하면 이 공급자 섹션 대신 공유 PATH에 설치 디렉터리를 추가하세요."
       }
     },
     "agentSkills": {
@@ -565,6 +809,7 @@
       }
     },
     "opencode": {
+      "emptyModels": "OpenCode 서버가 이 보관함에서 활성화된 모델을 반환하지 않았습니다. 보관함의 .opencode/opencode.json과 OpenCode 로그를 확인하세요(opencode debug paths로 위치 확인). OpenCode v2에서는 설정된 V1 플러그인이 호환되지 않을 수 있습니다. 보관함에서 opencode models --standalone을 실행해 비교한 후 다시 검색하세요.",
       "environment": {
         "name": "OpenCode 환경 변수",
         "desc": "OpenCode에 전달되는 추가 환경 변수입니다."
@@ -574,29 +819,40 @@
         "link": "OpenCode v2로 마이그레이션"
       }
     },
-    "omp": {
-      "environment": {
-        "name": "OMP 환경 변수",
-        "desc": "OMP에만 전달되는 환경 변수입니다."
-      }
-    },
     "pi": {
       "environment": {
         "name": "Pi 환경 변수",
         "desc": "Pi에만 전달되는 환경 변수입니다."
-      }
-    },
-    "dsh": {
-      "environment": {
-        "name": "DeepSeek Harness 환경 변수",
-        "desc": "DeepSeek Harness에만 전달되는 환경 변수입니다. 인증하려면 여기에 DEEPSEEK_API_KEY를 설정하세요."
       },
-      "cliNote": "Node.js가 필요합니다. CLI 설치: npm install -g @deepseek-ai/dsh"
+      "models": {
+        "desc": "Claudian은 Pi의 enabledModels와 별도로 자체 모델 목록을 유지합니다. Discover는 Pi가 현재 환경에서 인증할 수 있는 모든 모델을 Pi가 호출할 제공자 경로별로 표시합니다. 경로에 따라 자격 증명과 청구가 결정됩니다."
+      }
     },
     "grok": {
       "environment": {
         "name": "Grok Build 환경 변수",
         "desc": "Grok Build에만 전달되는 환경 변수입니다. 사용자 지정 모델의 비밀 값은 이 제공자 범위에 남아 있으며 네이티브 구성에서 env_key로 참조됩니다."
+      }
+    },
+    "deepseek": {
+      "installation": {
+        "desc": "자동 감지는 dsh를 우선하고 다음으로 macOS 또는 Windows의 Desktop을 찾습니다. 둘 다 설치된 경우 Desktop의 .app 경로 또는 Windows 설치 폴더를 입력하면 선택할 수 있습니다. 먼저 Desktop을 열어 초기 설정을 완료하세요.",
+        "desktop": "네이티브 Desktop 프로필을 사용합니다.",
+        "web": "네이티브 Web 프로필을 사용합니다."
+      },
+      "preset": "프리셋",
+      "codeMode": {
+        "name": "코드 모드 사용",
+        "desc": "기존 대화를 포함해 각 대화의 다음 턴부터 적용됩니다. 직접 도구와 함께 네이티브 run_code를 추가합니다."
+      },
+      "presetPlugins": {
+        "name": "추가 프리셋 플러그인",
+        "desc": "고급. Claudian 채팅 프리셋 뒤에 추가되는 네이티브 dsh 플러그인 행의 YAML 목록(dsh 형식)이며, 각 행에는 고유한 \"id\"와 \"name\"이 있어야 합니다. Claudian 자체 행은 대체할 수 없습니다. 저장하면 DeepSeek Harness가 다시 시작되어 진행 중인 턴이 중지됩니다. 계획 모드처럼 Claudian에 UI가 없는 플러그인은 작동하지 않을 수 있습니다."
+      },
+      "presetPreview": "프리셋 미리보기",
+      "environment": {
+        "name": "DeepSeek Harness 환경 변수",
+        "desc": "DeepSeek Harness에만 전달되는 환경 변수. 선택한 네이티브 Web 또는 Desktop 프로필, 자격 증명, 모델 및 MCP 서버를 사용합니다."
       }
     },
     "skills": {
@@ -605,7 +861,7 @@
         "shared": "기타 제공자"
       },
       "claudeHelp": ".claude/skills/의 Claude Code 스킬과 .claude/commands/의 명령.",
-      "sharedHelp": "Codex CLI, OpenCode, Pi, Grok Build용 .agents/skills/의 공유 스킬.",
+      "sharedHelp": "Codex, OpenCode, Pi, Grok Build, DeepSeek Harness용 .agents/skills/의 공유 스킬.",
       "status": {
         "error": "스킬 폴더를 읽을 수 없습니다: {message}"
       },
@@ -681,6 +937,128 @@
         "failed": "동기화 실패: {message}",
         "summary": "이동 {moved}, 변환 {converted}, 휴지통 {trashed}, 링크 제거 {unlinked}."
       }
+    },
+    "capabilityMatrix": {
+      "title": "Provider capabilities",
+      "desc": "What each agent harness can actually do, read straight from the capabilities the providers declare rather than a table kept here.",
+      "providerColumn": "Provider",
+      "unsupported": "Not supported",
+      "reasoningEffort": "effort",
+      "reasoningNone": "none",
+      "columns": {
+        "imageAttachments": "Images",
+        "fork": "Fork",
+        "rewind": "Rewind",
+        "turnSteer": "Steer",
+        "planMode": "Plan",
+        "instructionMode": "Instruct",
+        "providerCommands": "Commands",
+        "reasoningControl": "Reasoning"
+      }
+    },
+    "gettingStarted": {
+      "title": "Getting started",
+      "install": {
+        "name": "1. Install an agent CLI",
+        "desc": "Install at least one harness: the OMP install script, or npm install -g @deepseek-ai/dsh. The plugin never installs anything for you."
+      },
+      "provider": {
+        "name": "2. Enable it here",
+        "desc": "Enable the provider in the Providers tab and pick a model. Its readiness panel says what is still missing."
+      },
+      "chat": {
+        "name": "3. Start a chat",
+        "desc": "Open the chat view from the ribbon icon or the command palette and send a message."
+      }
+    },
+    "hotkeys": {
+      "title": "Hotkeys",
+      "desc": "This plugin sets no default hotkeys. Bind them in Obsidian's Settings, Hotkeys - search for \"Super Useful Claudian\" to see every command it registers."
+    },
+    "usage": {
+      "title": "Token usage",
+      "today": "Today",
+      "total": "Total",
+      "input": "Input",
+      "output": "Output",
+      "cache": "Cache",
+      "date": "Date",
+      "sessions": "Top sessions",
+      "empty": "No usage recorded yet.",
+      "note": "Figures are best-effort, as reported by each provider.",
+      "last7days": "Last 7 days"
+    },
+    "readiness": {
+      "heading": "준비 상태",
+      "refresh": "다시 확인",
+      "checking": "확인 중…",
+      "checkFailed": "준비 상태를 확인할 수 없습니다",
+      "status": {
+        "ready": "준비됨",
+        "attention": "확인 필요",
+        "blocked": "사용 불가",
+        "disabled": "사용 안 함"
+      },
+      "check": {
+        "enabled": "제공자 활성화",
+        "cli": "CLI 사용 가능",
+        "models": "모델 카탈로그",
+        "selection": "모델 선택됨"
+      },
+      "detail": {
+        "enabled": "활성화됨",
+        "disabled": "사용 안 함",
+        "cliFound": "v{version} · {path}",
+        "cliNoVersion": "{path} · 버전을 읽을 수 없음",
+        "cliMissing": "PATH에서 찾을 수 없음",
+        "models": "모델 {count}개 발견",
+        "modelsNone": "아직 발견된 모델이 없음",
+        "selection": "모델 {count}개 활성화됨",
+        "selectionNone": "활성화된 모델이 없음"
+      },
+      "remedy": {
+        "enable": "{provider}를 켜면 사용할 수 있습니다.",
+        "cliMissing": "{name}을(를) 찾을 수 없습니다. 설치한 뒤 다시 확인하세요. Claudian은 설치를 대신 실행하지 않습니다:",
+        "cliUnreadable": "CLI를 찾았지만 버전을 읽지 못했습니다. 아래 경로를 확인하세요.",
+        "refreshModels": "아래 '모델'을 열고 모델 카탈로그를 새로 고치세요.",
+        "selectModel": "아래 '모델'에서 모델을 하나 이상 활성화하세요."
+      },
+      "action": {
+        "copy": "복사",
+        "copied": "복사됨",
+        "checkUpdate": "업데이트 확인"
+      },
+      "update": {
+        "checking": "npm 확인 중…",
+        "available": "새 버전 {version}이 있습니다. 다음 명령으로 업데이트하세요:",
+        "latest": "최신 버전입니다(최신 {version}).",
+        "unavailable": "npm 레지스트리에 연결할 수 없습니다."
+      }
+    },
+    "cliUpdates": {
+      "name": "Check CLI updates",
+      "desc": "Show a \"Check for update\" button in each provider's readiness panel. Pressing it queries registry.npmjs.org for the latest published version of that provider's CLI package. Off by default: Claudian makes no registry request unless you enable this."
+    },
+    "instructionMode": {
+      "name": "Instruction mode",
+      "desc": "Type # in an empty composer to refine a rough instruction into a polished prompt before sending."
+    },
+    "bangBash": {
+      "name": "Bash 모드",
+      "desc": "빈 입력창에서 ! 를 입력하면 Bash 모드로 들어가 자신의 shell 로 vault 에서 명령을 하나 실행합니다. 명령 출력은 이 대화에 추가됩니다."
+    },
+    "omp": {
+      "environment": {
+        "name": "OMP 환경 변수",
+        "desc": "OMP에만 전달되는 환경 변수입니다."
+      }
+    },
+    "dsh": {
+      "environment": {
+        "name": "DeepSeek Harness 환경 변수",
+        "desc": "DeepSeek Harness에만 전달되는 환경 변수입니다. 인증하려면 여기에 DEEPSEEK_API_KEY를 설정하세요."
+      },
+      "cliNote": "Node.js가 필요합니다. CLI 설치: npm install -g @deepseek-ai/dsh"
     }
   }
 }

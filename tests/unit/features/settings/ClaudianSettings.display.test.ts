@@ -99,7 +99,7 @@ jest.mock('obsidian', () => {
     }
 
     addTextArea(callback: (text: Record<string, unknown>) => void): this {
-      callback(createTextComponent());
+      callback(createTextComponent('textarea'));
       return this;
     }
 
@@ -138,17 +138,12 @@ jest.mock('obsidian', () => {
     return component;
   }
 
-  function createTextComponent(): Record<string, unknown> {
+  function createTextComponent(tag: 'input' | 'textarea' = 'input'): Record<string, unknown> {
+    const inputEl = document.createElement(tag);
+    inputEl.addClass = (...classes) => inputEl.classList.add(...classes);
     return {
       ...createChainableComponent(),
-      inputEl: {
-        addClass: jest.fn(),
-        addEventListener: jest.fn(),
-        dataset: {},
-        value: '',
-        rows: 0,
-        cols: 0,
-      },
+      inputEl,
     };
   }
 
@@ -569,4 +564,16 @@ it('batches a burst of text edits into one settings mutation and flushes on tear
     await jest.advanceTimersByTimeAsync(1000);
     expect(plugin.mutateSettings).toHaveBeenCalledTimes(2);
   } finally { cleanup(); jest.useRealTimers(); }
+});
+
+it('offers no Projects tab; the doc folder is chosen per project', () => {
+  const { tab } = createTab(false);
+  const container = createContainer();
+  const cleanup = (tab as any).renderSettings(container);
+  try {
+    expect(findByClass(container, 'claudian-settings-skills')).not.toBeNull();
+    expect(findContainer(container, t('settings.tabs.skills'))).not.toBeNull();
+    expect(findByClass(container, 'claudian-settings-projects')).toBeNull();
+    expect(findContainer(container, 'Projects')).toBeNull();
+  } finally { cleanup(); }
 });

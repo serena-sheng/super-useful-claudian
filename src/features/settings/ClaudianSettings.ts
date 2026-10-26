@@ -282,9 +282,15 @@ export class ClaudianSettingTab extends PluginSettingTab {
               dropdown.setValue(this.host.settings.locale);
               return;
             }
-            await this.host.mutateSettings((settings) => {
-              settings.locale = locale;
-            });
+            try {
+              await this.host.mutateSettings((settings) => {
+                settings.locale = locale;
+              });
+            } finally {
+              const committedLocale = this.host.settings.locale;
+              setLocale(committedLocale as Locale);
+              dropdown.setValue(committedLocale);
+            }
             this.update();
           });
       });
@@ -418,6 +424,26 @@ export class ClaudianSettingTab extends PluginSettingTab {
             });
           })
       );
+
+    new Setting(container)
+      .setName(t('settings.pluginRenderedFenceLanguages.name'))
+      .setDesc(t('settings.pluginRenderedFenceLanguages.desc'))
+      .setClass('claudian-settings-textarea')
+      .addTextArea((text) => {
+        text
+          .setValue(this.host.settings.pluginRenderedFenceLanguages.join('\n'))
+          .onChange((value) => {
+            this.textEdits.schedule('pluginRenderedFenceLanguages', (settings) => {
+              settings.pluginRenderedFenceLanguages = value
+                .split(/\r?\n/)
+                .map((entry) => entry.trim())
+                .filter((entry) => entry.length > 0);
+            });
+          });
+        text.inputEl.addEventListener('blur', () => { void this.textEdits.flush(); });
+        text.inputEl.rows = 3;
+        text.inputEl.cols = 30;
+      });
 
     // --- Conversations ---
 
@@ -656,7 +682,8 @@ export class ClaudianSettingTab extends PluginSettingTab {
             saveTimeout = null;
           }
 
-          const result = parseNavMappings(pendingValue);
+          const submittedValue = pendingValue;
+          const result = parseNavMappings(submittedValue);
           if (!result.settings) {
             if (showError) {
               new Notice(`${t('common.error')}: ${result.error}`);
@@ -671,6 +698,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
             settings.keyboardNavigation.scrollDownKey = result.settings!.scrollDown;
             settings.keyboardNavigation.focusInputKey = result.settings!.focusInput;
           });
+          if (pendingValue !== submittedValue) return;
           pendingValue = buildNavMappingText(this.host.settings.keyboardNavigation);
           text.setValue(pendingValue);
         };
@@ -685,7 +713,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
         };
 
         text
-          .setPlaceholder('Map w scrollup\nmap s scrolldown\nmap i focusinput')
+          .setPlaceholder(pendingValue)
           .setValue(pendingValue)
           .onChange((value) => {
             pendingValue = value;
@@ -775,8 +803,10 @@ export class ClaudianSettingTab extends PluginSettingTab {
     const listEl = container.createDiv({ cls: 'claudian-context-limits-list' });
 
     for (const modelId of uniqueModelIds) {
-      const currentValue = this.host.settings.customContextLimits?.[modelId];
-      const currentAlias = (modelAliases?.get(this.host.settings) ?? {})[modelId] ?? '';
+      const limits = this.host.settings.customContextLimits ?? {};
+      const currentValue = Object.hasOwn(limits, modelId) ? limits[modelId] : undefined;
+      const currentAliases = modelAliases?.get(this.host.settings) ?? {};
+      const currentAlias = Object.hasOwn(currentAliases, modelId) ? currentAliases[modelId] : '';
 
       const itemEl = listEl.createDiv({ cls: 'claudian-context-limits-item' });
       const nameEl = itemEl.createDiv({ cls: 'claudian-context-limits-model' });
@@ -806,13 +836,13 @@ export class ClaudianSettingTab extends PluginSettingTab {
         const trimmed = aliasInputEl.value.trim();
 
         await this.host.mutateSettings((settings) => {
-          const aliases = (modelAliases?.get(settings) ?? {});
+          const aliases = new Map(Object.entries(modelAliases?.get(settings) ?? {}));
           if (trimmed) {
-            aliases[modelId] = trimmed;
+            aliases.set(modelId, trimmed);
           } else {
-            delete aliases[modelId];
+            aliases.delete(modelId);
           }
-          modelAliases?.update(settings, aliases);
+          modelAliases?.update(settings, Object.fromEntries(aliases));
         });
         this.notifyProviderModelOptionsChanged(providerId);
       };
@@ -840,7 +870,10 @@ export class ClaudianSettingTab extends PluginSettingTab {
           if (!trimmed) {
             delete settings.customContextLimits[modelId];
           } else {
-            settings.customContextLimits[modelId] = parseContextLimit(trimmed)!;
+            settings.customContextLimits = Object.fromEntries([
+              ...Object.entries(settings.customContextLimits),
+              [modelId, parseContextLimit(trimmed)!],
+            ]);
           }
         });
       };
@@ -852,12 +885,14 @@ export class ClaudianSettingTab extends PluginSettingTab {
         void saveAlias();
       });
       aliasInputEl.addEventListener('keydown', (event) => {
+        if (event.isComposing) return;
         if (event.key === 'Enter') {
           event.preventDefault();
           aliasInputEl.blur();
         } else if (event.key === 'Escape') {
           event.preventDefault();
-          aliasInputEl.value = (modelAliases?.get(this.host.settings) ?? {})[modelId] ?? '';
+          const aliases = modelAliases?.get(this.host.settings) ?? {};
+          aliasInputEl.value = Object.hasOwn(aliases, modelId) ? aliases[modelId] : '';
           aliasInputEl.blur();
         }
       });

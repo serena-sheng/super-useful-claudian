@@ -5,6 +5,10 @@ import type {
   SDKUserMessage,
   SlashCommand,
 } from '@anthropic-ai/claude-agent-sdk';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+
+import { createSessionToolMCPServer, SESSION_TOOL_MCP_SERVER_NAME } from '@/core/session-tools/sessionToolMCP';
+import type { SessionToolCallHandler } from '@/core/session-tools/sessionToolSpecs';
 
 import { loadClaudeAgentQuery } from '../loadClaudeAgentSDK';
 import { MessageChannel } from '../runtime/ClaudeMessageChannel';
@@ -13,7 +17,7 @@ import {
   type ClaudeSDKUserMessage,
 } from '../runtime/ClaudeUserMessageFactory';
 import type { ClaudeEncodedExecutionRequest } from './ClaudeExecutionRequestEncoder';
-import { ClaudeTurnInputs } from './ClaudeTurnInputs';
+import { type ClaudeSteerDelivery, ClaudeTurnInputs } from './ClaudeTurnInputs';
 
 export interface ClaudeCommandUpdate {
   readonly commands?: SlashCommand[];
@@ -22,6 +26,7 @@ export interface ClaudeCommandUpdate {
 
 export interface ClaudeExecutionStrategySink {
   readonly sessionInstanceId: string;
+  getSessionToolHandler(signal: AbortSignal): SessionToolCallHandler | undefined;
   getProviderSessionId(): string | null;
   assertModelAvailable(model: string): void;
   bindNativeTurnInputs(inputs: ClaudeTurnInputs, queryToken: number): void;
@@ -43,10 +48,10 @@ export interface ClaudeExecutionStrategy {
     queryToken: number,
   ): Promise<void>;
   /**
-   * Hands a steer to the live native turn for `queryToken`. Returns false only
-   * when nothing was handed off.
+   * Hands a steer to the live native turn for `queryToken`; its turn inputs
+   * settle `delivery`. Returns false only when nothing was handed off.
    */
-  steerTurn(message: ClaudeSDKUserMessage, queryToken: number): boolean;
+  steerTurn(message: ClaudeSDKUserMessage, queryToken: number, delivery: ClaudeSteerDelivery): boolean;
   cancel(queryToken: number | null, nativeTurnHandedOff: boolean): void;
   getRewindQuery(): Query | null;
   ensureReadyForRewind(
@@ -90,7 +95,6 @@ implements ClaudeExecutionStrategy {
     const priorTurn = this.activeNativeTurn;
     if (priorTurn) {
       const outcome = await priorTurn.completion;
-      requestSignal?.throwIfAborted();
       if (outcome.type === 'failed') {
         throw outcome.error;
       }
@@ -114,7 +118,6 @@ implements ClaudeExecutionStrategy {
       );
       const inputs = new ClaudeTurnInputs(message.uuid);
       this.sink.bindNativeTurnInputs(inputs, queryToken);
-      requestSignal?.throwIfAborted();
       const query = this.query;
       this.sink.assertModelAvailable(request.model);
       this.messageChannel.enqueue(message);
@@ -128,7 +131,7 @@ implements ClaudeExecutionStrategy {
     }
   }
 
-  steerTurn(message: ClaudeSDKUserMessage, queryToken: number): boolean {
+  steerTurn(message: ClaudeSDKUserMessage, queryToken: number, delivery: ClaudeSteerDelivery): boolean {
     const nativeTurn = this.activeNativeTurn;
     if (
       this.disposed
@@ -142,7 +145,7 @@ implements ClaudeExecutionStrategy {
     ) {
       return false;
     }
-    nativeTurn.inputs.addSteer(message.uuid);
+    nativeTurn.inputs.addSteer(message.uuid, delivery);
     // 'next' folds at the next native boundary; 'now' would abort the running tool.
     this.messageChannel.enqueue({ ...message, priority: 'next' });
     return true;
@@ -216,7 +219,6 @@ implements ClaudeExecutionStrategy {
     queryToken: number,
   ): Promise<void> {
     const requestSignal = request.options.abortController?.signal;
-    requestSignal?.throwIfAborted();
     if (this.disposed) {
       throw new Error('Claude Code persistent strategy is disposed');
     }
@@ -257,6 +259,7 @@ implements ClaudeExecutionStrategy {
       ...request.options,
       abortController,
     };
+    attachSessionTools(options, this.sink, abortController.signal);
     const query = agentQuery({
       prompt: messageChannel,
       options,
@@ -319,7 +322,7 @@ implements ClaudeExecutionStrategy {
           message,
           nativeTurn?.queryToken ?? queryToken,
         );
-        if (message.type === 'result' && nativeTurn?.inputs.settled) {
+        if (nativeTurn?.inputs.settled) {
           this.#finishNativeTurn(query, { type: 'completed' });
         }
       }
@@ -431,6 +434,7 @@ implements ClaudeExecutionStrategy {
       const agentQuery = await loadClaudeAgentQuery();
       abortController.signal.throwIfAborted();
       this.sink.assertModelAvailable(request.model);
+      attachSessionTools(options, this.sink, abortController.signal);
       query = agentQuery({ options, prompt });
       this.activeQuery = query;
       this.sink.handleNativeQueryOpened(query);
@@ -520,16 +524,28 @@ function createPersistentNativeTurn(
       resolve = innerResolve;
     },
   );
-  let settled = false;
   return {
     query,
     queryToken,
     inputs,
     completion,
-    settle: (outcome) => {
-      if (settled) return;
-      settled = true;
-      resolve(outcome);
-    },
+    settle: resolve,
+  };
+}
+
+/** Construct at query launch: an SDK server instance belongs to one transport. */
+function attachSessionTools(options: Options, sink: ClaudeExecutionStrategySink, signal: AbortSignal): void {
+  const handler = sink.getSessionToolHandler(signal);
+  if (!handler) return;
+  options.mcpServers = {
+    ...options.mcpServers,
+    [SESSION_TOOL_MCP_SERVER_NAME]: {
+      type: 'sdk',
+      name: SESSION_TOOL_MCP_SERVER_NAME,
+      instance: createSessionToolMCPServer(handler) as unknown as McpServer,
+      timeout: 60_000,
+      // Supported by the pinned SDK runtime, but not yet by its public type.
+      disableAutoBackground: true,
+    } as NonNullable<Options['mcpServers']>[string],
   };
 }

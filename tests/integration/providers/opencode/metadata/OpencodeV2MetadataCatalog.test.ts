@@ -1,10 +1,12 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+
+import { runtimeHostFor } from '@test/helpers/providerRuntimeHost';
 
 import { OpencodeMetadataService } from '@/providers/opencode/metadata/OpencodeMetadataService';
 import { createOpencodeModels } from '@/providers/opencode/runtime/OpencodeModels';
 import { getOpencodeProviderSettings, projectOpencodeModelSettings } from '@/providers/opencode/settings';
 
-import { createOpencodeV2MetadataFixture, type OpencodeV2MetadataFixture } from './OpencodeV2MetadataFixture';
+import { createOpencodeV2MetadataFixture, type OpencodeV2MetadataFixture, waitUntil } from './OpencodeV2MetadataFixture';
 
 // OpenCode v2 metadata catalog discovery, refresh, and models that appear after startup.
 let fixture: OpencodeV2MetadataFixture;
@@ -12,6 +14,14 @@ let fixture: OpencodeV2MetadataFixture;
 beforeEach(() => { fixture = createOpencodeV2MetadataFixture(); });
 
 afterEach(() => fixture.dispose());
+
+function addModel(): void {
+  const file = fixture.environment.CATALOG_FILE!;
+  const catalog = JSON.parse(readFileSync(file, 'utf8'));
+  catalog.push({ providerID: 'acme', id: 'slow-model', name: 'Slow Model', enabled: true, variants: [{ id: 'high' }] });
+  writeFileSync(file + '.pending', JSON.stringify(catalog));
+  renameSync(file + '.pending', file);
+}
 
 it('discovers several selected models from one native catalog response', async () => {
   fixture.environment.ACTIVATION_DELAY_MS = '1';
@@ -21,8 +31,9 @@ it('discovers several selected models from one native catalog response', async (
   ]));
   const plugin = fixture.createPlugin();
   plugin.settings.providerConfigs.opencode.visibleModels = ['test/one', 'test/two'];
-  const service = new OpencodeMetadataService(plugin);
-  const models = createOpencodeModels(plugin, service);
+  const host = runtimeHostFor(plugin, 'opencode');
+  const service = new OpencodeMetadataService(host, plugin.executionLifecycleRegistry);
+  const models = createOpencodeModels(host, service);
   try {
     await models.refresh();
     const thinking = getOpencodeProviderSettings(plugin.settings).thinkingOptionsByModel;
@@ -35,9 +46,27 @@ it('discovers several selected models from one native catalog response', async (
   }
 });
 
+it('names each model\'s upstream provider by its native display name when the server lists one', async () => {
+  writeFileSync(fixture.environment.CATALOG_FILE + '.providers', JSON.stringify([
+    { id: 'deepseek', name: 'DeepSeek Official' },
+    // A name that would split the "Upstream/Model" label keeps the provider id.
+    { id: 'acme', name: 'Acme / Labs' },
+  ]));
+  addModel();
+  const plugin = fixture.createPlugin();
+  const service = new OpencodeMetadataService(runtimeHostFor(plugin, 'opencode'), plugin.executionLifecycleRegistry);
+  try {
+    await expect(service.loadCatalog()).resolves.toBe(true);
+    expect(getOpencodeProviderSettings(plugin.settings).discoveredModels).toEqual([
+      { rawId: 'deepseek/chat', label: 'DeepSeek Official/DeepSeek Chat' },
+      { rawId: 'acme/slow-model', label: 'acme/Slow Model' },
+    ]);
+  } finally { await service.dispose(); }
+});
+
 it('refreshes the native catalog and commands without persisting the catalog or enabling models', async () => {
   const plugin = fixture.createPlugin();
-  const service = new OpencodeMetadataService(plugin);
+  const service = new OpencodeMetadataService(runtimeHostFor(plugin, 'opencode'), plugin.executionLifecycleRegistry);
   try {
     await expect(service.loadCatalog()).resolves.toBe(true);
     expect(getOpencodeProviderSettings(plugin.settings).discoveredModels).toEqual([
@@ -61,17 +90,13 @@ it('refreshes the native catalog and commands without persisting the catalog or 
   await expect(fetch(readFileSync(fixture.environment.ENDPOINT_FILE!, 'utf8'))).rejects.toThrow();
 });
 
-it.each([3_000, 7_500])('discovers models added after %i ms on the same metadata server', async (delayMs) => {
-  fixture.environment.DELAYED_CATALOG_MS = String(delayMs);
-  const catalog = JSON.parse(readFileSync(fixture.environment.CATALOG_FILE!, 'utf8'));
-  catalog.push({ providerID: 'acme', id: 'slow-model', name: 'Slow Model', enabled: true, variants: [{ id: 'high' }] });
-  writeFileSync(fixture.environment.CATALOG_FILE!, JSON.stringify(catalog));
+it('discovers models added after the initial discovery on the same metadata server', async () => {
   const plugin = fixture.createPlugin();
-  const service = new OpencodeMetadataService(plugin);
+  const service = new OpencodeMetadataService(runtimeHostFor(plugin, 'opencode'), plugin.executionLifecycleRegistry);
   try {
     await expect(service.loadCatalog()).resolves.toBe(true);
     const endpoint = readFileSync(fixture.environment.ENDPOINT_FILE!, 'utf8');
-    await new Promise(resolve => setTimeout(resolve, delayMs + 50));
+    addModel();
     await expect(service.loadCatalog()).resolves.toBe(true);
     expect(getOpencodeProviderSettings(plugin.settings).discoveredModels).toEqual([
       { rawId: 'deepseek/chat', label: 'deepseek/DeepSeek Chat' },
@@ -83,15 +108,19 @@ it.each([3_000, 7_500])('discovers models added after %i ms on the same metadata
       .toEqual(expect.arrayContaining([{ value: 'high', label: 'High' }]));
     expect(getOpencodeProviderSettings(plugin.settings).visibleModels).toEqual([]);
   } finally { await service.dispose(); }
-}, 15_000);
+});
 
 it('waits for the requested model while other models are already available', async () => {
-  fixture.environment.DELAYED_CATALOG_MS = '250';
-  const catalog = JSON.parse(readFileSync(fixture.environment.CATALOG_FILE!, 'utf8'));
-  catalog.push({ providerID: 'acme', id: 'slow-model', name: 'Slow Model', enabled: true, variants: [{ id: 'high' }] });
-  writeFileSync(fixture.environment.CATALOG_FILE!, JSON.stringify(catalog));
-  const service = new OpencodeMetadataService(fixture.createPlugin());
+  const plugin = fixture.createPlugin();
+  const service = new OpencodeMetadataService(runtimeHostFor(plugin, 'opencode'), plugin.executionLifecycleRegistry);
   try {
-    await expect(service.warmModelMetadata('opencode:acme/slow-model')).resolves.toBe(true);
+    await expect(service.loadCatalog()).resolves.toBe(true);
+    const read = fixture.environment.ENDPOINT_FILE! + '.read';
+    rmSync(read);
+    const pending = service.warmModelMetadata('opencode:acme/slow-model');
+    // The requested model appears only after a response containing other models was sent.
+    await waitUntil(() => existsSync(read));
+    addModel();
+    await expect(pending).resolves.toBe(true);
   } finally { await service.dispose(); }
 });
