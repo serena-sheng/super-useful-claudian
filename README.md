@@ -12,7 +12,8 @@ a provider-readiness panel, a token meter, and a local archive that can reopen a
 conversation with every turn visible. A few enhancements were borrowed from
 [oh-my-claudian](https://github.com/lee259/oh-my-claudian) by Lee.
 
-**1.6.0 is synced to upstream Claudian 2.3.34.** The fork's early `dsh` provider is gone:
+**1.6.0 is synced to upstream Claudian 2.3.34, plus the fixes upstream landed on `main` after that
+tag.** The fork's early `dsh` provider is gone:
 upstream now ships a maintained **DeepSeek Harness** provider (`deepseek`), so the plugin
 migrates your old `dsh` settings and sessions automatically instead of keeping a second
 copy of the same integration.
