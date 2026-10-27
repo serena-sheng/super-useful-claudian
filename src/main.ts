@@ -57,6 +57,7 @@ import { ClaudianSettingTab } from './features/settings/ClaudianSettings';
 import { type BalanceStatusHandle,mountDeepSeekBalanceStatus, refreshDeepSeekBalanceStatus } from './features/usage/DeepSeekBalanceStatus';
 import { initUsageLedger } from './features/usage/UsageLedger';
 import { t } from './i18n/i18n';
+import { getDeepSeekProviderSettings } from './providers/deepseek/settings';
 import { getBuiltInProviderDefaultConfigs } from './providers/defaultProviderConfigs';
 import {
   DEEPSEEK_API_KEY_VARIABLE,
@@ -246,7 +247,9 @@ export default class ClaudianPlugin extends Plugin {
       getApiKey: () => getRuntimeEnvironmentVariables(this.settings, 'deepseek')[DEEPSEEK_API_KEY_VARIABLE]?.trim() || null,
     });
     this.deepSeekBalanceStatus = mountDeepSeekBalanceStatus(this, {
-      isEnabled: () => this.settings.deepseekBalanceInStatusBar !== false,
+      // Only meaningful while the DeepSeek Harness provider itself is enabled.
+      isEnabled: () => this.settings.deepseekBalanceInStatusBar !== false
+        && getDeepSeekProviderSettings(this.settings).enabled,
       read: () => {
         const snapshot = getDeepSeekBalance()?.snapshot;
         const primary = snapshot?.reading?.infos[0];
