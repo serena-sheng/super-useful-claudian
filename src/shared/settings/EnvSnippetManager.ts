@@ -400,6 +400,7 @@ export class EnvSnippetManager {
     });
 
     this.onContextLimitsChange?.();
+    if (snippet.modelAliases) this.plugin.notifyProviderChatOptionsChanged('claude');
     const view = this.plugin.app.workspace.getLeavesOfType('super-useful-claudian-view')[0]?.view as {
       refreshModelSelector?(): void;
     } | undefined;
