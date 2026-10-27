@@ -106,6 +106,9 @@ export interface StoredInlineEditModelSelection extends StoredChatModelSelection
  * `string` here.  The active provider casts internally when it needs
  * narrower types.
  */
+/** Default linked-content behaviour for a new chat draft. */
+export type LinkedContentNewDraftMode = 'active-note' | 'none';
+
 export interface ClaudianSettings {
   // User preferences
   userName: string;
@@ -200,6 +203,11 @@ export interface ClaudianSettings {
   checkCliUpdates: boolean;
   /** Show the DeepSeek account balance in the status bar (reads only on demand). */
   deepseekBalanceInStatusBar: boolean;
+  /**
+   * What a new chat links by default: the active note, or nothing until you pick one.
+   * Existing conversations keep (or detach) their own binding from the composer chip.
+   */
+  linkedContentOnNewDraft: LinkedContentNewDraftMode;
 
   // Allow provider-specific extension fields
   [key: string]: unknown;

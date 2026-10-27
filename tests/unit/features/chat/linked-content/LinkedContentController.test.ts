@@ -22,7 +22,10 @@ function createFolder(path: string): TFolder {
   return folder;
 }
 
-function createHarness(initialFiles: Array<TFile | TFolder> = []) {
+function createHarness(
+  initialFiles: Array<TFile | TFolder> = [],
+  overrides: Partial<LinkedContentControllerOptions> = {},
+) {
   const entries = new Map(initialFiles.map(entry => [entry.path || '.', entry]));
   let activeFile: TFile | null = null;
   const app = {
@@ -50,6 +53,7 @@ function createHarness(initialFiles: Array<TFile | TFolder> = []) {
     getCachedVaultFolders: () => [...entries.values()].filter(
       (entry): entry is TFolder => entry instanceof TFolder,
     ),
+    ...overrides,
   };
 
   return {
@@ -363,5 +367,70 @@ describe('LinkedContentController', () => {
     expect(() => harness.controller.commitSubmission(nextToken)).toThrow(
       'Linked content controller is destroyed',
     );
+  });
+
+  it('starts a new draft without a note when the default is No file', () => {
+    const note = createFile('Notes/First.md');
+    const other = createFile('Notes/Second.md');
+    const harness = createHarness([note, other], { getNewDraftLinkMode: () => 'none' });
+    harness.setActiveFile(note);
+
+    harness.controller.resetAutoDraft();
+    expect(harness.controller.getSnapshot()).toEqual({ mode: 'auto-draft', path: null });
+
+    // The active note moving on must not quietly re-attach it.
+    harness.controller.handleActiveFileChanged(other, true);
+    expect(harness.controller.getSnapshot().path).toBeNull();
+
+    // Picking one explicitly still works.
+    harness.controller.selectExplicit('Notes/First.md');
+    expect(harness.controller.getSnapshot()).toEqual({ mode: 'explicit-draft', path: 'Notes/First.md' });
+  });
+
+  it('keeps following the active note by default', () => {
+    const note = createFile('Notes/First.md');
+    const harness = createHarness([note]);
+    harness.setActiveFile(note);
+
+    harness.controller.resetAutoDraft();
+    expect(harness.controller.getSnapshot().path).toBe('Notes/First.md');
+  });
+
+  it('detaches a bound conversation from its linked note', async () => {
+    const note = createFile('Notes/First.md');
+    const detachConversation = jest.fn().mockResolvedValue(undefined);
+    const harness = createHarness([note], {
+      getConversationId: () => 'conv-1',
+      detachConversation,
+    });
+    harness.controller.lock('Notes/First.md');
+    expect(harness.controller.canDetachConversation).toBe(true);
+
+    await harness.controller.detachFromConversation();
+
+    expect(detachConversation).toHaveBeenCalledWith('conv-1');
+    expect(harness.controller.getSnapshot()).toEqual({ mode: 'locked', path: null });
+    expect(harness.controller.canDetachConversation).toBe(false);
+  });
+
+  it('restores the linked note when detaching fails', async () => {
+    const note = createFile('Notes/First.md');
+    const detachConversation = jest.fn().mockRejectedValue(new Error('write failed'));
+    const harness = createHarness([note], {
+      getConversationId: () => 'conv-1',
+      detachConversation,
+    });
+    harness.controller.lock('Notes/First.md');
+
+    await harness.controller.detachFromConversation();
+
+    expect(harness.controller.getSnapshot()).toEqual({ mode: 'locked', path: 'Notes/First.md' });
+  });
+
+  it('does not offer detaching without a bound conversation', () => {
+    const note = createFile('Notes/First.md');
+    const harness = createHarness([note], { getConversationId: () => null, detachConversation: jest.fn() });
+    harness.controller.lock('Notes/First.md');
+    expect(harness.controller.canDetachConversation).toBe(false);
   });
 });

@@ -5,6 +5,7 @@ import {
   assertLinkedContentPath,
   normalizeLinkedContentPath,
 } from '@/core/path/LinkedContentPath';
+import type { LinkedContentNewDraftMode } from '@/core/types/settings';
 import type { ComposerInfoRow } from '@/features/chat/composer/ComposerInfoRow';
 import { LinkedContentChip } from '@/features/chat/linked-content/LinkedContentChip';
 import { LinkedContentPickerSource } from '@/features/chat/linked-content/LinkedContentPickerSource';
@@ -47,6 +48,12 @@ export interface LinkedContentControllerOptions {
   readonly getExcludedTags: () => readonly string[];
   readonly getCachedVaultFiles: () => readonly TFile[];
   readonly getCachedVaultFolders: () => readonly { readonly name: string; readonly path: string }[];
+  /** Whether a new draft starts linked to the active note; 'none' keeps drafts empty. */
+  readonly getNewDraftLinkMode?: () => LinkedContentNewDraftMode;
+  /** The conversation this controller represents, once the draft has been admitted. */
+  readonly getConversationId?: () => string | null;
+  /** Removes the conversation's note binding; the conversation keeps its history. */
+  readonly detachConversation?: (conversationId: string) => Promise<void>;
 }
 
 interface DraftCheckpoint {
@@ -109,8 +116,50 @@ export class LinkedContentController {
     this.#assertLive();
     this.activeSubmission = null;
     this.mode = 'auto-draft';
-    this.path = this.#eligibleActiveFilePath(this.app.workspace.getActiveFile());
+    this.path = this.#followsActiveNote()
+      ? this.#eligibleActiveFilePath(this.app.workspace.getActiveFile())
+      : null;
     this.publish();
+  }
+
+  /** False when the user asked new drafts to start without a note. */
+  #followsActiveNote(): boolean {
+    return (this.options.getNewDraftLinkMode?.() ?? 'active-note') !== 'none';
+  }
+
+  /** Which conversation, if any, owns the note this controller shows. */
+  #conversationId(): string | null {
+    return this.options.getConversationId?.() ?? null;
+  }
+
+  /** A bound conversation whose note can still be detached from the composer. */
+  get canDetachConversation(): boolean {
+    return this.mode === 'locked'
+      && this.path !== null
+      && this.options.detachConversation !== undefined
+      && this.#conversationId() !== null;
+  }
+
+  /**
+   * Drops the conversation's linked note so this chat stops travelling with a vault file.
+   * The chip disappears; the conversation and its history stay where they are.
+   */
+  async detachFromConversation(): Promise<void> {
+    if (!this.canDetachConversation) return;
+    const conversationId = this.#conversationId()!;
+    const detach = this.options.detachConversation!;
+    const previous = this.path;
+    this.path = null;
+    this.publish();
+    try {
+      await detach(conversationId);
+    } catch (error) {
+      if (!this.destroyed) {
+        this.path = previous;
+        this.publish();
+        new Notice(error instanceof Error ? error.message : String(error));
+      }
+    }
   }
 
   /** New returning to a draft drops any explicit choice and links the active Note again. */
@@ -133,12 +182,12 @@ export class LinkedContentController {
   }
 
   handleActiveFileChanged(file: TFile | null, isActiveOwner: boolean): void {
-    if (this.destroyed || !isActiveOwner || this.mode !== 'auto-draft') return;
+    if (this.destroyed || !isActiveOwner || this.mode !== 'auto-draft' || !this.#followsActiveNote()) return;
     this.#reconcileAutoDraftPath(file);
   }
 
   handleActiveFileMetadataChanged(file: TFile | null): void {
-    if (this.destroyed || this.mode !== 'auto-draft') return;
+    if (this.destroyed || this.mode !== 'auto-draft' || !this.#followsActiveNote()) return;
     const activeFile = this.app.workspace.getActiveFile();
     if (file !== null && activeFile?.path !== file.path) return;
     this.#reconcileAutoDraftPath(activeFile);
@@ -251,7 +300,8 @@ export class LinkedContentController {
     this.chip = new LinkedContentChip(infoRow, () => {
       void this.activateCurrentContent();
     }, () => {
-      this.selectExplicit(null);
+      if (this.canDetachConversation) void this.detachFromConversation();
+      else this.selectExplicit(null);
     });
     this.#renderChip();
   }
@@ -379,7 +429,8 @@ export class LinkedContentController {
   }
 
   #renderChip(presentation = this.#derivePresentation(this.path)): void {
-    const removable = this.mode === 'auto-draft' || this.mode === 'explicit-draft';
+    const removable = this.mode === 'auto-draft' || this.mode === 'explicit-draft'
+      || this.canDetachConversation;
     this.chip?.render(presentation, removable);
   }
 

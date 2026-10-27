@@ -97,6 +97,12 @@ export class ConversationService {
       this.#mutateConversations(ids, id => this.deps.repository.setPlacement(id, placement)));
   }
 
+  /** Drops the conversation's linked note; the list refresh moves it out of that note's group. */
+  async detachLinkedContent(id: string): Promise<void> {
+    await this.deps.repository.detachLinkedContent(id);
+    this.notifyConversationListChanged();
+  }
+
   async setLinkedContentPinned(contentPath: string, isPinned: boolean): Promise<void> {
     const changed = await this.deps.pinnedLinkedContentPaths.setPinned(contentPath, isPinned);
     if (changed) {

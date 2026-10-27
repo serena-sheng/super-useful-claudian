@@ -128,8 +128,9 @@ it('shows the linked note in an info row under the input box', async () => {
     const info = within(row);
     const linked = info.getByRole('button', { name: 'Linked content: Notes/Plan.md' });
     expect(linked.textContent).toBe('Plan');
-    // Locked after the first message: shown, activatable, not removable.
-    expect(info.queryByRole('button', { name: /^Remove/ })).toBeNull();
+    // Locked after the first message: shown and activatable, and detachable so the chat can
+    // stop carrying this note.
+    expect(info.getByRole('button', { name: /^Remove/ })).toBeTruthy();
     // The in-box tray is left to per-turn context.
     expect(within(tab.dom.inputWrapper).queryByRole('button', { name: /Linked content/ })).toBeNull();
 

@@ -500,6 +500,12 @@
       "name": "Etiquetas excluidas",
       "desc": "Las notas con estas etiquetas no se cargarán automáticamente como contexto (una por línea, sin #)"
     },
+    "linkedContentOnNewDraft": {
+      "name": "Los chats nuevos llevan un archivo",
+      "desc": "Qué archivo asocia un chat nuevo antes de enviar nada. Elige «Ningún archivo» para que la sesión deje de seguir la nota abierta; aún puedes elegir una desde el cuadro de entrada. Las conversaciones ya iniciadas conservan su nota hasta que la quites.",
+      "activeNote": "Nota activa",
+      "none": "Ningún archivo"
+    },
     "mediaFolder": {
       "name": "Carpeta de medios",
       "desc": "Carpeta que contiene archivos adjuntos/imagenes. Cuando las notas usan ![[image.jpg]], Claude buscará aquí. Dejar vacío para la raíz del depósito."

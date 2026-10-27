@@ -641,6 +641,29 @@ export class ConversationRepository {
     });
   }
 
+  /**
+   * Removes the note a conversation is grouped under. The conversation keeps its history and
+   * its provider session; only the linked-content membership goes, so it leaves that note's group.
+   */
+  async detachLinkedContent(id: string): Promise<void> {
+    const conversation = this.#getRecord(id);
+    if (!conversation || conversation.linkedContentPath === undefined) return;
+    await this.#enqueuePersistence(id, async () => {
+      if (!this.#canWriteConversation(conversation)) return;
+      const previous = conversation.linkedContentPath;
+      this.#assignLinkedContentPath(conversation, undefined);
+      try {
+        await this.#writeMetadata(conversation, {
+          preserveProviderState: !this.hydratedConversationIds.has(id),
+        });
+      } catch (error) {
+        if (this.#getRecord(id) === conversation) this.#assignLinkedContentPath(conversation, previous);
+        throw error;
+      }
+      if (this.#isConversationRetained(conversation)) this.#invalidateConversation(conversation.id);
+    });
+  }
+
   #isLiveProject(projectId: string): boolean {
     const project = this.deps.projects?.get(projectId);
     return project != null && !project.isArchived;

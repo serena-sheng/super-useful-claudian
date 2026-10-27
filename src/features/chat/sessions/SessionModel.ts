@@ -109,6 +109,9 @@ export class SessionModel {
       getExcludedTags: () => plugin.settings.excludedTags,
       getCachedVaultFiles: () => this.presentation?.vaultIndex.getCachedVaultFiles() ?? [],
       getCachedVaultFolders: () => this.presentation?.vaultIndex.getCachedVaultFolders() ?? [],
+      getNewDraftLinkMode: () => plugin.settings.linkedContentOnNewDraft ?? 'active-note',
+      getConversationId: () => session.conversationId,
+      detachConversation: id => plugin.detachConversationLinkedContent(id),
     });
     if (session.conversationId) this.linkedContentController.lock(plugin.getConversationSync(session.conversationId)?.linkedContentPath);
     else this.linkedContentController.resetAutoDraft();

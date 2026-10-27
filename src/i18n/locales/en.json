@@ -500,6 +500,12 @@
       "name": "Excluded tags",
       "desc": "Notes with these tags will not auto-load as context (one per line, without #)"
     },
+    "linkedContentOnNewDraft": {
+      "name": "New chats carry a file",
+      "desc": "What a new chat links before you send anything. Choose “No file” to keep sessions free of whichever vault note happens to be open; you can still pick one from the composer. Conversations you already started keep their note until you remove it.",
+      "activeNote": "Active note",
+      "none": "No file"
+    },
     "mediaFolder": {
       "name": "Media folder",
       "desc": "Folder containing attachments/images. When notes use ![[image.jpg]], Claude will look here. Leave empty for vault root."
