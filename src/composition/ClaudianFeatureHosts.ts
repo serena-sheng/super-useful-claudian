@@ -174,6 +174,10 @@ export class ClaudianChatFeatureHost extends ClaudianFeatureHost implements Chat
     return this.domains.conversations.setLinkedContentPinned(contentPath, isPinned);
   }
 
+  detachConversationLinkedContent(id: string): Promise<void> {
+    return this.domains.conversations.detachLinkedContent(id);
+  }
+
   getWorkspaceConversationIds(): ReadonlySet<string> {
     return this.domains.views.getWorkspaceConversationIds();
   }

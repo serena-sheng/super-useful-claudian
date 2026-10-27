@@ -500,6 +500,12 @@
       "name": "Tags exclus",
       "desc": "Les notes avec ces tags ne seront pas chargées automatiquement comme contexte (un par ligne, sans #)"
     },
+    "linkedContentOnNewDraft": {
+      "name": "Les nouveaux chats emportent un fichier",
+      "desc": "Le fichier qu'un nouveau chat associe avant tout envoi. Choisissez « Aucun fichier » pour que la session ne suive plus la note ouverte ; vous pouvez toujours en choisir une depuis la zone de saisie. Les conversations déjà commencées gardent leur note jusqu'à ce que vous la retiriez.",
+      "activeNote": "Note active",
+      "none": "Aucun fichier"
+    },
     "mediaFolder": {
       "name": "Dossier des médias",
       "desc": "Dossier contenant les pièces jointes/images. Lorsque les notes utilisent ![[image.jpg]], Claude cherchera ici. Laisser vide pour la racine du coffre."

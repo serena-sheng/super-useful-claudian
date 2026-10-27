@@ -74,4 +74,5 @@ export const DEFAULT_CLAUDIAN_SETTINGS: ClaudianSettings = {
   // Off by default: no registry lookups until the user opts in.
   checkCliUpdates: false,
   deepseekBalanceInStatusBar: true,
+  linkedContentOnNewDraft: 'active-note',
 };

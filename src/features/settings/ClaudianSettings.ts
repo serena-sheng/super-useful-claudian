@@ -609,6 +609,21 @@ export class ClaudianSettingTab extends PluginSettingTab {
       });
 
     new Setting(container)
+      .setName(t('settings.linkedContentOnNewDraft.name'))
+      .setDesc(t('settings.linkedContentOnNewDraft.desc'))
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption('active-note', t('settings.linkedContentOnNewDraft.activeNote'))
+          .addOption('none', t('settings.linkedContentOnNewDraft.none'))
+          .setValue(this.host.settings.linkedContentOnNewDraft ?? 'active-note')
+          .onChange(async (value) => {
+            await this.host.mutateSettings((settings) => {
+              settings.linkedContentOnNewDraft = value === 'none' ? 'none' : 'active-note';
+            });
+          });
+      });
+
+    new Setting(container)
       .setName(t('settings.mediaFolder.name'))
       .setDesc(t('settings.mediaFolder.desc'))
       .addText((text) => {

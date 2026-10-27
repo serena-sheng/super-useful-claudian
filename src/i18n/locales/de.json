@@ -500,6 +500,12 @@
       "name": "Ausgeschlossene Tags",
       "desc": "Notizen mit diesen Tags werden nicht automatisch als Kontext geladen (einer pro Zeile, ohne #)"
     },
+    "linkedContentOnNewDraft": {
+      "name": "Neue Chats führen eine Datei mit",
+      "desc": "Welche Datei ein neuer Chat vor dem Senden verknüpft. Mit „Keine Datei“ folgt der Chat nicht mehr der gerade geöffneten Notiz; du kannst weiterhin eine aus dem Eingabefeld wählen. Bereits gestartete Unterhaltungen behalten ihre Notiz, bis du sie entfernst.",
+      "activeNote": "Aktive Notiz",
+      "none": "Keine Datei"
+    },
     "mediaFolder": {
       "name": "Medienordner",
       "desc": "Ordner mit Anhängen/Bildern. Wenn Notizen ![[image.jpg]] verwenden, sucht Claude hier. Leer lassen für Vault-Stammverzeichnis."

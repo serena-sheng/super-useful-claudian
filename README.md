@@ -77,6 +77,10 @@ that CLI's own documentation.
 - **One-step steering**: while a steer-capable turn runs, a **Steer** button appears in the
   composer and Option/Alt+Enter sends the current text into that turn — no queue round trip.
   The queued-message "Steer Now" path still exists for input already sent.
+- **Linked content on your terms**: a setting decides what a new chat links — the note you
+  have open, or nothing at all until you pick one from the composer. An already-started
+  conversation can drop its note from the composer chip (the × beside it), so a chat stops
+  travelling with a vault file; it keeps its history and moves out of that note's group.
 - **DeepSeek balance**: the DeepSeek Harness settings tab can read the live account balance
   from `api.deepseek.com/user/balance` with the provider's `DEEPSEEK_API_KEY`, and the status
   bar can show it. Reads happen only when you ask (the Refresh button or a click on the status

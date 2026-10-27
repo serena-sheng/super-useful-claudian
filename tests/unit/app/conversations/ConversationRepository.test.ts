@@ -145,6 +145,35 @@ describe('ConversationRepository hydration', () => {
       .not.toHaveProperty('currentNote');
   });
 
+  it('detaches a conversation from its linked note without touching its history', async () => {
+    const { repository, persistence } = createRepository();
+    const conversation = await repository.create({
+      sessionId: 'linked-content-session',
+      linkedContentPath: 'Notes/Architecture.md',
+    });
+
+    await repository.detachLinkedContent(conversation.id);
+
+    expect(repository.getSync(conversation.id)).not.toHaveProperty('linkedContentPath');
+    expect(persistence.saveMetadata).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ linkedContentPath: 'Notes/Architecture.md' }),
+    );
+    // The provider session and its messages stay bound.
+    expect(repository.getSync(conversation.id)!.sessionId).toBe('linked-content-session');
+  });
+
+  it('keeps the linked note when detach persistence fails', async () => {
+    const { repository, persistence } = createRepository();
+    const conversation = await repository.create({
+      linkedContentPath: 'Notes/Architecture.md',
+    });
+
+    persistence.saveMetadata.mockRejectedValueOnce(new Error('metadata unavailable'));
+    await expect(repository.detachLinkedContent(conversation.id)).rejects.toThrow('metadata unavailable');
+
+    expect(repository.getSync(conversation.id)!.linkedContentPath).toBe('Notes/Architecture.md');
+  });
+
   it('removes a new Conversation shell when its initial metadata write fails', async () => {
     const { repository, persistence } = createRepository();
     persistence.saveMetadata.mockRejectedValueOnce(new Error('metadata unavailable'));
