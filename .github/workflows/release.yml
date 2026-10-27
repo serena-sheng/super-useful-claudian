@@ -1,7 +1,7 @@
 name: Release Obsidian plugin
 
-# Tag push builds the plugin, attests the artifacts, and opens a draft release.
-# Publishing stays manual: review the notes, then press Publish on GitHub.
+# Tag push builds the plugin, attests the artifacts and publishes the release.
+# Release notes come from the annotated tag message, so pass them when tagging.
 on:
   push:
     tags: ['[0-9]*']
@@ -36,10 +36,10 @@ jobs:
             manifest.json
             styles.css
 
-      - name: Create draft release
+      - name: Publish the release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="${GITHUB_REF#refs/tags/}"
-          gh release create "$tag" --title "$tag" --draft \
+          gh release create "$tag" --title "$tag" --notes-from-tag \
             main.js manifest.json styles.css
