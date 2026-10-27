@@ -321,6 +321,34 @@ it('keeps the user text on a conflicting save and overwrites or reloads only whe
   expect(memory.content).toBe('Second edits');
 });
 
+it('keeps unsaved edits when conflict Reload fails, then replaces them after Retry succeeds', async () => {
+  const memory = new InMemoryProjectMemory(FILLED);
+  const { dialog, controls, textarea } = await open(memory);
+  await waitFor(() => expect(textarea.value).toBe(FILLED));
+  type(dialog, textarea, 'My unsaved edits');
+  memory.writeExternally('Agent edits');
+  fireEvent.click(controls.getByRole('button', { name: t('common.save') }));
+  expect((await controls.findByRole('alert')).textContent).toBe(t('chat.projects.memory.conflict'));
+  memory.readMemory.mockRejectedValueOnce(new Error('Temporary read failure'));
+
+  fireEvent.click(controls.getByRole('button', { name: t('chat.projects.memory.reload') }));
+
+  await waitFor(() => expect(controls.getByRole('alert').textContent).toBe(t('chat.projects.memory.loadFailed')));
+  expect(textarea.value).toBe('My unsaved edits');
+  expect(textarea.disabled).toBe(false);
+  expect(hasDirtyMark(dialog)).toBe(true);
+  expect(memory.content).toBe('Agent edits');
+  expect(memory.saveMemory).toHaveBeenCalledTimes(1);
+  expect((await axe(dialog)).violations).toEqual([]);
+
+  fireEvent.click(controls.getByRole('button', { name: t('common.retry') }));
+
+  await waitFor(() => expect(textarea.value).toBe('Agent edits'));
+  expect(controls.queryByRole('alert')).toBeNull();
+  expect(hasDirtyMark(dialog)).toBe(false);
+  expect(memory.saveMemory).toHaveBeenCalledTimes(1);
+});
+
 it('locks the editor while Reload after a conflict reads the file, so no new typing is overwritten', async () => {
   const memory = new InMemoryProjectMemory(FILLED);
   const { dialog, controls, textarea } = await open(memory);
@@ -445,4 +473,55 @@ it('preserves source offsets after host frontmatter and skips ambiguous extra re
   renderedHeading.parentElement!.createEl('h2', { text: 'Injected heading' });
   fireEvent.click(controls.getByRole('heading', { name: 'Injected heading' }));
   expect(textarea.hidden).toBe(true);
+});
+
+it.each(['edit', 'close'])('releases Markdown embed resources registered after the memory preview is retired by %s', async action => {
+  let finish!: () => void;
+  let finished!: () => void;
+  const gate = new Promise<void>(resolve => { finish = resolve; });
+  const completed = new Promise<void>(resolve => { finished = resolve; });
+  const cleanup = jest.fn();
+  const childCleanup = jest.fn();
+  const embedEvent = jest.fn();
+  const childEvent = jest.fn();
+  const eventName = 'memory-preview-embed-event';
+  render.mockImplementationOnce(async (_app, _markdown, element, _sourcePath, component) => {
+    element.createEl('p', { text: 'Loading embed' });
+    await gate;
+    window.addEventListener(eventName, embedEvent);
+    component.register(() => {
+      window.removeEventListener(eventName, embedEvent);
+      cleanup();
+    });
+    const child = new Component();
+    window.addEventListener(eventName, childEvent);
+    child.register(() => {
+      window.removeEventListener(eventName, childEvent);
+      childCleanup();
+    });
+    component.addChild(child);
+    finished();
+  });
+  const { modal, controls, textarea } = await open(new InMemoryProjectMemory(FILLED));
+  await controls.findByText('Loading embed');
+  if (action === 'edit') {
+    fireEvent.click(controls.getByRole('button', { name: edit }));
+  } else {
+    modal.close();
+  }
+  expect(textarea.hidden).toBe(action === 'close');
+  expect(textarea.value).toBe(FILLED);
+  expect(screen.queryByRole('dialog', { name: title }) !== null).toBe(action === 'edit');
+  try {
+    finish();
+    await completed;
+    window.dispatchEvent(new Event(eventName));
+    expect(embedEvent).not.toHaveBeenCalled();
+    expect(childEvent).not.toHaveBeenCalled();
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(childCleanup).toHaveBeenCalledTimes(1);
+  } finally {
+    window.removeEventListener(eventName, embedEvent);
+    window.removeEventListener(eventName, childEvent);
+  }
 });

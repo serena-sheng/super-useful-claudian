@@ -42,13 +42,13 @@ import type {
 import { shouldSendMessageFromEnterKey } from '@/features/chat/tabs/TabInputEvents';
 import { TabModelSelectionCoordinator } from '@/features/chat/tabs/TabModelSelectionCoordinator';
 import { syncTabProviderServices } from '@/features/chat/tabs/tabProviderLifecycle';
-import { getBlankTabModelOptions } from '@/features/chat/tabs/tabProviderSettings';
 import { applyProviderUIGating, refreshTabProviderUI, syncComposerDropdownForProvider, updateTabPermissionMode, updateTabServiceTier } from '@/features/chat/tabs/tabProviderUI';
 import type {
   ProviderCatalogInfo,
   TabUIComponents,
 } from '@/features/chat/tabs/types';
 import { t } from '@/i18n/i18n';
+import { getProviderPickerModelOptions } from '@/shared/toolbar/providerPickerModelOptions';
 import { getVaultPath } from '@/utils/path';
 
 function buildContextManagers(
@@ -130,7 +130,7 @@ function buildInputToolbar(
     return {
       ...baseConfig,
       getModelOptions: (settings: Record<string, unknown>) =>
-        getBlankTabModelOptions(settings),
+        getProviderPickerModelOptions(() => settings),
     };
   };
 

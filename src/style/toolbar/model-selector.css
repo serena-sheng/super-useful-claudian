@@ -101,7 +101,7 @@
 }
 
 /* The chevron points up while its menu is open above the button. */
-.claudian-toolbar-chip[aria-expanded='true'] .claudian-toolbar-chip-chevron {
+.claudian-toolbar-chip[aria-expanded='true']:not([data-menu-placement='below']) .claudian-toolbar-chip-chevron {
   transform: rotate(180deg);
 }
 
@@ -136,11 +136,12 @@
 }
 
 
-/* A floating menu (ToolbarMenu's floatingLayer) is fixed above its button's end edge. */
+/* Floating menus choose the side with room and stay within the viewport's vertical edges. */
 .claudian-toolbar-popover.claudian-toolbar-popover--floating {
   position: fixed;
-  top: auto;
+  top: var(--claudian-toolbar-popover-top, auto);
   bottom: var(--claudian-toolbar-popover-bottom);
+  max-height: min(var(--claudian-toolbar-popover-max-height, 420px), 60vh);
   inset-inline-start: auto;
   right: var(--claudian-toolbar-popover-right);
   min-width: var(--claudian-toolbar-popover-min-width);
@@ -311,11 +312,6 @@
 .claudian-model-list .claudian-model-group {
   padding-top: 1px;
   padding-bottom: 0;
-}
-
-/* A column with no visible part, such as a provider without reasoning or fast mode, takes no room. */
-.claudian-model-parts:not(:has(> :not(.claudian-hidden))) {
-  display: none;
 }
 
 .claudian-model-providers {
