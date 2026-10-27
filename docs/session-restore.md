@@ -34,6 +34,10 @@ the restored transcript still shows every round.
    the provider decides whether to start a fresh native session; the displayed archive is
    not replayed into the model automatically.
 
+Reopening a conversation reveals **every** restored turn at once. The chat's live render
+window (the last 40 messages while a turn streams) is a streaming budget, not a statement
+about an existing transcript, so it never hides the start of a session you open.
+
 ## Limits
 
 - Rounds that were never saved (for example a conversation that existed only in another

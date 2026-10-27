@@ -1,9 +1,9 @@
 {
   "id": "super-useful-claudian",
   "name": "Super Useful Claudian",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "minAppVersion": "1.13.0",
-  "description": "Run Oh My Pi, DeepSeek Harness, Claude Code, Codex, Grok, OpenCode and Pi inside your vault as chat collaborators. A fork of Claudian with provider readiness checks, a capability matrix, a token usage meter and full session restore.",
+  "description": "Run Oh My Pi, DeepSeek Harness, Claude Code, Codex, Grok, OpenCode and Pi inside your vault as chat collaborators. A fork of Claudian with provider readiness checks, a capability matrix, a token usage meter, one-step turn steering, a DeepSeek balance readout and full session restore.",
   "author": "Serena Sheng",
   "authorUrl": "https://github.com/serena-sheng",
   "isDesktopOnly": true

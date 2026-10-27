@@ -25,6 +25,7 @@ import { ClaudianProviderHost } from './composition/ClaudianProviderHost';
 import { ClaudianViews } from './composition/ClaudianViews';
 import { ProviderExecutionLifecycleRegistry } from './core/execution';
 import { resolveLoginShellPath } from './core/process/loginShellPath';
+import { getRuntimeEnvironmentVariables } from './core/providers/providerEnvironment';
 import { ProviderRegistry } from './core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from './core/providers/ProviderSettingsCoordinator';
 import { ProviderWorkspaceRegistry } from './core/providers/ProviderWorkspaceRegistry';
@@ -53,8 +54,16 @@ import { ZenModeController } from './features/chat/zen/ZenModeController';
 import { createInlineEditCommand } from './features/inline-edit/inlineEditCommand';
 import { InlineEditSessionOwner } from './features/inline-edit/InlineEditSessionOwner';
 import { ClaudianSettingTab } from './features/settings/ClaudianSettings';
+import { type BalanceStatusHandle,mountDeepSeekBalanceStatus, refreshDeepSeekBalanceStatus } from './features/usage/DeepSeekBalanceStatus';
 import { initUsageLedger } from './features/usage/UsageLedger';
+import { t } from './i18n/i18n';
 import { getBuiltInProviderDefaultConfigs } from './providers/defaultProviderConfigs';
+import {
+  DEEPSEEK_API_KEY_VARIABLE,
+  formatDeepSeekBalance,
+  getDeepSeekBalance,
+  initDeepSeekBalance,
+} from './shared/usage/DeepSeekBalance';
 
 export default class ClaudianPlugin extends Plugin {
   readonly executionLifecycleRegistry = new ProviderExecutionLifecycleRegistry();
@@ -77,6 +86,7 @@ export default class ClaudianPlugin extends Plugin {
   private conversationLifecycle!: ConversationLifecycle;
   private vaultContentEvents!: VaultContentEvents;
   private settingsTab: ClaudianSettingTab | null = null;
+  private deepSeekBalanceStatus: BalanceStatusHandle | null = null;
   private readonly views = new ClaudianViews(
     this.app.workspace,
     () => this.settings.chatViewPlacement,
@@ -212,7 +222,11 @@ export default class ClaudianPlugin extends Plugin {
       providerSettings: ProviderSettingsCoordinator,
       executionLifecycle: this.executionLifecycleRegistry,
       isUnloading: () => this.isUnloading,
-      publishCommittedSettings: async (settings, previous) => this.chatViews.publishSettings(settings, previous),
+      publishCommittedSettings: async (settings, previous) => {
+        this.chatViews.publishSettings(settings, previous);
+        // The status item re-reads its preference on every committed save.
+        refreshDeepSeekBalanceStatus();
+      },
       // No chat view can hold tabs before loading completes and assigns the lifecycle.
       onConversationDeleted: conversationId => this.conversationLifecycle.resetDeletedConversationTabs(conversationId),
       onConversationListChanged: () => this.chatViews.notifyConversationListChanged(),
@@ -227,6 +241,41 @@ export default class ClaudianPlugin extends Plugin {
     this.settingsCoordinator = settings;
     this.storage = domains.storage;
     await initUsageLedger(this.storage.getAdapter());
+    // Balance reads stay user-initiated; the service only holds the last reading.
+    initDeepSeekBalance({
+      getApiKey: () => getRuntimeEnvironmentVariables(this.settings, 'deepseek')[DEEPSEEK_API_KEY_VARIABLE]?.trim() || null,
+    });
+    this.deepSeekBalanceStatus = mountDeepSeekBalanceStatus(this, {
+      isEnabled: () => this.settings.deepseekBalanceInStatusBar !== false,
+      read: () => {
+        const snapshot = getDeepSeekBalance()?.snapshot;
+        const primary = snapshot?.reading?.infos[0];
+        if (!snapshot || !primary) {
+          return { value: null, tooltip: '', loading: snapshot?.status === 'loading' };
+        }
+        const breakdown = snapshot.reading?.infos
+          .map(info => t('settings.deepseek.balance.breakdown', {
+            currency: info.currency,
+            total: formatDeepSeekBalance(info),
+            granted: info.granted.toFixed(2),
+            toppedUp: info.toppedUp.toFixed(2),
+          }))
+          .join('\n') ?? '';
+        return {
+          value: `DeepSeek ${formatDeepSeekBalance(primary)}`,
+          tooltip: t('settings.deepseek.balance.statusBarTooltip', { breakdown }),
+          loading: false,
+        };
+      },
+      subscribe: listener => getDeepSeekBalance()?.subscribe(listener) ?? (() => undefined),
+      refresh: async () => { await getDeepSeekBalance()?.refresh(true); },
+      labels: {
+        loading: t('settings.deepseek.balance.loadingLabel'),
+        unknown: t('settings.deepseek.balance.unknownLabel'),
+        hint: t('settings.deepseek.balance.statusBarHint'),
+      },
+    });
+    if (typeof this.register === 'function') this.register(() => this.deepSeekBalanceStatus?.dispose());
     this.sessionMetadata = domains.sessionMetadata;
     this.nativeSessionArchives = domains.nativeSessionArchives;
     this.projects = domains.projects;

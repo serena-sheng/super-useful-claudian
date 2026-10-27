@@ -429,6 +429,10 @@
         "emptyHint": "Agents fill this in as the project progresses."
       }
     },
+    "steer": {
+      "button": "Steer",
+      "actionLabel": "Steer this message into the running turn (Alt+Enter)"
+    },
     "instructionMode": {
       "placeholder": "# Refine an instruction into a prompt",
       "unsupportedProvider": "Instruction mode is not supported by this provider.",
@@ -829,6 +833,29 @@
       }
     },
     "deepseek": {
+      "balance": {
+        "name": "Balance",
+        "desc": "Read the account balance from api.deepseek.com with the DEEPSEEK_API_KEY in this provider's environment. Nothing is requested until you refresh.",
+        "neverRead": "Not read yet.",
+        "noKey": "Set DEEPSEEK_API_KEY in this provider's environment to read the balance.",
+        "unavailable": "DeepSeek reports this key cannot make requests right now.",
+        "error": "Could not read the balance: {message}",
+        "amount": "{total} · granted {granted} · topped up {toppedUp}",
+        "updated": "updated {time}",
+        "refreshName": "Refresh balance",
+        "refreshDesc": "Reads the balance once. The plugin keeps no polling timer.",
+        "refresh": "Refresh",
+        "refreshing": "Refreshing…",
+        "statusBar": {
+          "name": "Show balance in the status bar",
+          "desc": "Adds a DeepSeek balance item to the status bar. It repaints the last reading; clicking it reads again."
+        },
+        "breakdown": "{currency}: {total} (granted {granted}, topped up {toppedUp})",
+        "statusBarTooltip": "DeepSeek balance\n{breakdown}",
+        "statusBarHint": "Click to read the DeepSeek balance",
+        "loadingLabel": "DeepSeek …",
+        "unknownLabel": "DeepSeek —"
+      },
       "installation": {
         "desc": "Auto prefers dsh, then discovers Desktop on macOS or Windows. To use Desktop when both are installed, enter its .app path or Windows install folder. Open Desktop once to complete setup.",
         "desktop": "Using your native Desktop profile.",

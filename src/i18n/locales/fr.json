@@ -429,6 +429,10 @@
         "emptyHint": "Les agents le complètent au fil du projet."
       }
     },
+    "steer": {
+      "button": "Intervenir",
+      "actionLabel": "Insérer ce message dans le tour en cours (Alt+Enter)"
+    },
     "instructionMode": {
       "placeholder": "# Refine an instruction into a prompt",
       "unsupportedProvider": "Instruction mode is not supported by this provider.",
@@ -829,6 +833,29 @@
       }
     },
     "deepseek": {
+      "balance": {
+        "name": "Solde",
+        "desc": "Lit le solde sur api.deepseek.com avec la DEEPSEEK_API_KEY de l'environnement de ce fournisseur. Aucune requête n'est faite avant un rafraîchissement.",
+        "neverRead": "Pas encore lu.",
+        "noKey": "Définissez DEEPSEEK_API_KEY dans l'environnement de ce fournisseur pour lire le solde.",
+        "unavailable": "DeepSeek indique que cette clé ne peut pas faire de requêtes pour l'instant.",
+        "error": "Impossible de lire le solde : {message}",
+        "amount": "{total} · offert {granted} · rechargé {toppedUp}",
+        "updated": "mis à jour {time}",
+        "refreshName": "Rafraîchir le solde",
+        "refreshDesc": "Lit une seule fois. Le plugin n'interroge pas périodiquement.",
+        "refresh": "Rafraîchir",
+        "refreshing": "Rafraîchissement…",
+        "statusBar": {
+          "name": "Afficher le solde dans la barre d'état",
+          "desc": "Ajoute un solde DeepSeek à la barre d'état. Il redessine la dernière lecture ; un clic relit."
+        },
+        "breakdown": "{currency} : {total} (offert {granted}, rechargé {toppedUp})",
+        "statusBarTooltip": "Solde DeepSeek\n{breakdown}",
+        "statusBarHint": "Cliquer pour lire le solde DeepSeek",
+        "loadingLabel": "DeepSeek …",
+        "unknownLabel": "DeepSeek —"
+      },
       "installation": {
         "desc": "La détection automatique privilégie dsh, puis cherche Desktop sur macOS ou Windows. Si les deux sont installés, saisissez le chemin .app de Desktop ou son dossier d’installation Windows pour le choisir. Ouvrez d’abord Desktop pour terminer sa configuration.",
         "desktop": "Utilisation de votre profil Desktop natif.",

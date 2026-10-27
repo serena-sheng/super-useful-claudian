@@ -106,6 +106,18 @@ it('hydrates a committed retry without replaying failed attempt prefixes', async
   expect(result.messages?.[1].content).toBe('checkingdone');
 });
 
+it('replays reasoning that only an unsettled attempt recorded', async () => {
+  records = [
+    wire(1, 'turn/start', { turn: 1 }),
+    wire(2, 'user/message', { source: { kind: 'user' }, content: [{ type: 'text', text: 'weigh the options' }] }),
+    wire(3, 'assistant/attempt', { turn: 1, step: 0, stream: [{ type: 'reasoning-chunks', index: 0, texts: ['Weighing the options'] }] }),
+    wire(4, 'turn/end', { turn: 1, reason: { kind: 'error' } }),
+  ];
+  const result = await history.hydrateConversationHistory(input, '/vault');
+  const blocks = result.messages?.[1].contentBlocks ?? [];
+  expect(blocks).toContainEqual({ type: 'thinking', content: 'Weighing the options' });
+});
+
 it.each(['direct', 'subagent', 'subagent_fork'])('hydrates %s child tools through a native subagent address without activating the child', async mode => {
   records = [wire(0, 'turn/start', { turn: 0 }),
     wire(1, 'tool/call', { callId: 'spawn', name: 'subagent', arguments: '{"description":"Review"}' }),

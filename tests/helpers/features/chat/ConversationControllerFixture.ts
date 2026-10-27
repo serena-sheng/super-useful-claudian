@@ -67,6 +67,7 @@ export function createConversationControllerDeps(
       refreshBranchButtonState: jest.fn(),
       captureReadingAnchor: jest.fn(() => null),
       restoreReadingAnchor: jest.fn(),
+      revealEarlierMessages: jest.fn(),
     } as any,
     subagentManager: {
       clear: jest.fn(),

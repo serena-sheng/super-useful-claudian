@@ -225,3 +225,37 @@ button.claudian-input-nav-btn[aria-disabled='true'] {
   --claudian-input-wrapper-border-color: var(--claudian-side-chat);
   --claudian-input-wrapper-box-shadow: 0 0 0 1px var(--claudian-side-chat);
 }
+
+/*
+ * Steer button: joins the composer's text to the running turn. It sits at the toolbar's end and
+ * only exists while steering is possible, so it never competes with the ordinary send path.
+ */
+.claudian-steer-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.claudian-steer-button:is(:hover, :focus-visible) {
+  color: var(--text-normal);
+  border-color: var(--interactive-accent);
+}
+
+.claudian-steer-button .claudian-steer-button-icon {
+  display: flex;
+  align-items: center;
+}
+
+.claudian-steer-button .claudian-steer-button-icon svg {
+  width: 12px;
+  height: 12px;
+}

@@ -9,6 +9,7 @@ import {
   handleComposerMenuKeydown,
   sendTabInputMessageFromEnterKey,
   sendTabInputMessageFromExplicitEnterShortcut,
+  steerTabInputMessageFromModifier,
 } from '@/features/chat/tabs/TabInputEvents';
 import type { TabControllers, TabUIComponents } from '@/features/chat/tabs/types';
 
@@ -52,6 +53,10 @@ export function buildTabRuntimeInputBindings(
       return;
     }
 
+    if (steerTabInputMessageFromModifier(tab, event)) {
+      return;
+    }
+
     if (sendTabInputMessageFromExplicitEnterShortcut(tab, event)) {
       return;
     }
@@ -85,6 +90,7 @@ export function buildTabRuntimeInputBindings(
     }
     ui.instructionModeManager.handleInputChange();
     ui.bangBashModeManager.handleInputChange();
+    ui.steerButton?.update();
   };
   dom.inputEl.addEventListener('input', inputHandler);
   options.registerCleanup(

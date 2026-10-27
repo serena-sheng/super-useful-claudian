@@ -242,6 +242,40 @@ export class InputController {
     }
   }
 
+  /** True while the composer's own follow-up can join the running turn instead of queueing. */
+  get canSteerComposer(): boolean {
+    return this.steering.canSteer && this.deps.drafts.destination === 'main';
+  }
+
+  /** Whether the composer currently holds something worth steering. */
+  get hasComposerContentForSteer(): boolean {
+    const draft = this.deps.drafts.capture('main');
+    return draft.content.trim().length > 0 || draft.images.length > 0;
+  }
+
+  /**
+   * Sends the composer's text straight into the running turn, skipping the queue round trip.
+   * False means the input stayed in the composer: nothing to send, or the provider declined the steer.
+   */
+  async steerComposer(): Promise<boolean> {
+    if (!this.canSteerComposer) return false;
+    const draft = this.deps.drafts.capture('main');
+    const content = draft.content.trim();
+    if (!content && draft.images.length === 0) return false;
+    const { turnRequest } = this.#buildTurnSubmission(content, draft.images);
+    const consumed = this.deps.drafts.consume('main');
+    const pending = await this.steering.steer(
+      createQueuedMessage(content, turnRequest),
+      message => new Notice(message),
+    );
+    if (pending.providerDisposition === 'definitely-unsent') {
+      this.steering.release(pending);
+      this.deps.drafts.restore('main', consumed, { merge: true, focus: true });
+      return false;
+    }
+    return true;
+  }
+
   /** Mailbox dispatch never reads the composer destination, drafts, or live selections. */
   get canStartSessionMessage(): boolean {
     return this.deps.canStartTurn() && !this.turns.isActive && !this.queue.message

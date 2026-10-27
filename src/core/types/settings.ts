@@ -198,6 +198,8 @@ export interface ClaudianSettings {
    * published CLI version. Off by default so the plugin makes no network calls.
    */
   checkCliUpdates: boolean;
+  /** Show the DeepSeek account balance in the status bar (reads only on demand). */
+  deepseekBalanceInStatusBar: boolean;
 
   // Allow provider-specific extension fields
   [key: string]: unknown;

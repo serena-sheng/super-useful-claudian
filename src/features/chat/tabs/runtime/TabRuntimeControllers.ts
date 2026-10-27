@@ -147,6 +147,7 @@ export function buildTabRuntimeControllers(
     switch (change) {
       case 'streaming':
         renderer.refreshBranchButtonState();
+        ui.steerButton?.update();
         options.onStreamingChanged?.(tab, state.isStreaming);
         break;
       case 'rewinding':

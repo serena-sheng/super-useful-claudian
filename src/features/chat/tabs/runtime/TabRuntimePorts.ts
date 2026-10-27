@@ -42,6 +42,7 @@ export function buildTabRuntimePorts(
       ui.effortSelector.updateDisplay();
       ui.permissionToggle.updateDisplay();
       ui.serviceTierToggle.updateDisplay();
+      ui.steerButton?.update();
     },
     refreshMessageTimestamps: () => {
       renderer.refreshMessageTimestamps();

@@ -26,6 +26,7 @@ import { InstructionModeManager } from '@/features/chat/composer/InstructionMode
 import { MainChatComposerDropdown } from '@/features/chat/composer/MainChatComposerDropdown';
 import { installTextareaSizing } from '@/features/chat/composer/textareaSizing';
 import { createInputToolbar } from '@/features/chat/composer/toolbar/InputToolbar';
+import { SteerButton } from '@/features/chat/composer/toolbar/SteerButton';
 import { BangBashRunner } from '@/features/chat/input/BangBashRunner';
 import { BangBashService } from '@/features/chat/input/BangBashService';
 import { NavigationSidebar } from '@/features/chat/navigation/NavigationSidebar';
@@ -119,7 +120,7 @@ function buildInputToolbar(
   options: TabRuntimeConstructionContext,
   runtimeRef: PublishedTabRuntimeRef,
   onUserModified: () => void,
-): ReturnType<typeof createInputToolbar> {
+): ReturnType<typeof createInputToolbar> & { steerButton: SteerButton } {
   const { dom } = core;
   const { plugin } = options;
 
@@ -366,7 +367,22 @@ function buildInputToolbar(
     'tab input toolbar menus',
     () => toolbarComponents.menus.destroy(),
   );
-  return toolbarComponents;
+
+  // Steering stays one click (or Option/Alt+Enter) away instead of a queue round trip.
+  const steerButton = new SteerButton(inputToolbar, {
+    canSteer: () => {
+      const tab = runtimeRef.current();
+      if (!tab || !options.isRuntimeLive(tab)) return false;
+      const inputController = tab.controllers.inputController;
+      return inputController.canSteerComposer && inputController.hasComposerContentForSteer;
+    },
+    onSteer: () => {
+      void runtimeRef.requirePublished().controllers.inputController.steerComposer()
+        .finally(() => steerButton.update());
+    },
+  });
+  options.registerCleanup('tab steer button', () => steerButton.destroy());
+  return { ...toolbarComponents, steerButton };
 }
 
 export function buildTabRuntimeUI(
@@ -486,6 +502,7 @@ export function buildTabRuntimeUI(
     effortSelector: toolbar.effortSelector,
     permissionToggle: toolbar.permissionToggle,
     serviceTierToggle: toolbar.serviceTierToggle,
+    steerButton: toolbar.steerButton,
     composerDropdown,
     contextUsageMeter: toolbar.contextUsageMeter,
     toolbarMenus: toolbar.menus,

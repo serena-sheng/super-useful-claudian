@@ -429,6 +429,10 @@
         "emptyHint": "Los agentes lo completan a medida que avanza el proyecto."
       }
     },
+    "steer": {
+      "button": "Intercalar",
+      "actionLabel": "Insertar este mensaje en el turno en curso (Alt+Enter)"
+    },
     "instructionMode": {
       "placeholder": "# Refine an instruction into a prompt",
       "unsupportedProvider": "Instruction mode is not supported by this provider.",
@@ -829,6 +833,29 @@
       }
     },
     "deepseek": {
+      "balance": {
+        "name": "Saldo",
+        "desc": "Lee el saldo de api.deepseek.com con la DEEPSEEK_API_KEY del entorno de este proveedor. No se hace ninguna petición hasta que refresques.",
+        "neverRead": "Aún sin leer.",
+        "noKey": "Define DEEPSEEK_API_KEY en el entorno de este proveedor para leer el saldo.",
+        "unavailable": "DeepSeek indica que esta clave no puede hacer peticiones ahora mismo.",
+        "error": "No se pudo leer el saldo: {message}",
+        "amount": "{total} · regalado {granted} · recargado {toppedUp}",
+        "updated": "actualizado {time}",
+        "refreshName": "Refrescar saldo",
+        "refreshDesc": "Lee una vez. El plugin no consulta periódicamente.",
+        "refresh": "Refrescar",
+        "refreshing": "Refrescando…",
+        "statusBar": {
+          "name": "Mostrar el saldo en la barra de estado",
+          "desc": "Añade un saldo de DeepSeek a la barra de estado. Redibuja la última lectura; al hacer clic vuelve a leer."
+        },
+        "breakdown": "{currency}: {total} (regalado {granted}, recargado {toppedUp})",
+        "statusBarTooltip": "Saldo de DeepSeek\n{breakdown}",
+        "statusBarHint": "Haz clic para leer el saldo de DeepSeek",
+        "loadingLabel": "DeepSeek …",
+        "unknownLabel": "DeepSeek —"
+      },
       "installation": {
         "desc": "La detección automática prioriza dsh y después busca Desktop en macOS o Windows. Si ambos están instalados, introduce la ruta .app de Desktop o su carpeta de instalación de Windows para seleccionarlo. Abre Desktop primero para completar su configuración.",
         "desktop": "Se usa tu perfil nativo de Desktop.",

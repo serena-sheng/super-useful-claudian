@@ -245,7 +245,7 @@ export function deepseekText(content: unknown): string {
   return Array.isArray(content) ? content.flatMap(block => isRecord(block) && block.type === 'text' && typeof block.text === 'string' ? [block.text] : []).join('\n') : '';
 }
 
-function attemptKey(value: Record<string, unknown>): string {
+export function attemptKey(value: Record<string, unknown>): string {
   if (typeof value.turn !== 'number' || typeof value.step !== 'number') throw new Error('Malformed DeepSeek attempt identity.');
   return `${value.turn}:${value.step}`;
 }

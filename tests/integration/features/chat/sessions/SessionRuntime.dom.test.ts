@@ -192,7 +192,7 @@ it('opens a reattached conversation at its latest message after rendering it in 
   await destroyTab(second);
 });
 
-it('lists every prompt of a long transcript in the directory, including prompts not rendered yet', async () => {
+it('lists every prompt of a long transcript in the directory and shows the whole restored transcript', async () => {
   const h = setup();
   const start = testDate().getTime();
   h.setNativeHistory(Array.from({ length: 30 }, (_, index) => [
@@ -201,7 +201,9 @@ it('lists every prompt of a long transcript in the directory, including prompts 
   ]).flat());
   const tab = await h.attach();
   const view = within(tab.dom.messagesWrapperEl);
-  expect(view.getByRole('button', { name: 'Show earlier messages' })).toBeTruthy();
+  // Reopening reveals every restored turn instead of the live render window's tail.
+  expect(view.getByText('Prompt 0')).toBeTruthy();
+  expect(view.queryByRole('button', { name: 'Show earlier messages' })).toBeNull();
 
   fireEvent.click(view.getByRole('button', { name: 'Conversation directory' }));
   const entries = view.getAllByRole('button').filter(button => button.classList.contains('claudian-nav-toc-item'));

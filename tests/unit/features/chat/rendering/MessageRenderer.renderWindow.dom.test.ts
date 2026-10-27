@@ -156,8 +156,9 @@ it('returns to the reading position after cancelling a branch preview of a revea
     getExecutionCoordinator: () => ({ supportsConversationBranches: true }),
   } as any);
   state.currentConversationId = 'pi-chat';
+  // Opening a conversation now reveals every restored turn, so no earlier-messages control is offered.
   await controller.loadActive();
-  fireEvent.click(within(messagesEl).getByRole('button', { name: 'Show earlier messages' }));
+  expect(within(messagesEl).queryByRole('button', { name: 'Show earlier messages' })).toBeNull();
   const prompt = messagesEl.querySelector<HTMLElement>('[data-message-id="u5"]')!;
   // The reader sees the lower 70px of the prompt at the top of the viewport.
   messagesEl.scrollTop = Array.from(messagesEl.children).indexOf(prompt) * 100 + 30;

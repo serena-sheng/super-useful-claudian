@@ -34,6 +34,24 @@ export function shouldSendMessageFromEnterKey(
   return true;
 }
 
+function isSteerEnterShortcut(event: KeyboardEvent): boolean {
+  return event.key === 'Enter' && !event.shiftKey && !event.isComposing
+    && event.altKey === true && !event.metaKey && !event.ctrlKey;
+}
+
+/**
+ * Option/Alt+Enter sends the composer's own input into the running turn instead of queueing it
+ * behind the turn. Providers without steering keep the ordinary queue path.
+ */
+export function steerTabInputMessageFromModifier(tab: AssembledTabRuntime, event: KeyboardEvent): boolean {
+  if (!isSteerEnterShortcut(event)) return false;
+  const inputController = tab.controllers.inputController;
+  if (!inputController.canSteerComposer || !inputController.hasComposerContentForSteer) return false;
+  event.preventDefault();
+  void inputController.steerComposer().finally(() => tab.ui.steerButton?.update());
+  return true;
+}
+
 /** Open composer menus consume their keys, including Escape, before tab-level handling. */
 export function handleComposerMenuKeydown(tab: AssembledTabRuntime, event: KeyboardEvent): boolean {
   return tab.controllers.builtInCommandController.handleResumeKeydown(event)

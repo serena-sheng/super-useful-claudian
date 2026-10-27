@@ -15,6 +15,7 @@ import type { ContextUsageMeter } from '@/features/chat/composer/toolbar/Context
 import type { ModeSelector } from '@/features/chat/composer/toolbar/ModeSelector';
 import type { PermissionToggle } from '@/features/chat/composer/toolbar/PermissionToggle';
 import type { ServiceTierToggle } from '@/features/chat/composer/toolbar/ServiceTierToggle';
+import type { SteerButton } from '@/features/chat/composer/toolbar/SteerButton';
 import type { ConversationController } from '@/features/chat/conversation/ConversationController';
 import type { ChatExecutionCoordinator } from '@/features/chat/execution/ChatExecutionCoordinator';
 import type { BuiltInCommandController } from '@/features/chat/input/BuiltInCommandController';
@@ -113,6 +114,8 @@ export interface TabUIComponents {
   readonly effortSelector: EffortSelector;
   readonly permissionToggle: PermissionToggle;
   readonly serviceTierToggle: ServiceTierToggle;
+  /** Joins the composer's text to the running turn without queueing it first. */
+  readonly steerButton: SteerButton;
   readonly composerDropdown: MainChatComposerDropdown;
   readonly contextUsageMeter: ContextUsageMeter;
   /** Toolbar menus; Escape closes an open one before it can cancel a turn. */
