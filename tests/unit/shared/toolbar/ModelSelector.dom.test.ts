@@ -7,12 +7,12 @@ import { fireEvent, waitFor, within } from '@testing-library/dom';
 import { axe } from 'jest-axe';
 
 import type { ToolbarCallbacks } from '@/features/chat/composer/toolbar/types';
-import { getBlankTabModelOptions } from '@/features/chat/tabs/tabProviderSettings';
 import { claudeChatUIConfig } from '@/providers/claude/ui/ClaudeChatUIConfig';
 import { updateCodexProviderSettings } from '@/providers/codex/settings';
 import { codexChatUIConfig } from '@/providers/codex/ui/CodexChatUIConfig';
 import { EffortSelector } from '@/shared/toolbar/EffortSelector';
 import { ModelSelector } from '@/shared/toolbar/ModelSelector';
+import { getProviderPickerModelOptions } from '@/shared/toolbar/providerPickerModelOptions';
 
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };
@@ -97,6 +97,26 @@ it('renders saved model order top-to-bottom through the real provider UI config'
   expect(labels()).toEqual(['sonnet', 'opus', 'haiku']);
 });
 
+it('hides the parts column while none of its parts is shown', () => {
+  const host = document.body.createDiv();
+  let reasoningControl = 'none';
+  const callbacks = {
+    getSettings: () => ({ model: 'opus', reasoning: 'high' }),
+    getUIConfig: () => ({
+      getModelOptions: () => [{ value: 'opus', label: 'opus' }],
+      getReasoningOptions: () => [{ value: 'low', label: 'Low' }, { value: 'high', label: 'High' }],
+      getDefaultReasoningValue: () => 'low',
+    }),
+    getCapabilities: () => ({ reasoningControl }),
+  } as unknown as ToolbarCallbacks;
+  const effort = new EffortSelector(new ModelSelector(host, callbacks), callbacks);
+  const parts = host.querySelector('.claudian-model-parts')!;
+  expect(parts.classList.contains('claudian-hidden')).toBe(true);
+  reasoningControl = 'effort';
+  effort.updateDisplay();
+  expect(parts.classList.contains('claudian-hidden')).toBe(false);
+});
+
 it('lists a new session\'s providers in their own column and shows one provider\'s models at a time', async () => {
   const host = document.body.createDiv();
   const settings = {
@@ -133,7 +153,7 @@ it('lists a new session\'s providers in their own column and shows one provider\
   const callbacks = {
     getSettings: () => settings,
     getUIConfig: () => ({
-      getModelOptions: getBlankTabModelOptions,
+      getModelOptions: (options: Record<string, unknown>) => getProviderPickerModelOptions(() => options),
       getReasoningOptions: () => [{ value: 'low', label: 'Low' }, { value: 'high', label: 'High' }],
       getDefaultReasoningValue: () => 'low',
     }),
