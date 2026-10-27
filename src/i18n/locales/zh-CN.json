@@ -429,6 +429,10 @@
         "emptyHint": "代理会随着项目推进填写这里。"
       }
     },
+    "steer": {
+      "button": "插话",
+      "actionLabel": "把这条消息插进当前回合（Alt+Enter）"
+    },
     "instructionMode": {
       "placeholder": "# 输入要改写的指令",
       "unsupportedProvider": "当前 provider 不支持指令模式。",
@@ -829,6 +833,29 @@
       }
     },
     "deepseek": {
+      "balance": {
+        "name": "余额",
+        "desc": "用本 provider 环境变量里的 DEEPSEEK_API_KEY 读取 api.deepseek.com 的账户余额。不点刷新就不会发起任何请求。",
+        "neverRead": "尚未读取。",
+        "noKey": "请先在本 provider 的环境变量里设置 DEEPSEEK_API_KEY，才能读取余额。",
+        "unavailable": "DeepSeek 表示该 Key 目前无法发起请求。",
+        "error": "读取余额失败：{message}",
+        "amount": "{total} · 赠送 {granted} · 充值 {toppedUp}",
+        "updated": "更新于 {time}",
+        "refreshName": "刷新余额",
+        "refreshDesc": "只读取一次，插件不会后台轮询。",
+        "refresh": "刷新",
+        "refreshing": "刷新中…",
+        "statusBar": {
+          "name": "在状态栏显示余额",
+          "desc": "在状态栏加一个 DeepSeek 余额项。它只重绘上次读数，点击才会重新读取。"
+        },
+        "breakdown": "{currency}：{total}（赠送 {granted}，充值 {toppedUp}）",
+        "statusBarTooltip": "DeepSeek 余额\n{breakdown}",
+        "statusBarHint": "点击读取 DeepSeek 余额",
+        "loadingLabel": "DeepSeek …",
+        "unknownLabel": "DeepSeek —"
+      },
       "installation": {
         "desc": "自动模式优先使用 dsh，其次检测 macOS 或 Windows 上的 Desktop。两者都已安装时，输入 Desktop 的 .app 路径或 Windows 安装文件夹即可选择它。请先打开 Desktop 完成初始设置。",
         "desktop": "使用你的原生 Desktop 配置文件。",

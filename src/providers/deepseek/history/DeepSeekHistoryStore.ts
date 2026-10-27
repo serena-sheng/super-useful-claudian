@@ -4,7 +4,7 @@ import { isWriteEditTool } from '@/core/tools/toolNames';
 import { applyToolResultPresentation } from '@/core/tools/toolResultDetails';
 import type { ChatMessage, SubagentInfo, ToolCallInfo } from '@/core/types';
 
-import { DeepSeekOutput, type DeepSeekOutputEvent, deepseekText } from '../normalization/DeepSeekOutput';
+import { attemptKey, DeepSeekOutput, type DeepSeekOutputEvent, deepseekText } from '../normalization/DeepSeekOutput';
 import { DeepSeekSubagents } from '../normalization/DeepSeekSubagents';
 import { type DeepSeekReader,isRecord } from '../remote/DeepSeekRemoteClient';
 import { encodeDeepSeekCheckpoint } from '../types';
@@ -35,12 +35,19 @@ export async function loadDeepSeekHistory(client: DeepSeekReader, sessionId: str
     }
     return assistant;
   };
+  // A step that committed an assistant message replays from that message; an attempt stays the only
+  // durable record when the step never settled (abandoned, failed, or reasoning-only), and its
+  // reasoning would otherwise never appear on reopen.
+  const settledSteps = new Set(records
+    .filter(candidate => candidate.type === 'assistant/message')
+    .map(candidate => attemptKey(candidate.data)));
   for (const record of records) {
     current = record;
     // Replacement copies change model context; the native chat retains append-origin history.
     if (record.surfaceOp !== undefined && record.surfaceOp !== 'append') continue;
-    // Failed attempts are native diagnostics, not committed assistant messages.
-    if (record.type === 'assistant/attempt') continue;
+    // Failed attempts are native diagnostics, not committed assistant messages; only an unsettled
+    // step replays its attempt, and only once a turn has opened its output channel.
+    if (record.type === 'assistant/attempt' && (settledSteps.has(attemptKey(record.data)) || output === undefined)) continue;
     if (record.type === 'turn/start') {
       assistant = undefined; automatic = true; turnStart = record.time; pendingNotices.length = 0;
       turnId = `deepseek:${sessionId}:turn:${typeof record.data.turn === 'number' ? record.data.turn : record.seq}`;

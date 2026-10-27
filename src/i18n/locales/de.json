@@ -429,6 +429,10 @@
         "emptyHint": "Agenten füllen dies im Laufe des Projekts aus."
       }
     },
+    "steer": {
+      "button": "Einschieben",
+      "actionLabel": "Diese Nachricht in den laufenden Durchlauf einschieben (Alt+Enter)"
+    },
     "instructionMode": {
       "placeholder": "# Refine an instruction into a prompt",
       "unsupportedProvider": "Instruction mode is not supported by this provider.",
@@ -829,6 +833,29 @@
       }
     },
     "deepseek": {
+      "balance": {
+        "name": "Guthaben",
+        "desc": "Liest das Guthaben über api.deepseek.com mit dem DEEPSEEK_API_KEY aus der Umgebung dieses Anbieters. Ohne Aktualisieren wird nichts angefragt.",
+        "neverRead": "Noch nicht gelesen.",
+        "noKey": "Setze DEEPSEEK_API_KEY in der Umgebung dieses Anbieters, um das Guthaben zu lesen.",
+        "unavailable": "DeepSeek meldet, dass dieser Schlüssel derzeit keine Anfragen stellen kann.",
+        "error": "Guthaben konnte nicht gelesen werden: {message}",
+        "amount": "{total} · geschenkt {granted} · aufgeladen {toppedUp}",
+        "updated": "aktualisiert {time}",
+        "refreshName": "Guthaben aktualisieren",
+        "refreshDesc": "Liest einmal. Das Plugin fragt nicht periodisch ab.",
+        "refresh": "Aktualisieren",
+        "refreshing": "Wird aktualisiert…",
+        "statusBar": {
+          "name": "Guthaben in der Statusleiste zeigen",
+          "desc": "Fügt ein DeepSeek-Guthaben in die Statusleiste ein. Es zeigt die letzte Lesung; ein Klick liest erneut."
+        },
+        "breakdown": "{currency}: {total} (geschenkt {granted}, aufgeladen {toppedUp})",
+        "statusBarTooltip": "DeepSeek-Guthaben\n{breakdown}",
+        "statusBarHint": "Klicken, um das DeepSeek-Guthaben zu lesen",
+        "loadingLabel": "DeepSeek …",
+        "unknownLabel": "DeepSeek —"
+      },
       "installation": {
         "desc": "Die automatische Suche bevorzugt dsh und sucht danach unter macOS oder Windows nach Desktop. Sind beide installiert, wähle Desktop durch Angabe des .app-Pfads oder des Windows-Installationsordners. Öffne Desktop zunächst, um die Einrichtung abzuschließen.",
         "desktop": "Dein natives Desktop-Profil wird verwendet.",

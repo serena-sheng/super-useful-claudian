@@ -12,7 +12,7 @@ a provider-readiness panel, a token meter, and a local archive that can reopen a
 conversation with every turn visible. A few enhancements were borrowed from
 [oh-my-claudian](https://github.com/lee259/oh-my-claudian) by Lee.
 
-**1.6.0 is synced to upstream Claudian 2.3.34, plus the fixes upstream landed on `main` after that
+**1.7.0 is synced to upstream Claudian 2.3.34, plus the fixes upstream landed on `main` after that
 tag.** The fork's early `dsh` provider is gone:
 upstream now ships a maintained **DeepSeek Harness** provider (`deepseek`), so the plugin
 migrates your old `dsh` settings and sessions automatically instead of keeping a second
@@ -74,6 +74,13 @@ that CLI's own documentation.
   you can approve or reject.
 - **Composer bash mode** (opt-in): type `!` to run a shell command and see its output in the
   transcript.
+- **One-step steering**: while a steer-capable turn runs, a **Steer** button appears in the
+  composer and Option/Alt+Enter sends the current text into that turn — no queue round trip.
+  The queued-message "Steer Now" path still exists for input already sent.
+- **DeepSeek balance**: the DeepSeek Harness settings tab can read the live account balance
+  from `api.deepseek.com/user/balance` with the provider's `DEEPSEEK_API_KEY`, and the status
+  bar can show it. Reads happen only when you ask (the Refresh button or a click on the status
+  item); there is no polling timer.
 
 ## Disclosures
 
@@ -84,10 +91,13 @@ Required by the Obsidian developer policies, and true as of this fork:
   …) and to any MCP servers you configure. Which services are contacted, and with which
   credentials, is determined by those CLIs and by the environment variables you set in each
   provider's settings.
-  There is exactly one optional exception: if you turn on **Check for CLI updates**, the
-  plugin queries `https://registry.npmjs.org` (public npm registry, no identifiers sent
-  beyond the package names) to tell you when an installed CLI has a newer release. It is
-  off by default and can be turned off again at any time.
+  There are two optional exceptions. If you turn on **Check for CLI updates**, the plugin
+  queries `https://registry.npmjs.org` (public npm registry, no identifiers sent beyond the
+  package names) to tell you when an installed CLI has a newer release; it is off by default.
+  If you press **Refresh balance** (DeepSeek Harness settings) or click the balance item in
+  the status bar, the plugin requests `https://api.deepseek.com/user/balance` with your own
+  `DEEPSEEK_API_KEY`. That request is never automatic, and turning off the status-bar item
+  stops it for good.
 - **Files outside the vault.** Each agent CLI is started with your vault as its working
   directory, but the CLIs may read and write outside it (their own config, credentials,
   session stores and caches; OMP uses `~/.omp`, Pi uses `~/.pi`, DeepSeek Harness uses

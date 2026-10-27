@@ -429,6 +429,10 @@
         "emptyHint": "Агенты заполняют это по ходу проекта."
       }
     },
+    "steer": {
+      "button": "Вклиниться",
+      "actionLabel": "Вставить это сообщение в текущий цикл (Alt+Enter)"
+    },
     "instructionMode": {
       "placeholder": "# Refine an instruction into a prompt",
       "unsupportedProvider": "Instruction mode is not supported by this provider.",
@@ -829,6 +833,29 @@
       }
     },
     "deepseek": {
+      "balance": {
+        "name": "Баланс",
+        "desc": "Читает баланс на api.deepseek.com с ключом DEEPSEEK_API_KEY из окружения этого провайдера. Без обновления запросов не будет.",
+        "neverRead": "Ещё не читался.",
+        "noKey": "Задайте DEEPSEEK_API_KEY в окружении этого провайдера, чтобы читать баланс.",
+        "unavailable": "DeepSeek сообщает, что этот ключ сейчас не может делать запросы.",
+        "error": "Не удалось прочитать баланс: {message}",
+        "amount": "{total} · подарено {granted} · пополнено {toppedUp}",
+        "updated": "обновлено {time}",
+        "refreshName": "Обновить баланс",
+        "refreshDesc": "Читает один раз. Плагин не опрашивает периодически.",
+        "refresh": "Обновить",
+        "refreshing": "Обновление…",
+        "statusBar": {
+          "name": "Показывать баланс в строке состояния",
+          "desc": "Добавляет баланс DeepSeek в строку состояния. Он показывает последнее чтение; клик читает снова."
+        },
+        "breakdown": "{currency}: {total} (подарено {granted}, пополнено {toppedUp})",
+        "statusBarTooltip": "Баланс DeepSeek\n{breakdown}",
+        "statusBarHint": "Нажмите, чтобы прочитать баланс DeepSeek",
+        "loadingLabel": "DeepSeek …",
+        "unknownLabel": "DeepSeek —"
+      },
       "installation": {
         "desc": "Автопоиск предпочитает dsh, затем ищет Desktop в macOS или Windows. Если установлены оба варианта, укажите путь к .app или папку установки в Windows для выбора Desktop. Сначала откройте Desktop и завершите настройку.",
         "desktop": "Используется ваш нативный профиль Desktop.",

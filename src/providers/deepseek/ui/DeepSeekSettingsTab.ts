@@ -13,6 +13,7 @@ import { renderEnvironmentSettingsSection } from '@/shared/settings/EnvironmentS
 import { renderLastEnabledProviderWarning, renderProviderModelEnablementWarning } from '@/shared/settings/ProviderModelEnablementWarning';
 import { renderProviderModelsSection } from '@/shared/settings/ProviderModelsSection';
 import { renderProviderReadinessPanel } from '@/shared/settings/ProviderReadinessPanel';
+import { formatDeepSeekBalance, getDeepSeekBalance } from '@/shared/usage/DeepSeekBalance';
 
 import { CLI_PROVIDER_METADATA } from '../../cli/CLIProviderMetadataTable';
 import type { DeepSeekCLIResolver } from '../runtime/DeepSeekCLIResolver';
@@ -74,6 +75,63 @@ export function createDeepSeekSettingsTabRenderer(workspace: { cliResolver: Deep
       });
       new Setting(container).setName(t('settings.models')).setHeading();
       const picker = renderProviderModelsSection(container, 'deepseek', 'DeepSeek Harness', workspace.modelCatalog, () => modelWarning.refresh());
+      new Setting(container).setName(t('settings.deepseek.balance.name')).setHeading();
+      const balanceEl = container.createDiv({ cls: 'claudian-deepseek-balance' });
+      balanceEl.createEl('p', { cls: 'setting-item-description', text: t('settings.deepseek.balance.desc') });
+      const balanceValue = balanceEl.createEl('p', { cls: 'claudian-deepseek-balance-value', attr: { role: 'status' } });
+      const balanceService = getDeepSeekBalance();
+      const paintBalance = (): void => {
+        const snapshot = balanceService?.snapshot;
+        const primary = snapshot?.reading?.infos[0];
+        if (!snapshot || snapshot.status === 'idle') {
+          balanceValue.setText(t('settings.deepseek.balance.neverRead'));
+          return;
+        }
+        if (snapshot.status === 'error' || !primary) {
+          const key = snapshot.error?.key ?? 'requestFailed';
+          if (key === 'noKey') balanceValue.setText(t('settings.deepseek.balance.noKey'));
+          else if (key === 'unavailable') balanceValue.setText(t('settings.deepseek.balance.unavailable'));
+          else balanceValue.setText(t('settings.deepseek.balance.error', { message: snapshot.error?.message ?? '' }));
+          return;
+        }
+        const updated = snapshot.fetchedAt !== null ? new Date(snapshot.fetchedAt).toLocaleString() : '';
+        balanceValue.setText(t('settings.deepseek.balance.amount', {
+          total: formatDeepSeekBalance(primary),
+          granted: primary.granted.toFixed(2),
+          toppedUp: primary.toppedUp.toFixed(2),
+        }) + (updated ? ` · ${t('settings.deepseek.balance.updated', { time: updated })}` : ''));
+      };
+      paintBalance();
+      const unsubscribeBalance = balanceService?.subscribe(paintBalance) ?? (() => undefined);
+      const balanceActions = balanceEl.createDiv({ cls: 'claudian-deepseek-balance-actions' });
+      balanceActions.createEl('p', { cls: 'setting-item-description', text: t('settings.deepseek.balance.refreshDesc') });
+      const balanceButton = balanceActions.createEl('button', {
+        cls: 'claudian-deepseek-balance-refresh',
+        text: t('settings.deepseek.balance.refresh'),
+        attr: { type: 'button', 'aria-label': t('settings.deepseek.balance.refreshName') },
+      });
+      balanceButton.addEventListener('click', () => {
+        if (!balanceService) { paintBalance(); return; }
+        balanceButton.disabled = true;
+        balanceButton.setText(t('settings.deepseek.balance.refreshing'));
+        void balanceService.refresh(true).finally(() => {
+          balanceButton.disabled = false;
+          balanceButton.setText(t('settings.deepseek.balance.refresh'));
+        });
+      });
+      new Setting(container)
+        .setName(t('settings.deepseek.balance.statusBar.name'))
+        .setDesc(t('settings.deepseek.balance.statusBar.desc'))
+        .addToggle(toggle => {
+          toggle.setValue(host.settings.deepseekBalanceInStatusBar !== false);
+          toggle.toggleEl.setAttribute('aria-label', t('settings.deepseek.balance.statusBar.name'));
+          toggle.onChange(async value => {
+            // The plugin repaints the status item on every committed settings save.
+            await host.mutateSettings(settings => { settings.deepseekBalanceInStatusBar = value; });
+            paintBalance();
+          });
+        });
+
       new Setting(container).setName(t('settings.deepseek.preset')).setHeading();
       new Setting(container).setName(t('settings.deepseek.codeMode.name')).setDesc(t('settings.deepseek.codeMode.desc'))
         .addToggle(toggle => {
@@ -93,6 +151,7 @@ export function createDeepSeekSettingsTabRenderer(workspace: { cliResolver: Deep
         dispose: () => {
           picker.dispose();
           readiness.dispose();
+          unsubscribeBalance();
         },
       };
     },

@@ -429,6 +429,10 @@
         "emptyHint": "Os agentes preenchem isto conforme o projeto avança."
       }
     },
+    "steer": {
+      "button": "Inserir",
+      "actionLabel": "Inserir esta mensagem no turno em execução (Alt+Enter)"
+    },
     "instructionMode": {
       "placeholder": "# Refine an instruction into a prompt",
       "unsupportedProvider": "Instruction mode is not supported by this provider.",
@@ -829,6 +833,29 @@
       }
     },
     "deepseek": {
+      "balance": {
+        "name": "Saldo",
+        "desc": "Lê o saldo em api.deepseek.com com a DEEPSEEK_API_KEY do ambiente deste provedor. Nenhuma requisição é feita até você atualizar.",
+        "neverRead": "Ainda não lido.",
+        "noKey": "Defina DEEPSEEK_API_KEY no ambiente deste provedor para ler o saldo.",
+        "unavailable": "A DeepSeek informa que esta chave não pode fazer requisições agora.",
+        "error": "Não foi possível ler o saldo: {message}",
+        "amount": "{total} · concedido {granted} · recarregado {toppedUp}",
+        "updated": "atualizado {time}",
+        "refreshName": "Atualizar saldo",
+        "refreshDesc": "Lê uma vez. O plugin não consulta periodicamente.",
+        "refresh": "Atualizar",
+        "refreshing": "Atualizando…",
+        "statusBar": {
+          "name": "Mostrar o saldo na barra de status",
+          "desc": "Adiciona um saldo DeepSeek à barra de status. Ele redesenha a última leitura; clicar lê novamente."
+        },
+        "breakdown": "{currency}: {total} (concedido {granted}, recarregado {toppedUp})",
+        "statusBarTooltip": "Saldo DeepSeek\n{breakdown}",
+        "statusBarHint": "Clique para ler o saldo DeepSeek",
+        "loadingLabel": "DeepSeek …",
+        "unknownLabel": "DeepSeek —"
+      },
       "installation": {
         "desc": "A detecção automática prioriza dsh e depois procura Desktop no macOS ou no Windows. Se ambos estiverem instalados, informe o caminho .app do Desktop ou a pasta de instalação no Windows para selecioná-lo. Abra o Desktop primeiro para concluir a configuração.",
         "desktop": "Usando seu perfil nativo do Desktop.",

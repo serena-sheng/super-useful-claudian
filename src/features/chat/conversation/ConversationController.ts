@@ -372,6 +372,9 @@ export class ConversationController {
     this.deps.getLinkedContentController().lock(conversation.linkedContentPath);
 
     this.#renderTranscript(state.messages);
+    // A reopened conversation shows every restored turn: the render window is a live-append budget,
+    // not a statement about how much of an existing transcript the user wants to see.
+    this.deps.renderer?.revealEarlierMessages?.(true);
     this.deps.onConversationHydrated?.();
   }
 

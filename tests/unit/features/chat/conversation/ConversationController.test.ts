@@ -152,6 +152,22 @@ describe('ConversationController', () => {
   });
 
   describe('loadActive with existing conversation', () => {
+    it('reveals every restored turn instead of the live render window only', async () => {
+      deps.state.currentConversationId = 'long-conv';
+      (deps.plugin.getConversationById as jest.Mock).mockResolvedValue({
+        id: 'long-conv',
+        messages: Array.from({ length: 120 }, (_, index) => ({
+          id: `m${index}`, role: index % 2 === 0 ? 'user' : 'assistant', content: `turn ${index}`, timestamp: Date.now(),
+        })),
+        sessionId: null,
+      });
+
+      await controller.loadActive();
+
+      expect(deps.state.messages).toHaveLength(120);
+      expect(deps.renderer.revealEarlierMessages).toHaveBeenCalledWith(true);
+    });
+
     it('should restore linkedContentPath when conversation has one', async () => {
       const linkedContentController = deps.getLinkedContentController();
       deps.state.currentConversationId = 'conv-with-note';

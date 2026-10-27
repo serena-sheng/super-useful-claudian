@@ -1,6 +1,6 @@
 {
   "name": "super-useful-claudian",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Run Oh My Pi, DeepSeek Harness, Claude Code, Codex, Grok, OpenCode and Pi inside your vault as chat collaborators. A fork of Claudian with provider readiness checks, a capability matrix, a token usage meter and full session restore.",
   "main": "main.js",
   "engines": {
