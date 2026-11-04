@@ -23,13 +23,13 @@ function createReader(files: Record<string, string>): {
 describe('PersonalPackService', () => {
   it('loads the pack identity, trimmed, from the documented vault path', async () => {
     const { reader } = createReader({
-      [PERSONAL_PACK_IDENTITY_PATH]: '  You are Miss. Coco.  \n\nKeep replies short.\n',
+      [PERSONAL_PACK_IDENTITY_PATH]: '  You are the vault assistant. Keep replies short.\n',
     });
     const pack = new PersonalPackService(reader);
 
     await pack.load();
 
-    expect(pack.getIdentityInstructions()).toBe('You are Miss. Coco.  \n\nKeep replies short.');
+    expect(pack.getIdentityInstructions()).toBe('You are the vault assistant. Keep replies short.');
     expect(pack.identityPath).toBe('.super-useful-claudian/personal/identity.md');
     expect(PERSONAL_PACK_ROOT).toBe('.super-useful-claudian/personal');
   });

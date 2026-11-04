@@ -45,11 +45,11 @@ describe('systemPrompt', () => {
     it('should append personal instructions after custom instructions', () => {
       const prompt = buildSystemPrompt({
         customPrompt: 'Prefer short answers.',
-        personalInstructions: 'You are Miss. Coco, the attendant for this flight.',
+        personalInstructions: 'You are the vault assistant. Keep replies short.',
       });
 
       expect(prompt).toContain('## Personal Instructions');
-      expect(prompt).toContain('You are Miss. Coco, the attendant for this flight.');
+      expect(prompt).toContain('You are the vault assistant. Keep replies short.');
       expect(prompt.indexOf('## Custom Instructions')).toBeLessThan(prompt.indexOf('## Personal Instructions'));
     });
 

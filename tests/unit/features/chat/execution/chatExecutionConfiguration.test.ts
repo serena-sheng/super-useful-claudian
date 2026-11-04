@@ -12,11 +12,11 @@ describe('resolveChatSystemInstructions', () => {
       settings,
       '/vault',
       undefined,
-      'You are Miss. Coco, the attendant for this flight.',
+      'You are the vault assistant. Keep replies short.',
     );
 
     expect(instructions).toContain('## Personal Instructions');
-    expect(instructions).toContain('You are Miss. Coco, the attendant for this flight.');
+    expect(instructions).toContain('You are the vault assistant. Keep replies short.');
     expect(instructions.indexOf('## Custom Instructions')).toBeLessThan(
       instructions.indexOf('## Personal Instructions'),
     );
