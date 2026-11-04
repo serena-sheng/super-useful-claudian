@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "example-server": {
+      "command": "/absolute/path/to/server-binary",
+      "args": ["--stdio"]
+    }
+  }
+}

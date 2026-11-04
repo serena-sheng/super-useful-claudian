@@ -85,6 +85,10 @@ that CLI's own documentation.
   from `api.deepseek.com/user/balance` with the provider's `DEEPSEEK_API_KEY`, and the status
   bar can show it. Reads happen only when you ask (the Refresh button or a click on the status
   item); there is no polling timer.
+- **Personal pack**: your assistant identity lives in the vault, not in the plugin. An
+  optional `.super-useful-claudian/personal/identity.md` is appended to every chat's system
+  prompt, and any commands, skills or MCP servers you keep beside it stay provider-native.
+  See [docs/personal-pack.md](docs/personal-pack.md).
 
 ## Disclosures
 
@@ -117,6 +121,10 @@ Required by the Obsidian developer policies, and true as of this fork:
   is deleted with the session. The usage log records, per turn, the conversation id, provider,
   model and token counts — never message content — and is trimmed to 90 days. Nothing is
   uploaded anywhere by the plugin itself.
+- **Personal pack.** If `.super-useful-claudian/personal/identity.md` exists in the vault, the
+  plugin reads it to append personal instructions to chat prompts. It is plain local text: the
+  plugin never uploads it, and deleting the file removes the instructions. No other file in
+  that folder is read by the plugin.
 - **Paid services.** Some providers require a paid subscription or API key. The plugin
   does not sell anything and does not install or update any CLI for you.
 - **Desktop only.** `isDesktopOnly` is true: the plugin spawns subprocesses through Node
@@ -124,10 +132,11 @@ Required by the Obsidian developer policies, and true as of this fork:
 
 ## Installing
 
-Not in the community directory — this is a fork, and Obsidian's developer policies require
-explicit permission from the original author before a fork may be listed there
-(https://docs.obsidian.md/community-directory/developer-policies). Until that is sorted
-out, install it manually or via BRAT:
+Available in the Obsidian community directory: open **Settings → Community plugins → Browse**,
+search for **Super Useful Claudian**, or follow
+`obsidian://show-plugin?id=super-useful-claudian`.
+
+You can also install it manually or via BRAT:
 
 1. Download `main.js`, `manifest.json` and `styles.css` from the latest release.
 2. Put them in `YOUR_VAULT/.obsidian/plugins/super-useful-claudian/`.
@@ -153,6 +162,9 @@ when `OBSIDIAN_VAULT` is set in `.env.local`.
 Settings live in `.super-useful-claudian/` inside your vault. The plugin stores its settings file,
 session metadata and cached catalogs there — separate from upstream Claudian, which uses
 `.claudian/`, so the two can coexist on disk without corrupting each other.
+
+Personal instructions live beside them in `.super-useful-claudian/personal/identity.md`; see
+[docs/personal-pack.md](docs/personal-pack.md) for the optional commands, skills and MCP layout.
 
 ## Credits
 

@@ -106,7 +106,10 @@ export class SideChatRuntime {
   constructor(private readonly deps: SideChatRuntimeDeps) {
     this.#settings = { ...deps.settings };
     this.#systemInstructions = resolveChatSystemInstructions(
-      deps.plugin.settings, deps.workingDirectory, deps.source.sessionInstructions,
+      deps.plugin.settings,
+      deps.workingDirectory,
+      deps.source.sessionInstructions,
+      deps.plugin.getPersonalPackInstructions?.() ?? '',
     );
     this.state = new ChatState({
       onAttentionChanged: () => this.#refreshStatus(),

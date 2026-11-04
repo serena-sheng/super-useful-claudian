@@ -25,6 +25,9 @@ export interface FeatureHost {
   notifyAgentSkillsChanged(): Promise<void>;
   notifyProviderChatOptionsChanged(providerId: ProviderId): void;
 
+  /** Text from the vault's personal pack `identity.md`; empty when no pack is installed. */
+  getPersonalPackInstructions?(): string;
+
   /** Selected execution context, without exposing a chat view or runtime. */
   getActiveModelSelection(): StoredChatModelSelection | null;
 

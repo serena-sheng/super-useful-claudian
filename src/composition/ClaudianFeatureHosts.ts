@@ -40,6 +40,8 @@ export interface FeatureHostDomains {
   readonly conversations: Pick<ConversationService, 'getConversationSummary'>;
   readonly views: ClaudianViews;
   notifyProviderChatOptionsChanged(providerId: ProviderId): Promise<void>;
+  /** Optional identity text from the vault personal pack, read by main at load time. */
+  getPersonalPackInstructions?: () => string;
 }
 
 export interface ChatFeatureHostDomains extends FeatureHostDomains {
@@ -91,6 +93,10 @@ export class ClaudianFeatureHost implements FeatureHost {
 
   notifyProviderChatOptionsChanged(providerId: ProviderId): void {
     void this.domains.notifyProviderChatOptionsChanged(providerId);
+  }
+
+  getPersonalPackInstructions(): string {
+    return this.domains.getPersonalPackInstructions?.() ?? '';
   }
 
   getConversationTitle(conversationId: string): string | null {

@@ -3,6 +3,8 @@ export interface SystemPromptSettings {
   customPrompt?: string;
   vaultPath?: string;
   userName?: string;
+  /** Vault-loaded personal identity text, appended after Custom Instructions. */
+  personalInstructions?: string;
   /** Per-session section appended verbatim after Custom Instructions (for example, a project paragraph). */
   sessionInstructions?: string;
 }
@@ -93,6 +95,11 @@ function getCustomInstructions(customPrompt: string | undefined): string {
   return instructions ? `## Custom Instructions\n\n${instructions}` : '';
 }
 
+function getPersonalInstructions(personalInstructions: string | undefined): string {
+  const instructions = personalInstructions?.trim();
+  return instructions ? `## Personal Instructions\n\n${instructions}` : '';
+}
+
 export function buildSystemPrompt(settings: SystemPromptSettings = {}): string {
   return [
     getRuntimeContext(settings.vaultPath, settings.userName),
@@ -102,6 +109,7 @@ export function buildSystemPrompt(settings: SystemPromptSettings = {}): string {
     getReferenceConventions(),
     getVaultMediaContext(settings.mediaFolder || ''),
     getCustomInstructions(settings.customPrompt),
+    getPersonalInstructions(settings.personalInstructions),
     settings.sessionInstructions?.trim() ? settings.sessionInstructions : '',
   ].filter(Boolean).join('\n\n');
 }

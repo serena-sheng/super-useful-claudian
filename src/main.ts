@@ -11,6 +11,7 @@ import { Notice, Plugin } from 'obsidian';
 
 import type { NativeSessionArchiveSync } from './app/conversations/NativeSessionArchiveSync';
 import type { SessionMetadataLoader } from './app/conversations/SessionMetadataLoader';
+import { PersonalPackService } from './app/personal-pack/PersonalPackService';
 import type { ProjectService } from './app/projects/ProjectService';
 import { createDefaultClaudianSettings } from './app/settings/defaultSettings';
 import { EnvironmentSettingsService } from './app/settings/EnvironmentSettingsService';
@@ -88,6 +89,7 @@ export default class ClaudianPlugin extends Plugin {
   private vaultContentEvents!: VaultContentEvents;
   private settingsTab: ClaudianSettingTab | null = null;
   private deepSeekBalanceStatus: BalanceStatusHandle | null = null;
+  private personalPack!: PersonalPackService;
   private readonly views = new ClaudianViews(
     this.app.workspace,
     () => this.settings.chatViewPlacement,
@@ -135,6 +137,18 @@ export default class ClaudianPlugin extends Plugin {
         registerEvent: eventRef => this.registerEvent(eventRef),
       });
       this.vaultContentEvents.register(eventRef => this.registerEvent(eventRef));
+      // Registered after the vault content listeners so their established order is unchanged.
+      const reloadPersonalPack = (path: string): void => {
+        if (!this.personalPack.isIdentityPath(path)) return;
+        void this.personalPack.load();
+      };
+      this.registerEvent(this.app.vault.on('modify', file => reloadPersonalPack(file.path)));
+      this.registerEvent(this.app.vault.on('create', file => reloadPersonalPack(file.path)));
+      this.registerEvent(this.app.vault.on('delete', file => reloadPersonalPack(file.path)));
+      this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
+        reloadPersonalPack(file.path);
+        reloadPersonalPack(oldPath);
+      }));
 
       this.addRibbonIcon('bot', 'Open Claudian', () => {
         void this.views.activateView();
@@ -242,6 +256,11 @@ export default class ClaudianPlugin extends Plugin {
     this.settingsCoordinator = settings;
     this.storage = domains.storage;
     await initUsageLedger(this.storage.getAdapter());
+    // Personal identity lives in the vault, not in the plugin; reload it when its file changes.
+    this.personalPack = new PersonalPackService(
+      PersonalPackService.fromVaultAdapter(this.storage.getAdapter()),
+    );
+    await this.personalPack.load();
     // Balance reads stay user-initiated; the service only holds the last reading.
     initDeepSeekBalance({
       getApiKey: () => getRuntimeEnvironmentVariables(this.settings, 'deepseek')[DEEPSEEK_API_KEY_VARIABLE]?.trim() || null,
@@ -328,6 +347,7 @@ export default class ClaudianPlugin extends Plugin {
       conversations: domains.conversations,
       views: this.views,
       notifyProviderChatOptionsChanged,
+      getPersonalPackInstructions: () => this.personalPack?.getIdentityInstructions() ?? '',
     };
     this.featureHost = new ClaudianFeatureHost(featureDomains);
     this.sessionRuntimes = new SessionRuntimePool({

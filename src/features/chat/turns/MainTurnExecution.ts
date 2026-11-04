@@ -471,6 +471,7 @@ export class MainTurnExecution {
             // The prompt names the directory the session runs in, not a later host value.
             this.deps.getExecutionCoordinator()?.workingDirectory ?? getChatWorkingDirectory(plugin),
             sessionInstructions,
+            plugin.getPersonalPackInstructions?.() ?? '',
           ),
         ),
         promptSuggestions: true,

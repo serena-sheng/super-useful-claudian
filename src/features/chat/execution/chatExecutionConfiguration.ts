@@ -16,12 +16,14 @@ export function resolveChatSystemInstructions(
   settings: Pick<ClaudianSettings, 'mediaFolder' | 'systemPrompt' | 'userName'>,
   workingDirectory: string,
   sessionInstructions?: string,
+  personalInstructions?: string,
 ): ProviderSystemInstructions {
   return {
     kind: 'main-agent',
     instructions: buildSystemPrompt({
       customPrompt: settings.systemPrompt,
       mediaFolder: settings.mediaFolder,
+      personalInstructions,
       userName: settings.userName,
       vaultPath: workingDirectory,
       sessionInstructions,

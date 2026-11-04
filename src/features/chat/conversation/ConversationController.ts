@@ -109,6 +109,7 @@ export class ConversationController {
           plugin.settings,
           workingDirectory,
           resolveSessionInstructions(plugin.projects, id ? plugin.getConversationSummary(id) : null),
+          plugin.getPersonalPackInstructions?.() ?? '',
         );
       },
       isClosing,

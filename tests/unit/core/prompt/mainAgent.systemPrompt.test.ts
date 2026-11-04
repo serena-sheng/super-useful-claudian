@@ -42,6 +42,38 @@ describe('systemPrompt', () => {
       expect(prompt).not.toContain('# Custom Instructions');
     });
 
+    it('should append personal instructions after custom instructions', () => {
+      const prompt = buildSystemPrompt({
+        customPrompt: 'Prefer short answers.',
+        personalInstructions: 'You are Miss. Coco, the attendant for this flight.',
+      });
+
+      expect(prompt).toContain('## Personal Instructions');
+      expect(prompt).toContain('You are Miss. Coco, the attendant for this flight.');
+      expect(prompt.indexOf('## Custom Instructions')).toBeLessThan(prompt.indexOf('## Personal Instructions'));
+    });
+
+    it.each([
+      ['undefined', undefined],
+      ['empty', ''],
+      ['whitespace only', '  \n '],
+    ])('should omit personal instructions when %s', (_label, personalInstructions) => {
+      const withoutField = buildSystemPrompt({ customPrompt: 'Prefer short answers.' });
+      expect(buildSystemPrompt({ customPrompt: 'Prefer short answers.', personalInstructions })).toBe(withoutField);
+      expect(withoutField).not.toContain('## Personal Instructions');
+    });
+
+    it('should keep session instructions last when a personal pack is loaded', () => {
+      const sessionInstructions = '## Project\n\nBody';
+      const prompt = buildSystemPrompt({
+        personalInstructions: 'Identity text.',
+        sessionInstructions,
+      });
+
+      expect(prompt.endsWith(`\n\n${sessionInstructions}`)).toBe(true);
+      expect(prompt.indexOf('## Personal Instructions')).toBeLessThan(prompt.indexOf('## Project'));
+    });
+
     it('should append session instructions verbatim as the last section', () => {
       const sessionInstructions = '## Project\n\nThis session is a member of the Claudian project **Alpha**.\n\n  Keep   spacing.';
       const prompt = buildSystemPrompt({ customPrompt: 'Prefer short answers.', sessionInstructions });
