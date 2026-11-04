@@ -1,7 +1,7 @@
 {
   "id": "super-useful-claudian",
   "name": "Super Useful Claudian",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "minAppVersion": "1.13.0",
   "description": "Run OMP, the Oh My Pi agent CLI, in your vault as the default chat provider, with DeepSeek Harness optional. A Claudian fork with readiness checks, a capability matrix, token meter, session restore and a personal pack.",
   "author": "Serena Sheng",
