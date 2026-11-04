@@ -12,7 +12,23 @@ const mockProcessStart = jest.fn();
 const mockProcessShutdown = jest.fn().mockResolvedValue(undefined);
 const mockProcessOnClose = jest.fn();
 const mockGetStderrSnapshot = jest.fn(() => '');
-let mockEventHandler: ((event: Record<string, unknown>) => void) | null = null;
+let mockEventHandlers: Array<(event: Record<string, unknown>) => void> = [];
+
+const flush = (): Promise<void> => new Promise(resolve => setImmediate(resolve));
+
+function emitTransportEvent(event: Record<string, unknown>): void {
+  for (const handler of mockEventHandlers) {
+    handler(event);
+  }
+}
+
+const readyFrame = {
+  maxFrameBytes: 1048576,
+  maxReassembledFrameBytes: 8388608,
+  protocolVersion: 1,
+  supportedProtocolVersions: [1],
+  type: 'ready',
+};
 
 jest.mock('@/providers/pi/runtime/PiRPCTransport', () => ({
   PiRPCTransport: jest.fn().mockImplementation(() => ({
@@ -54,10 +70,10 @@ function createPlugin() {
 describe('PiModelDiscoveryService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockEventHandler = null;
+    mockEventHandlers = [];
     mockGetStderrSnapshot.mockReturnValue('');
     mockTransportOnEvent.mockImplementation((handler: (event: Record<string, unknown>) => void) => {
-      mockEventHandler = handler;
+      mockEventHandlers.push(handler);
       return mockRemoveEventListener;
     });
   });
@@ -91,7 +107,12 @@ describe('PiModelDiscoveryService', () => {
       }],
     });
 
-    const result = await new PiModelDiscoveryService(runtimeHostFor(createPlugin(), 'pi')).discoverModels();
+    const discovery = new PiModelDiscoveryService(runtimeHostFor(createPlugin(), 'pi')).discoverModels();
+    await flush();
+    // The ready frame arms chunked protocol; the catalog request must come after it.
+    expect(mockTransportRequest).not.toHaveBeenCalled();
+    emitTransportEvent(readyFrame);
+    const result = await discovery;
 
     expect(result.kind).toBe('completed');
     if (result.kind !== 'completed') {
@@ -119,14 +140,17 @@ describe('PiModelDiscoveryService', () => {
 
   it('cancels extension UI requests during discovery', async () => {
     mockTransportRequest.mockImplementation(async () => {
-      mockEventHandler?.({
+      emitTransportEvent({
         id: 'ui-1',
         type: 'extension_ui_request',
       });
       return { models: [] };
     });
 
-    await new PiModelDiscoveryService(runtimeHostFor(createPlugin(), 'pi')).discoverModels();
+    const discovery = new PiModelDiscoveryService(runtimeHostFor(createPlugin(), 'pi')).discoverModels();
+    await flush();
+    emitTransportEvent(readyFrame);
+    await discovery;
 
     expect(mockTransportSend).toHaveBeenCalledWith({
       cancelled: true,
@@ -139,10 +163,31 @@ describe('PiModelDiscoveryService', () => {
     mockTransportRequest.mockRejectedValue(new Error('not logged in'));
     mockGetStderrSnapshot.mockReturnValue('Pi stderr');
 
-    const result = await new PiModelDiscoveryService(runtimeHostFor(createPlugin(), 'pi')).discoverModels();
+    const discovery = new PiModelDiscoveryService(runtimeHostFor(createPlugin(), 'pi')).discoverModels();
+    await flush();
+    emitTransportEvent(readyFrame);
+    const result = await discovery;
 
     expect(result).toEqual({
       diagnostics: 'not logged in\n\nPi stderr',
+      kind: 'completed',
+      models: [],
+    });
+    expect(mockTransportDispose).toHaveBeenCalled();
+    expect(mockProcessShutdown).toHaveBeenCalled();
+  });
+
+  it('releases the runtime when aborted while waiting for the ready frame', async () => {
+    const controller = new AbortController();
+    const discovery = new PiModelDiscoveryService(runtimeHostFor(createPlugin(), 'pi'))
+      .discoverModels(controller.signal);
+    await flush();
+    expect(mockTransportRequest).not.toHaveBeenCalled();
+
+    controller.abort();
+
+    await expect(discovery).resolves.toEqual({
+      diagnostics: 'Pi model discovery aborted',
       kind: 'completed',
       models: [],
     });

@@ -60,6 +60,9 @@ export class PiModelDiscoveryService {
         output: subprocess.stdin,
       });
       transport.start();
+      // The transport negotiates a chunked protocol from the ready frame; wait for
+      // it so the catalog request is not answered under the 1 MiB v1 frame limit.
+      await waitForReady(transport, signal);
       removeEventListener = transport.onEvent((event) => {
         if (event.type !== 'extension_ui_request') {
           return;
@@ -96,6 +99,41 @@ export class PiModelDiscoveryService {
       await subprocess.shutdown().catch(() => {});
     }
   }
+}
+
+function waitForReady(transport: PiRPCTransport, signal?: AbortSignal, timeoutMs = 15_000): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      window.clearTimeout(timer);
+      unsubscribe?.();
+      signal?.removeEventListener('abort', onAbort);
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    };
+    const onAbort = (): void => finish(new Error('Pi model discovery aborted'));
+    const timer = window.setTimeout(() => finish(), timeoutMs);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    const unsubscribe = transport.onEvent((event) => {
+      if (event.type === 'ready') {
+        finish();
+      }
+    });
+    if (signal?.aborted) {
+      finish(new Error('Pi model discovery aborted'));
+      return;
+    }
+    if (transport.isClosed) {
+      finish(new Error('Pi RPC transport closed before ready'));
+    }
+  });
 }
 
 function extractModels(response: unknown): unknown {

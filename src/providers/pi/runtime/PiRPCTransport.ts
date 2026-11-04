@@ -45,6 +45,8 @@ export class PiRPCTransport {
   private readonly pending = new Map<string, PendingRequest>();
   private unregisterClose?: () => void;
   private unsubscribeLines?: () => void;
+  private protocolNegotiationStarted = false;
+  private readonly chunkAssemblies = new Map<string, RpcChunkAssembly>();
   private readonly handleOutputError = (error: unknown): void => {
     this.dispose(error instanceof Error ? error : new Error(String(error)));
   };
@@ -190,6 +192,7 @@ export class PiRPCTransport {
     this.unsubscribeLines = undefined;
     this.unregisterClose?.();
     this.unregisterClose = undefined;
+    this.chunkAssemblies.clear();
     this.#rejectAllPending(error);
     for (const listener of this.closeListeners) {
       try {
@@ -222,13 +225,118 @@ export class PiRPCTransport {
       return;
     }
 
+    if (record.type === 'rpc_chunk') {
+      this.#handleChunk(record);
+      return;
+    }
+
+    if (record.type === 'response' && record.command === 'negotiate_protocol') {
+      // The handshake answer is consumed here; callers never await it directly.
+      return;
+    }
+
     if (record.type === 'response' && typeof record.id === 'string') {
       this.#handleResponse(record.id, record);
       return;
     }
 
+    if (record.type === 'ready') {
+      this.#startProtocolNegotiation(record);
+    }
+
     for (const handler of this.eventHandlers) {
       handler(record);
+    }
+  }
+
+  /**
+   * Pi peers speak protocol v1, where one frame may not exceed 1 MiB. Forks such
+   * as omp advertise v2 with chunked frames and a larger reassembled limit;
+   * negotiate it when available so big payloads (model catalogs, long tool
+   * results) arrive instead of being replaced by "RPC response exceeded the
+   * transport limit".
+   */
+  #startProtocolNegotiation(record: PiRPCRecord): void {
+    if (this.protocolNegotiationStarted) {
+      return;
+    }
+    this.protocolNegotiationStarted = true;
+    const supported = Array.isArray(record.supportedProtocolVersions)
+      ? record.supportedProtocolVersions
+      : [];
+    const canChunk = supported.includes(2)
+      && typeof record.maxReassembledFrameBytes === 'number';
+    if (!canChunk) {
+      return;
+    }
+    try {
+      this.#sendRaw({
+        id: `negotiate_${this.nextId++}`,
+        protocolVersion: 2,
+        type: 'negotiate_protocol',
+      });
+    } catch {
+      // A peer that cannot take the handshake simply stays on protocol v1.
+    }
+  }
+
+  #handleChunk(record: PiRPCRecord): void {
+    const chunkId = typeof record.chunkId === 'string' ? record.chunkId : '';
+    const data = record.data;
+    const index = record.index;
+    const count = record.count;
+    const byteLength = record.byteLength;
+    if (!chunkId || typeof data !== 'string') {
+      return;
+    }
+    if (
+      typeof index !== 'number' || !Number.isSafeInteger(index)
+      || typeof count !== 'number' || !Number.isSafeInteger(count)
+      || typeof byteLength !== 'number' || !Number.isSafeInteger(byteLength)
+      || index < 0 || count < 1 || index >= count || byteLength < 0
+    ) {
+      return;
+    }
+
+    let assembly = this.chunkAssemblies.get(chunkId);
+    if (!assembly) {
+      if (index !== 0) {
+        return;
+      }
+      assembly = {
+        byteLength,
+        chunks: [],
+        count,
+        nextIndex: 0,
+        receivedBytes: 0,
+      };
+      this.chunkAssemblies.set(chunkId, assembly);
+    }
+    if (
+      assembly.count !== count
+      || assembly.byteLength !== byteLength
+      || assembly.nextIndex !== index
+    ) {
+      this.chunkAssemblies.delete(chunkId);
+      return;
+    }
+
+    const bytes = Buffer.from(data, 'base64');
+    assembly.chunks.push(bytes);
+    assembly.receivedBytes += bytes.byteLength;
+    assembly.nextIndex += 1;
+    if (assembly.nextIndex < assembly.count) {
+      return;
+    }
+
+    this.chunkAssemblies.delete(chunkId);
+    if (assembly.receivedBytes !== assembly.byteLength) {
+      return;
+    }
+    try {
+      this.#handleLine(Buffer.concat(assembly.chunks).toString('utf8'));
+    } catch {
+      // Malformed reassembled frame: drop it rather than tearing the transport down.
     }
   }
 
@@ -270,4 +378,12 @@ export class PiRPCTransport {
 
 function isPlainObject(value: unknown): value is PiRPCRecord {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+interface RpcChunkAssembly {
+  byteLength: number;
+  chunks: Buffer[];
+  count: number;
+  nextIndex: number;
+  receivedBytes: number;
 }
