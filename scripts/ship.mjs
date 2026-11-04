@@ -51,6 +51,19 @@ function writeJson(path, value) {
   writeFileSync(join(ROOT, path), `${JSON.stringify(value, null, 2)}\n`);
 }
 
+// `gh` picks a remote for repo context; with an `upstream` remote present it can pick
+// the wrong repository. Resolve the repository from origin explicitly for every gh call.
+const repositorySlug = (() => {
+  try {
+    const url = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: ROOT, encoding: 'utf8' }).trim();
+    const match = url.match(/github\.com[:/](.+?)(?:\.git)?$/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+})();
+const ghRepoArgs = repositorySlug ? ['--repo', repositorySlug] : [];
+
 function nextVersion(current, bump) {
   if (typeof bump === 'string' && /^\d+\.\d+\.\d+$/.test(bump)) return bump;
   const [major, minor, patch] = current.split('.').map(Number);
@@ -140,15 +153,16 @@ for (let attempt = 0; attempt < 60; attempt += 1) {
   const runs = JSON.parse(capture('gh', [
     'run', 'list', '--workflow', 'release.yml', '--limit', '5',
     '--json', 'databaseId,headBranch,status,conclusion',
+    ...ghRepoArgs,
   ]));
   const mine = runs.find(entry => entry.headBranch === version);
   if (mine && mine.status === 'completed') {
     if (mine.conclusion !== 'success') fail(`release workflow ${mine.conclusion}`);
-    const release = JSON.parse(capture('gh', ['release', 'view', version, '--json', 'isDraft,assets']));
+    const release = JSON.parse(capture('gh', ['release', 'view', version, '--json', 'isDraft,assets', ...ghRepoArgs]));
     const names = release.assets.map(asset => asset.name).sort();
     const expected = ['main.js', 'manifest.json', 'styles.css'];
     if (names.join(',') !== expected.join(',')) fail(`release assets are ${names.join(', ')}`);
-    if (release.isDraft) run('gh', ['release', 'edit', version, '--draft=false']);
+    if (release.isDraft) run('gh', ['release', 'edit', version, '--draft=false', ...ghRepoArgs]);
     console.log(`ship: ${version} is published. Next: community.obsidian.md → the entry → Check for new releases.`);
     process.exit(0);
   }
