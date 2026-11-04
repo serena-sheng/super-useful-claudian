@@ -23,7 +23,7 @@ describe('ChatExecutionCoordinator', () => {
         list: async () => { controller.signal.throwIfAborted(); return { sessions: [] }; },
         send: async () => {
           controller.signal.throwIfAborted();
-          return { sessionId: 'recipient', title: 'Review', provider: 'codex', status: 'queued' };
+          return { sessionId: 'recipient', title: 'Review', provider: 'deepseek', status: 'queued' };
         },
         read: jest.fn(),
       };
@@ -37,11 +37,11 @@ describe('ChatExecutionCoordinator', () => {
   it.each(['bind', 'invalidation', 'dispose'] as const)(
     'revokes session tools before provider teardown on %s', async mode => {
       const harness = createSessionToolHarness();
-      await harness.coordinator.bindConversation({ conversationId: 'caller', providerId: 'claude' });
+      await harness.coordinator.bindConversation({ conversationId: 'caller', providerId: 'omp' });
       expect(harness.bindSessionTools).not.toHaveBeenCalled();
       await harness.coordinator.prepare();
       await harness.coordinator.prepare();
-      const backend = harness.backends.get('claude')!;
+      const backend = harness.backends.get('omp')!;
       const port = backend.configs[0].sessionTools!;
       expect(harness.bindSessionTools).toHaveBeenCalledTimes(1);
       expect(harness.bindSessionTools).toHaveBeenCalledWith('caller');
@@ -53,7 +53,7 @@ describe('ChatExecutionCoordinator', () => {
         await teardown.promise;
       });
       const release = mode === 'bind' ? harness.coordinator.bindConversation(null)
-        : mode === 'invalidation' ? harness.registry.runTransition(['claude'], async () => undefined)
+        : mode === 'invalidation' ? harness.registry.runTransition(['omp'], async () => undefined)
           : harness.coordinator.dispose();
       try {
         for (let attempt = 0; attempt < 20 && !dispose.mock.calls.length; attempt++) await Promise.resolve();
@@ -74,11 +74,11 @@ describe('ChatExecutionCoordinator', () => {
     const harness = createSessionToolHarness();
     const failure = new Error('Preparation failed');
     if (phase === 'acquire') {
-      jest.spyOn(harness.backends.get('claude')!, 'createSession').mockImplementationOnce(() => { throw failure; });
+      jest.spyOn(harness.backends.get('omp')!, 'createSession').mockImplementationOnce(() => { throw failure; });
     } else {
       harness.repository.persistExecutionSnapshot.mockRejectedValueOnce(failure);
     }
-    await harness.coordinator.bindConversation({ conversationId: 'caller', providerId: 'claude' });
+    await harness.coordinator.bindConversation({ conversationId: 'caller', providerId: 'omp' });
     await expect(harness.coordinator.prepare()).rejects.toBe(failure);
     expect(harness.bindings).toHaveLength(1);
     await expect(harness.bindings[0].port.list(listArgs, new AbortController().signal)).rejects.toThrow('Binding revoked');
@@ -87,7 +87,7 @@ describe('ChatExecutionCoordinator', () => {
     expect(harness.bindings[0].dispose).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['claude', 'codex'] as const)(
+  it.each(['omp', 'deepseek'] as const)(
     'validates %s events without serializing resume history after an equivalent rebind',
     async (providerId) => {
       const harness = createHarness();
@@ -152,14 +152,14 @@ describe('ChatExecutionCoordinator', () => {
       ...changedSeed,
     };
     await harness.coordinator.bindConversation({
-      conversationId: 'conversation-1', providerId: 'claude', resumeSeed,
+      conversationId: 'conversation-1', providerId: 'omp', resumeSeed,
     });
     run.events.push({ type: 'text_delta', scope: requestedScope(session, run, 1), text: 'late' });
     await expect(resultPromise).resolves.toMatchObject({ status: 'invalidated' });
     expect(harness.requestedEvents).toHaveLength(0);
     expect(session.disposeCalls).toBe(1);
     await harness.coordinator.prepare();
-    expect(harness.backends.get('claude')!.configs[1].resumeSeed).toEqual(resumeSeed);
+    expect(harness.backends.get('omp')!.configs[1].resumeSeed).toEqual(resumeSeed);
     await harness.coordinator.dispose();
   });
 
@@ -169,9 +169,9 @@ describe('ChatExecutionCoordinator', () => {
     it('releases an idle session after 30 minutes and resumes it on the next turn', async () => {
       const harness = createHarness({ idleReleaseMs: IDLE_MS });
       const resumeSeed = { providerSessionId: 'native-session' };
-      await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude', resumeSeed });
+      await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'omp', resumeSeed });
       await harness.coordinator.prepare();
-      const backend = harness.backends.get('claude')!;
+      const backend = harness.backends.get('omp')!;
       const session = backend.sessions[0];
 
       await jest.advanceTimersByTimeAsync(IDLE_MS - 1);
@@ -191,9 +191,9 @@ describe('ChatExecutionCoordinator', () => {
     it('retries idle release after a snapshot persistence failure', async () => {
       const onError = jest.fn();
       const harness = createHarness({ idleReleaseMs: IDLE_MS, onError });
-      await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
+      await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'omp' });
       await harness.coordinator.prepare();
-      const session = harness.backends.get('claude')!.sessions[0];
+      const session = harness.backends.get('omp')!.sessions[0];
       session.snapshot = { ...session.snapshot, revision: 1 };
       const error = new Error('Storage unavailable');
       harness.repository.persistExecutionSnapshot.mockRejectedValueOnce(error);
@@ -218,9 +218,9 @@ describe('ChatExecutionCoordinator', () => {
     it('honors a new idle period when background activity finishes during expiry persistence', async () => {
       const onIdleRelease = jest.fn();
       const harness = createHarness({ idleReleaseMs: IDLE_MS, onIdleRelease });
-      await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
+      await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'omp' });
       await harness.coordinator.prepare();
-      const session = harness.backends.get('claude')!.sessions[0];
+      const session = harness.backends.get('omp')!.sessions[0];
       session.snapshot = { ...session.snapshot, revision: 1 };
       const persistence = deferred<boolean>();
       harness.repository.persistExecutionSnapshot.mockReturnValueOnce(persistence.promise);
@@ -273,9 +273,9 @@ describe('ChatExecutionCoordinator', () => {
 
     it('keeps a session with running children alive past the idle period', async () => {
       const harness = createHarness({ idleReleaseMs: IDLE_MS });
-      await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'codex' });
+      await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'deepseek' });
       await harness.coordinator.prepare();
-      const session = harness.backends.get('codex')!.sessions[0];
+      const session = harness.backends.get('deepseek')!.sessions[0];
       const hasBackgroundWork = jest.fn(() => true);
       Object.assign(session, { hasBackgroundWork });
 
@@ -292,9 +292,9 @@ describe('ChatExecutionCoordinator', () => {
       let ownerIdle = false;
       const onIdleRelease = jest.fn();
       const harness = createHarness({ idleReleaseMs: IDLE_MS, isOwnerIdle: () => ownerIdle, onIdleRelease });
-      await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
+      await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'omp' });
       await harness.coordinator.prepare();
-      const session = harness.backends.get('claude')!.sessions[0];
+      const session = harness.backends.get('omp')!.sessions[0];
 
       await jest.advanceTimersByTimeAsync(IDLE_MS);
       expect(session.disposeCalls).toBe(0);
@@ -313,9 +313,9 @@ describe('ChatExecutionCoordinator', () => {
         idleReleaseMs: IDLE_MS,
         onSessionEvent: event => event.type === 'background_turn_completed' ? eventWork.promise : undefined,
       });
-      await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
+      await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'omp' });
       await harness.coordinator.prepare();
-      const session = harness.backends.get('claude')!.sessions[0];
+      const session = harness.backends.get('omp')!.sessions[0];
       const scope = { kind: 'background' as const, sessionInstanceId: session.sessionInstanceId, turnId: 'background', sequence: 1 };
       session.emit({ type: 'background_turn_started', scope });
       session.emit({ type: 'background_turn_completed', scope: { ...scope, sequence: 2 }, reason: 'completed' });
@@ -332,15 +332,15 @@ describe('ChatExecutionCoordinator', () => {
 
   it('exposes commands only for the current conversation and provider binding', async () => {
     const harness = createHarness();
-    await harness.coordinator.bindConversation({ conversationId: 'one', providerId: 'claude' });
+    await harness.coordinator.bindConversation({ conversationId: 'one', providerId: 'omp' });
     await harness.coordinator.prepare();
-    const session = harness.backends.get('claude')!.sessions[0];
+    const session = harness.backends.get('omp')!.sessions[0];
     session.commands = [{ id: 'review', name: 'review', description: '', content: '' }];
-    expect(harness.coordinator.getCommandSnapshot('one', 'claude')).toEqual(session.commands);
-    expect(harness.coordinator.getCommandSnapshot('two', 'claude')).toBeUndefined();
-    expect(harness.coordinator.getCommandSnapshot('one', 'codex')).toBeUndefined();
-    await harness.coordinator.bindConversation({ conversationId: 'two', providerId: 'claude' });
-    expect(harness.coordinator.getCommandSnapshot('two', 'claude')).toBeUndefined();
+    expect(harness.coordinator.getCommandSnapshot('one', 'omp')).toEqual(session.commands);
+    expect(harness.coordinator.getCommandSnapshot('two', 'omp')).toBeUndefined();
+    expect(harness.coordinator.getCommandSnapshot('one', 'deepseek')).toBeUndefined();
+    await harness.coordinator.bindConversation({ conversationId: 'two', providerId: 'omp' });
+    expect(harness.coordinator.getCommandSnapshot('two', 'omp')).toBeUndefined();
     await harness.coordinator.dispose();
   });
 
@@ -349,15 +349,15 @@ describe('ChatExecutionCoordinator', () => {
 
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-1',
-      providerId: 'claude',
+      providerId: 'omp',
       resumeSeed: { providerSessionId: 'native-session' },
     });
 
-    expect(harness.backends.get('claude')!.sessions).toHaveLength(0);
+    expect(harness.backends.get('omp')!.sessions).toHaveLength(0);
 
     await harness.coordinator.prepare();
 
-    const backend = harness.backends.get('claude')!;
+    const backend = harness.backends.get('omp')!;
     expect(backend.sessions).toHaveLength(1);
     expect(backend.configs[0]).toMatchObject({
       lifecycle: 'persistent',
@@ -382,10 +382,10 @@ describe('ChatExecutionCoordinator', () => {
     });
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-1',
-      providerId: 'claude',
+      providerId: 'omp',
     });
     await harness.coordinator.prepare();
-    const session = harness.backends.get('claude')!.sessions[0];
+    const session = harness.backends.get('omp')!.sessions[0];
 
     session.emit({
       type: 'session_error',
@@ -556,10 +556,10 @@ describe('ChatExecutionCoordinator', () => {
     ).assertConversationExecutionAuthority;
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-1',
-      providerId: 'claude',
+      providerId: 'omp',
     });
     await harness.coordinator.prepare();
-    const session = harness.backends.get('claude')!.sessions[0];
+    const session = harness.backends.get('omp')!.sessions[0];
     const execute = jest.spyOn(session, 'execute').mockImplementation(() => {
       throw new Error('provider handoff occurred');
     });
@@ -577,10 +577,10 @@ describe('ChatExecutionCoordinator', () => {
     const harness = createHarness();
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-1',
-      providerId: 'claude',
+      providerId: 'omp',
     });
     await harness.coordinator.prepare();
-    const session = harness.backends.get('claude')!.sessions[0];
+    const session = harness.backends.get('omp')!.sessions[0];
     session.execute = jest.fn(() => {
       throw new Error('not sent');
     });
@@ -705,7 +705,7 @@ describe('ChatExecutionCoordinator', () => {
     const harness = createHarness();
     const { session, run, resultPromise } = await beginExecution(harness);
     const snapshot: ProviderSessionSnapshot = {
-      providerId: 'claude',
+      providerId: 'omp',
       revision: 2,
       providerSessionId: 'native-2',
       status: 'executing',
@@ -779,9 +779,9 @@ describe('ChatExecutionCoordinator', () => {
 
   it('keeps background work running when a turn signal aborts before provider handoff', async () => {
     const harness = createHarness();
-    await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
+    await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'omp' });
     await harness.coordinator.prepare();
-    const session = harness.backends.get('claude')!.sessions[0];
+    const session = harness.backends.get('omp')!.sessions[0];
     session.emit({
       type: 'background_turn_started',
       scope: { kind: 'background', sessionInstanceId: session.sessionInstanceId, turnId: 'background-1', sequence: 1 },
@@ -863,10 +863,10 @@ describe('ChatExecutionCoordinator', () => {
 
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-2',
-      providerId: 'codex',
+      providerId: 'deepseek',
     });
     await harness.coordinator.prepare();
-    expect(harness.coordinator.snapshot?.providerId).toBe('codex');
+    expect(harness.coordinator.snapshot?.providerId).toBe('deepseek');
 
     nativeSteer.resolve(false);
 
@@ -892,10 +892,10 @@ describe('ChatExecutionCoordinator', () => {
 
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-2',
-      providerId: 'codex',
+      providerId: 'deepseek',
     });
     await harness.coordinator.prepare();
-    expect(harness.coordinator.snapshot?.providerId).toBe('codex');
+    expect(harness.coordinator.snapshot?.providerId).toBe('deepseek');
 
     nativeSteer.resolve(true);
 
@@ -998,10 +998,10 @@ describe('ChatExecutionCoordinator', () => {
       if (boundary === 'bind') {
         await harness.coordinator.bindConversation({
           conversationId: 'conversation-2',
-          providerId: 'codex',
+          providerId: 'deepseek',
         });
       } else if (boundary === 'invalidation') {
-        await harness.registry.runTransition(['claude'], async () => undefined);
+        await harness.registry.runTransition(['omp'], async () => undefined);
       } else {
         await harness.coordinator.dispose();
       }
@@ -1055,7 +1055,7 @@ describe('ChatExecutionCoordinator', () => {
     )).resolves.toBe(true);
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-2',
-      providerId: 'codex',
+      providerId: 'deepseek',
     });
     nativeSteer.reject(new Error('late transport failure'));
 
@@ -1188,10 +1188,10 @@ describe('ChatExecutionCoordinator', () => {
     const harness = createHarness({ onBackgroundWorkChanged });
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-1',
-      providerId: 'claude',
+      providerId: 'omp',
     });
     await harness.coordinator.prepare();
-    const session = harness.backends.get('claude')!.sessions[0];
+    const session = harness.backends.get('omp')!.sessions[0];
     const backgroundScope = {
       kind: 'background' as const,
       sessionInstanceId: session.sessionInstanceId,
@@ -1199,7 +1199,7 @@ describe('ChatExecutionCoordinator', () => {
       sequence: 1,
     };
     const snapshot: ProviderSessionSnapshot = {
-      providerId: 'claude',
+      providerId: 'omp',
       revision: 3,
       status: 'idle',
       providerSessionId: 'native-background',
@@ -1251,9 +1251,9 @@ describe('ChatExecutionCoordinator', () => {
   it.each(['subagent_updated', 'session_state_changed'] as const)('publishes background work transitions from %s', async eventType => {
     const onBackgroundWorkChanged = jest.fn();
     const harness = createHarness({ onBackgroundWorkChanged });
-    await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'codex' });
+    await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'deepseek' });
     await harness.coordinator.prepare();
-    const session = harness.backends.get('codex')!.sessions[0];
+    const session = harness.backends.get('deepseek')!.sessions[0];
     let childrenRunning = false;
     Object.assign(session, { hasBackgroundWork: () => childrenRunning });
     let sessionSequence = 0;
@@ -1287,10 +1287,10 @@ describe('ChatExecutionCoordinator', () => {
     const harness = createHarness();
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-1',
-      providerId: 'claude',
+      providerId: 'omp',
     });
     await harness.coordinator.prepare();
-    const session = harness.backends.get('claude')!.sessions[0];
+    const session = harness.backends.get('omp')!.sessions[0];
 
     session.emit({
       type: 'session_error',
@@ -1310,7 +1310,7 @@ describe('ChatExecutionCoordinator', () => {
 
     const switchPromise = harness.coordinator.bindConversation({
       conversationId: 'conversation-2',
-      providerId: 'codex',
+      providerId: 'deepseek',
     });
 
     expect(harness.coordinator.isEventContextCurrent(context)).toBe(false);
@@ -1318,7 +1318,7 @@ describe('ChatExecutionCoordinator', () => {
     expect(harness.coordinator.isEventContextCurrent(context)).toBe(false);
 
     await harness.coordinator.prepare();
-    const replacementSession = harness.backends.get('codex')!.sessions[0];
+    const replacementSession = harness.backends.get('deepseek')!.sessions[0];
     replacementSession.emit({
       type: 'session_error',
       category: 'provider',
@@ -1333,7 +1333,7 @@ describe('ChatExecutionCoordinator', () => {
     const replacementContext = harness.sessionEventContexts[1];
     expect(harness.coordinator.isEventContextCurrent(replacementContext)).toBe(true);
 
-    const transition = harness.registry.runTransition(['codex'], async () => undefined);
+    const transition = harness.registry.runTransition(['deepseek'], async () => undefined);
     for (
       let attempt = 0;
       attempt < 10 && harness.coordinator.isEventContextCurrent(replacementContext);
@@ -1348,7 +1348,7 @@ describe('ChatExecutionCoordinator', () => {
   it('fences interaction requests by current session and active turn identity', async () => {
     const harness = createHarness();
     const { session, run, resultPromise } = await beginExecution(harness);
-    const port = harness.backends.get('claude')!.configs[0].interactionPort;
+    const port = harness.backends.get('omp')!.configs[0].interactionPort;
 
     await expect(port.requestApproval({
       kind: 'approval',
@@ -1387,7 +1387,7 @@ describe('ChatExecutionCoordinator', () => {
 
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-2',
-      providerId: 'codex',
+      providerId: 'deepseek',
     });
     run.events.push({
       type: 'text_delta',
@@ -1405,17 +1405,17 @@ describe('ChatExecutionCoordinator', () => {
     expect(harness.requestedEvents).toHaveLength(0);
 
     await harness.coordinator.prepare();
-    expect(harness.backends.get('codex')!.sessions).toHaveLength(1);
+    expect(harness.backends.get('deepseek')!.sessions).toHaveLength(1);
   });
 
   it('publishes a null binding before rejected lease release and cannot reacquire', async () => {
     const harness = createHarness();
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-1',
-      providerId: 'claude',
+      providerId: 'omp',
     });
     await harness.coordinator.prepare();
-    const backend = harness.backends.get('claude')!;
+    const backend = harness.backends.get('omp')!;
     const session = backend.sessions[0];
     const disposeError = new Error('provider cleanup failed');
     jest.spyOn(session, 'dispose').mockImplementationOnce(async () => {
@@ -1463,7 +1463,7 @@ describe('ChatExecutionCoordinator', () => {
     expect(session.disposeCalls).toBe(1);
 
     await harness.coordinator.prepare();
-    const backend = harness.backends.get('claude')!;
+    const backend = harness.backends.get('omp')!;
     expect(backend.sessions).toHaveLength(2);
     expect(backend.configs[1]?.resumeSeed).toBeUndefined();
   });
@@ -1517,7 +1517,7 @@ describe('ChatExecutionCoordinator', () => {
 
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-2',
-      providerId: 'codex',
+      providerId: 'deepseek',
       resumeSeed: { providerSessionId: 'codex-native' },
     });
     resolution.resolve('reset');
@@ -1527,10 +1527,10 @@ describe('ChatExecutionCoordinator', () => {
       accepted: false,
     });
     await harness.coordinator.prepare();
-    expect(harness.backends.get('codex')!.configs[0]?.resumeSeed).toEqual({
+    expect(harness.backends.get('deepseek')!.configs[0]?.resumeSeed).toEqual({
       providerSessionId: 'codex-native',
     });
-    expect(harness.backends.get('claude')!.sessions).toHaveLength(1);
+    expect(harness.backends.get('omp')!.sessions).toHaveLength(1);
     expect(session.disposeCalls).toBe(1);
   });
 
@@ -1597,12 +1597,12 @@ describe('ChatExecutionCoordinator', () => {
     const harness = createHarness();
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-1',
-      providerId: 'claude',
+      providerId: 'omp',
     });
     await harness.coordinator.prepare();
-    const session = harness.backends.get('claude')!.sessions[0];
+    const session = harness.backends.get('omp')!.sessions[0];
     session.snapshot = {
-      providerId: 'claude',
+      providerId: 'omp',
       revision: 4,
       status: 'idle',
       providerSessionId: 'native-current',
@@ -1632,10 +1632,10 @@ describe('ChatExecutionCoordinator', () => {
     const harness = createHarness();
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-1',
-      providerId: 'claude',
+      providerId: 'omp',
     });
     await harness.coordinator.prepare();
-    const session = harness.backends.get('claude')!.sessions[0];
+    const session = harness.backends.get('omp')!.sessions[0];
     const nativeRewind = deferred<typeof session.rewindResult>();
     const rewind = jest.spyOn(session, 'rewind').mockReturnValue(nativeRewind.promise);
 
@@ -1649,10 +1649,10 @@ describe('ChatExecutionCoordinator', () => {
     }
     expect(rewind).toHaveBeenCalledTimes(1);
 
-    await harness.registry.runTransition(['claude'], async () => undefined);
+    await harness.registry.runTransition(['omp'], async () => undefined);
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-2',
-      providerId: 'codex',
+      providerId: 'deepseek',
     });
     await harness.coordinator.prepare();
     harness.repository.persistExecutionSnapshot.mockClear();
@@ -1668,24 +1668,24 @@ describe('ChatExecutionCoordinator', () => {
     });
     expect(harness.repository.persistExecutionSnapshot).not.toHaveBeenCalled();
     expect(harness.repository.releaseExecutionBinding).not.toHaveBeenCalled();
-    expect(harness.coordinator.snapshot?.providerId).toBe('codex');
+    expect(harness.coordinator.snapshot?.providerId).toBe('deepseek');
   });
 
   it('drops the session on lifecycle invalidation and recreates it at the new generation', async () => {
     const harness = createHarness();
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-1',
-      providerId: 'claude',
+      providerId: 'omp',
     });
     await harness.coordinator.prepare();
-    const first = harness.backends.get('claude')!.sessions[0];
+    const first = harness.backends.get('omp')!.sessions[0];
 
-    await harness.registry.runTransition(['claude'], async () => undefined);
+    await harness.registry.runTransition(['omp'], async () => undefined);
 
     expect(first.disposeCalls).toBe(1);
     expect(harness.coordinator.state).toBe('stale');
     await harness.coordinator.prepare();
-    expect(harness.backends.get('claude')!.sessions).toHaveLength(2);
+    expect(harness.backends.get('omp')!.sessions).toHaveLength(2);
     expect(harness.repository.registerExecutionBinding).toHaveBeenLastCalledWith(
       'conversation-1',
       'local-2',
@@ -1695,9 +1695,9 @@ describe('ChatExecutionCoordinator', () => {
 
   it.each(['dispose', 'bind', 'transition'] as const)('persists provider state settled during release on %s before giving up the binding', async mode => {
     const harness = createHarness();
-    await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
+    await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'omp' });
     await harness.coordinator.prepare();
-    const session = harness.backends.get('claude')!.sessions[0];
+    const session = harness.backends.get('omp')!.sessions[0];
     harness.repository.persistExecutionSnapshot.mockClear();
     jest.spyOn(session, 'dispose').mockImplementationOnce(async () => {
       // A stopped turn's native state settles once its process exits, after event routing ends.
@@ -1712,7 +1712,7 @@ describe('ChatExecutionCoordinator', () => {
 
     await (mode === 'dispose' ? harness.coordinator.dispose()
       : mode === 'bind' ? harness.coordinator.bindConversation(null)
-        : harness.registry.runTransition(['claude'], async () => undefined));
+        : harness.registry.runTransition(['omp'], async () => undefined));
     // Disposal joins any release still settling.
     await harness.coordinator.dispose();
 
@@ -1726,7 +1726,7 @@ describe('ChatExecutionCoordinator', () => {
 
   /** Routes the harness's claims through the real execution-binding owner, which rejects a second open claim. */
   function useRealBindings(harness: ReturnType<typeof createHarness>, writeMetadata: () => Promise<void> = async () => undefined) {
-    const conversation = { id: 'conversation-1', providerId: 'claude' } as Conversation;
+    const conversation = { id: 'conversation-1', providerId: 'omp' } as Conversation;
     const bindings = new ConversationExecutionBindings({
       fence: {
         getRecord: (id: string) => (id === conversation.id ? conversation : null),
@@ -1750,14 +1750,14 @@ describe('ChatExecutionCoordinator', () => {
     const firstWrite = deferred<void>();
     let writes = 0;
     useRealBindings(harness, async () => { if (writes++ === 0) await firstWrite.promise; });
-    await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
-    const backend = harness.backends.get('claude')!;
+    await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'omp' });
+    const backend = harness.backends.get('omp')!;
 
     const first = harness.coordinator.prepare();
     const queued = harness.coordinator.prepare();
     for (let attempt = 0; attempt < 20 && writes === 0; attempt++) await Promise.resolve();
     expect(backend.sessions).toHaveLength(1);
-    await harness.registry.runTransition(['claude'], async () => undefined);
+    await harness.registry.runTransition(['omp'], async () => undefined);
     firstWrite.resolve();
 
     await first;
@@ -1771,9 +1771,9 @@ describe('ChatExecutionCoordinator', () => {
   it.each([1, 2])('waits for a release that starts while preparation awaits the barrier (after %i ticks)', async ticks => {
     const harness = createHarness();
     useRealBindings(harness);
-    await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
+    await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'omp' });
     await harness.coordinator.prepare();
-    const backend = harness.backends.get('claude')!;
+    const backend = harness.backends.get('omp')!;
     const disposal = deferred<void>();
     jest.spyOn(backend.sessions[0], 'dispose').mockImplementationOnce(() => disposal.promise);
 
@@ -1781,7 +1781,7 @@ describe('ChatExecutionCoordinator', () => {
     for (let tick = 0; tick < ticks; tick++) await Promise.resolve();
     // An updated resume seed releases the prepared session; its disposal is still pending.
     const rebind = harness.coordinator.bindConversation({
-      conversationId: 'conversation-1', providerId: 'claude', resumeSeed: { providerSessionId: 'updated' },
+      conversationId: 'conversation-1', providerId: 'omp', resumeSeed: { providerSessionId: 'updated' },
     });
     disposal.resolve();
 
@@ -1796,7 +1796,7 @@ describe('ChatExecutionCoordinator', () => {
     const harness = createHarness();
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-1',
-      providerId: 'claude',
+      providerId: 'omp',
     });
     await harness.coordinator.prepare();
 
@@ -1805,7 +1805,7 @@ describe('ChatExecutionCoordinator', () => {
       harness.coordinator.dispose(),
     ]);
 
-    expect(harness.backends.get('claude')!.sessions[0].disposeCalls).toBe(1);
+    expect(harness.backends.get('omp')!.sessions[0].disposeCalls).toBe(1);
     await expect(harness.coordinator.prepare()).rejects.toThrow(
       'Chat execution coordinator is disposed',
     );
@@ -1842,9 +1842,9 @@ test.each([undefined, 'provider-reported-model'])(
 it('protects branch navigation from idle release and concurrent input and persists the resulting native cursor', async () => {
   jest.useFakeTimers({ doNotFake: ['setImmediate'] });
   const harness = createHarness({ idleReleaseMs: IDLE_MS });
-  await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
+  await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'omp' });
   await harness.coordinator.prepare();
-  const session = harness.backends.get('claude')!.sessions[0];
+  const session = harness.backends.get('omp')!.sessions[0];
   const navigation = deferred<{ status: string; messages: ChatMessage[] }>();
   const navigate = jest.fn(() => navigation.promise);
   Object.assign(session, { navigateConversationBranch: navigate, getConversationBranches: async () => ({}),
@@ -1864,9 +1864,9 @@ it('protects branch navigation from idle release and concurrent input and persis
 it('reports recovery after native branching succeeds but snapshot persistence fails', async () => {
   jest.useFakeTimers();
   const harness = createHarness({ idleReleaseMs: IDLE_MS });
-  await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
+  await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'omp' });
   await harness.coordinator.prepare();
-  const session = harness.backends.get('claude')!.sessions[0];
+  const session = harness.backends.get('omp')!.sessions[0];
   const messages: ChatMessage[] = [{ id: 'selected', role: 'user', content: 'Selected branch', timestamp: testDate().getTime() }];
   Object.assign(session, {
     getConversationBranches: async () => ({}),

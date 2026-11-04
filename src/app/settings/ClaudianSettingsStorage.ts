@@ -13,6 +13,7 @@ import {
   getSharedEnvironmentVariables
 } from '../../core/providers/providerEnvironment';
 import { ProviderRegistry } from '../../core/providers/ProviderRegistry';
+import { DEFAULT_CHAT_PROVIDER_ID } from '../../core/providers/types';
 import type { VaultFileAdapter } from '../../core/storage/VaultFileAdapter';
 import {
   CHAT_VIEW_PLACEMENTS,
@@ -402,7 +403,7 @@ function migrateLegacyChatModelSelection(
   const storedProviderId = trimStoredString(stored.settingsProvider);
   const providerId = registeredProviderIds.has(storedProviderId)
     ? storedProviderId
-    : 'claude';
+    : DEFAULT_CHAT_PROVIDER_ID;
   if (!registeredProviderIds.has(providerId)) {
     return null;
   }

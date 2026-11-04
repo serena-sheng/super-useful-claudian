@@ -3,7 +3,7 @@
   "name": "Super Useful Claudian",
   "version": "1.8.0",
   "minAppVersion": "1.13.0",
-  "description": "Run Oh My Pi, DeepSeek Harness, Claude Code, Codex, Grok, OpenCode and Pi inside your vault as chat collaborators. A fork of Claudian with provider readiness checks, a capability matrix, a token usage meter and full session restore.",
+  "description": "Run OMP, the Oh My Pi agent CLI, in your vault as the default chat provider, with DeepSeek Harness optional. A Claudian fork with readiness checks, a capability matrix, token meter, session restore and a personal pack.",
   "author": "Serena Sheng",
   "authorUrl": "https://github.com/serena-sheng",
   "isDesktopOnly": true

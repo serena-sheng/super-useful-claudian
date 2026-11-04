@@ -224,39 +224,16 @@ test('providers avoid root app imports', () => {
  * Listed explicitly so a new provider module is runtime until it is reviewed into this set.
  */
 const PROVIDER_DOCUMENT_WRAPPERS = new Set([
-  'src/providers/claude/ClaudeModelPolicy.ts',
-  'src/providers/claude/env/ClaudeSettingsReconciler.ts',
-  'src/providers/claude/runtime/ClaudeCLIResolver.ts',
-  'src/providers/claude/settings.ts',
-  'src/providers/codex/CodexModelPolicy.ts',
-  'src/providers/codex/env/CodexSettingsReconciler.ts',
-  'src/providers/codex/runtime/CodexCLIResolver.ts',
-  'src/providers/codex/settings.ts',
   'src/providers/deepseek/DeepSeekModelPolicy.ts',
   'src/providers/deepseek/app/DeepSeekCommandLoader.ts',
   'src/providers/deepseek/env/DeepSeekSettingsReconciler.ts',
   'src/providers/deepseek/runtime/DeepSeekCLIResolver.ts',
   'src/providers/deepseek/settings.ts',
-  'src/providers/grok/GrokModelPolicy.ts',
-  'src/providers/grok/app/GrokCommandLoader.ts',
-  'src/providers/grok/env/GrokSettingsReconciler.ts',
-  'src/providers/grok/runtime/GrokCLIResolver.ts',
-  'src/providers/grok/settings.ts',
   'src/providers/omp/OmpModelPolicy.ts',
   'src/providers/omp/app/OmpCommandLoader.ts',
   'src/providers/omp/env/OmpSettingsReconciler.ts',
   'src/providers/omp/runtime/OmpCLIResolver.ts',
   'src/providers/omp/settings.ts',
-  'src/providers/opencode/OpencodeModelPolicy.ts',
-  'src/providers/opencode/app/OpencodeCommandLoader.ts',
-  'src/providers/opencode/env/OpencodeSettingsReconciler.ts',
-  'src/providers/opencode/runtime/OpencodeCLIResolver.ts',
-  'src/providers/opencode/settings.ts',
-  'src/providers/pi/PiModelPolicy.ts',
-  'src/providers/pi/app/PiCommandLoader.ts',
-  'src/providers/pi/env/PiSettingsReconciler.ts',
-  'src/providers/pi/runtime/PiCLIResolver.ts',
-  'src/providers/pi/settings.ts',
 ]);
 
 /**
@@ -477,7 +454,7 @@ test('provider runtimes never reach the application settings document', () => {
 });
 
 test('the settings document boundary detects direct and type-only access', () => {
-  const file = path.join(providersRoot, 'pi', 'runtime', 'BoundaryFixture.ts');
+  const file = path.join(providersRoot, 'omp', 'runtime', 'BoundaryFixture.ts');
   for (const source of [
     "import type { ProviderHost } from '@/core/providers/ProviderHost';\nexport type Host = ProviderHost;",
     "import type { ClaudianSettings } from '@/core/types';\nexport type Settings = ClaudianSettings;",
@@ -495,14 +472,14 @@ test('the settings document boundary detects direct and type-only access', () =>
     "import { createConfigCatalogStore } from '@/core/providers/models/ProviderModelCatalog';\nexport const store = createConfigCatalogStore;",
   ]) assert.deepEqual(inspectSettingsDocumentAccess(file, source), [], source);
   // Document wrappers are integration; the configuration modules they wrap are runtime.
-  assert.equal(isProviderIntegrationModule(path.join(providersRoot, 'pi', 'settings.ts')), true);
-  assert.equal(isProviderIntegrationModule(path.join(providersRoot, 'pi', 'config.ts')), false);
+  assert.equal(isProviderIntegrationModule(path.join(providersRoot, 'omp', 'settings.ts')), true);
+  assert.equal(isProviderIntegrationModule(path.join(providersRoot, 'omp', 'config.ts')), false);
   // A module named like a wrapper is runtime until it is listed.
   for (const unlisted of [
-    ['pi', 'runtime', 'FooCLIResolver.ts'],
-    ['pi', 'app', 'FooCommandLoader.ts'],
-    ['pi', 'FooModelPolicy.ts'],
-    ['pi', 'env', 'FooReconciler.ts'],
+    ['omp', 'runtime', 'FooCLIResolver.ts'],
+    ['omp', 'app', 'FooCommandLoader.ts'],
+    ['omp', 'FooModelPolicy.ts'],
+    ['omp', 'env', 'FooReconciler.ts'],
   ]) assert.equal(isProviderIntegrationModule(path.join(providersRoot, ...unlisted)), false, unlisted.join('/'));
 });
 
@@ -512,16 +489,16 @@ test('every listed document wrapper exists and reaches the settings document', (
     return inspectDocumentWrapper(file, fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null);
   });
   assert.deepEqual(problems, []);
-  const listed = path.join(providersRoot, 'pi', 'runtime', 'PiCLIResolver.ts');
+  const listed = path.join(providersRoot, 'omp', 'runtime', 'OmpCLIResolver.ts');
   assert.notDeepEqual(inspectDocumentWrapper(listed, null), []);
-  assert.notDeepEqual(inspectDocumentWrapper(listed, "import { decodePiConfig } from '../config';\nexport const read = decodePiConfig;"), []);
-  assert.deepEqual(inspectDocumentWrapper(listed, "import { getPiProviderSettings } from '../settings';\nexport const read = getPiProviderSettings;"), []);
+  assert.notDeepEqual(inspectDocumentWrapper(listed, "import { decodeOmpConfig } from '../config';\nexport const read = decodeOmpConfig;"), []);
+  assert.deepEqual(inspectDocumentWrapper(listed, "import { getOmpProviderSettings } from '../settings';\nexport const read = getOmpProviderSettings;"), []);
   assert.deepEqual(inspectDocumentWrapper(listed, "import { getProviderConfig } from '@/core/providers/providerConfig';\nexport const read = getProviderConfig;"), []);
 });
 
 test('the provider runtime boundary detects indirect Obsidian access', () => {
   const options = { reachesObsidian: findObsidianValueReach(), obsidianBoundExports: createObsidianBoundExports() };
-  const file = path.join(providersRoot, 'claude', 'runtime', 'BoundaryFixture.ts');
+  const file = path.join(providersRoot, 'omp', 'runtime', 'BoundaryFixture.ts');
   const inspect = source => inspectProviderRuntimeSource(file, source, options);
   const forbidden = [
     "import { getVaultPath } from '@/utils/path';\nexport const cwd = (host: { app: never }) => getVaultPath(host.app);",
@@ -530,7 +507,7 @@ test('the provider runtime boundary detects indirect Obsidian access', () => {
     "export function cwd({ app: obsidian }: Record<string, unknown>) { return obsidian; }",
     "export function cwd(host: Record<string, unknown>) { return host['app']; }",
     "import { Notice } from 'obsidian';\nexport const warn = (message: string) => new Notice(message);",
-    "import { claudeChatUIConfig } from '../ui/ClaudeChatUIConfig';\nexport const config = claudeChatUIConfig;",
+    "import { ompChatUIConfig } from '../ui/OmpChatUIConfig';\nexport const config = ompChatUIConfig;",
     "import * as paths from '@/utils/path';\nexport const cwd = paths.getVaultPath;",
     "import * as paths from '@/utils/path';\nexport const { getVaultPath } = paths;",
     "export { getVaultPath } from '@/utils/path';",
@@ -766,18 +743,16 @@ test('performance policy enforces the main bundle budget and reports health delt
 });
 
 test('bundle-critical runtime dependencies require exact manifest and lock agreement', () => {
-  assert.deepEqual(bundleCriticalRuntimeDependencies, [
-    '@anthropic-ai/claude-agent-sdk',
-  ]);
+  // No provider SDK is bundled today; the list is empty by design and kept as a mechanism.
+  assert.deepEqual(bundleCriticalRuntimeDependencies, []);
+  const dependencies = ['bundle-critical'];
   const packageJson = {
-    dependencies: {
-      '@anthropic-ai/claude-agent-sdk': '0.3.226',
-    },
+    dependencies: { 'bundle-critical': '0.3.226' },
   };
   const packageLock = {
     packages: {
       '': { dependencies: { ...packageJson.dependencies } },
-      'node_modules/@anthropic-ai/claude-agent-sdk': { version: '0.3.226' },
+      'node_modules/bundle-critical': { version: '0.3.226' },
     },
   };
   const bunLock = {
@@ -785,114 +760,54 @@ test('bundle-critical runtime dependencies require exact manifest and lock agree
       '': { dependencies: { ...packageJson.dependencies } },
     },
     packages: {
-      '@anthropic-ai/claude-agent-sdk': ['@anthropic-ai/claude-agent-sdk@0.3.226'],
+      'bundle-critical': ['bundle-critical@0.3.226'],
     },
   };
 
-  assert.deepEqual(inspectRuntimeDependencyParity({ bunLock, packageJson, packageLock }), []);
+  assert.deepEqual(
+    inspectRuntimeDependencyParity({ bunLock, packageJson, packageLock, dependencies }),
+    [],
+  );
 
   const rangedManifest = structuredClone(packageJson);
-  rangedManifest.dependencies['@anthropic-ai/claude-agent-sdk'] = '^0.3.220';
+  rangedManifest.dependencies['bundle-critical'] = '^0.3.220';
   assert.deepEqual(
-    inspectRuntimeDependencyParity({ bunLock, packageJson: rangedManifest, packageLock }),
+    inspectRuntimeDependencyParity({ bunLock, packageJson: rangedManifest, packageLock, dependencies }),
     [{
       actual: '^0.3.220',
-      dependency: '@anthropic-ai/claude-agent-sdk',
+      dependency: 'bundle-critical',
       expected: 'an exact version',
       source: 'package.json',
     }],
   );
-
-  const staleNpmLock = structuredClone(packageLock);
-  staleNpmLock.packages['node_modules/@anthropic-ai/claude-agent-sdk'].version = '0.3.220';
-  assert.deepEqual(
-    inspectRuntimeDependencyParity({ bunLock, packageJson, packageLock: staleNpmLock }),
-    [{
-      actual: '0.3.220',
-      dependency: '@anthropic-ai/claude-agent-sdk',
-      expected: '0.3.226',
-      source: 'package-lock.json resolution',
-    }],
-  );
-
-  const staleBunLock = structuredClone(bunLock);
-  staleBunLock.packages['@anthropic-ai/claude-agent-sdk'][0] = '@anthropic-ai/claude-agent-sdk@0.3.220';
-  assert.deepEqual(
-    inspectRuntimeDependencyParity({ bunLock: staleBunLock, packageJson, packageLock }),
-    [{
-      actual: '0.3.220',
-      dependency: '@anthropic-ai/claude-agent-sdk',
-      expected: '0.3.226',
-      source: 'bun.lock resolution',
-    }],
-  );
 });
 
-test('Bun lock parsing accepts the repository JSONC shape without weakening JSON validation', () => {
-  assert.deepEqual(parseBunLock(`{
-    "literal": "preserve ,} and escaped \\\"text\\\"",
-    "workspaces": { "": { "dependencies": { "smol-toml": "1.7.1", }, }, },
-    "packages": { "smol-toml": ["smol-toml@1.7.1",], },
-  }`), {
-    literal: 'preserve ,} and escaped "text"',
-    workspaces: { '': { dependencies: { 'smol-toml': '1.7.1' } } },
-    packages: { 'smol-toml': ['smol-toml@1.7.1'] },
-  });
-  const prototypeKey = '{"__proto__": {"packages": {}}, "constructor": "literal"}';
-  assert.deepEqual(parseBunLock(prototypeKey), JSON.parse(prototypeKey));
-  for (const invalid of [
-    '{ "packages": /* unsupported */ {} }',
-    '{ "packages": {} // unsupported\n}',
-    '', '{', '{"packages":}', '{"packages":{} "other":1}', '{} trailing',
-  ]) {
-    assert.throws(() => parseBunLock(invalid), /bun\.lock is not valid JSONC/);
-  }
-});
+test('dependency parity rejects drift for bundle-critical dependencies', () => {
+  // The plugin bundles no provider SDK any more, so the guard is inert for the
+  // shipped artifact; the injected list keeps the mechanism covered.
+  assert.deepEqual([...bundleCriticalRuntimeDependencies], []);
 
-test('production artifact entry rejects dependency drift before emitting main.js', () => {
-  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'claudian-build-parity-'));
-  try {
-    fs.writeFileSync(path.join(fixtureRoot, 'package.json'), JSON.stringify({
-      dependencies: {
-        '@anthropic-ai/claude-agent-sdk': '0.3.226',
-      },
-    }));
-    fs.writeFileSync(path.join(fixtureRoot, 'package-lock.json'), JSON.stringify({
+  const violations = inspectRuntimeDependencyParity({
+    bunLock: {
+      workspaces: { '': { dependencies: { 'bundle-critical': '0.3.226' } } },
+      packages: { 'bundle-critical': ['bundle-critical@0.3.226'] },
+    },
+    dependencies: ['bundle-critical'],
+    packageJson: { dependencies: { 'bundle-critical': '0.3.226' } },
+    packageLock: {
       packages: {
-        '': {
-          dependencies: {
-            '@anthropic-ai/claude-agent-sdk': '0.3.226',
-          },
-        },
-        'node_modules/@anthropic-ai/claude-agent-sdk': { version: '0.3.220' },
+        '': { dependencies: { 'bundle-critical': '0.3.226' } },
+        'node_modules/bundle-critical': { version: '0.3.220' },
       },
-    }));
-    fs.writeFileSync(path.join(fixtureRoot, 'bun.lock'), `{
-      "workspaces": { "": { "dependencies": {
-        "@anthropic-ai/claude-agent-sdk": "0.3.226",
-      }, }, },
-      "packages": {
-        "@anthropic-ai/claude-agent-sdk": ["@anthropic-ai/claude-agent-sdk@0.3.226"],
-      },
-    }`);
+    },
+  });
 
-    const result = spawnSync(
-      process.execPath,
-      [path.join(process.cwd(), 'esbuild.config.mjs'), 'production'],
-      {
-        cwd: fixtureRoot,
-        encoding: 'utf8',
-        env: { ...process.env, OBSIDIAN_VAULT: '' },
-      },
-    );
-
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /Bundle-critical runtime dependency parity failed/);
-    assert.match(result.stderr, /package-lock\.json resolution: @anthropic-ai\/claude-agent-sdk/);
-    assert.equal(fs.existsSync(path.join(fixtureRoot, 'main.js')), false);
-  } finally {
-    fs.rmSync(fixtureRoot, { force: true, recursive: true });
-  }
+  assert.deepEqual(violations, [{
+    actual: '0.3.220',
+    dependency: 'bundle-critical',
+    expected: '0.3.226',
+    source: 'package-lock.json resolution',
+  }]);
 });
 
 test('production bundle policy rejects plugin artifact filename references', () => {

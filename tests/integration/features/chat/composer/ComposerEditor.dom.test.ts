@@ -1,34 +1,30 @@
 /** @jest-environment jsdom */
 
-import { EditorView } from '@codemirror/view';
-import { testDate } from '@test/helpers/testClock';
-import { createEvent, fireEvent, waitFor, within } from '@testing-library/dom';
-import { axe } from 'jest-axe';
-import { type App, Component, MarkdownRenderer, Notice, Platform, TFile } from 'obsidian';
+import { EditorView} from '@codemirror/view';
+import { testDate} from '@test/helpers/testClock';
+import { createEvent, fireEvent, waitFor, within} from '@testing-library/dom';
+import { axe} from 'jest-axe';
+import { type App, Component, MarkdownRenderer, Notice, Platform, TFile} from 'obsidian';
 
-import { createCatalogCommandDiscoveryStore } from '@/core/providers/commands/catalogCommandDiscovery';
-import type { ProviderCommandDiscoveryResult } from '@/core/providers/commands/ProviderCommandDiscoveryResult';
-import type { ProviderCommandDiscoverySnapshot } from '@/core/providers/commands/ProviderCommandDiscoveryStore';
-import type { ProviderCommandEntry } from '@/core/providers/commands/ProviderCommandEntry';
-import { ComposerContextTray } from '@/features/chat/composer/ComposerContextTray';
-import { ComposerEditor } from '@/features/chat/composer/ComposerEditor';
-import { ComposerInfoRow } from '@/features/chat/composer/ComposerInfoRow';
-import { ComposerPromptSuggestion } from '@/features/chat/composer/ComposerPromptSuggestion';
-import { formatComposerSessionMention } from '@/features/chat/composer/composerSessionMentions';
-import { FileContextManager } from '@/features/chat/composer/FileContextManager';
-import { ImageContextManager } from '@/features/chat/composer/ImageContextManager';
-import { MainChatComposerDropdown } from '@/features/chat/composer/MainChatComposerDropdown';
-import { CanvasSelectionController } from '@/features/chat/input/CanvasSelectionController';
-import { LinkedContentChip } from '@/features/chat/linked-content/LinkedContentChip';
-import { sendTabInputMessageFromExplicitEnterShortcut } from '@/features/chat/tabs/TabInputEvents';
-import { setLocale } from '@/i18n/i18n';
-import type { Locale } from '@/i18n/types';
-import { CodexCommandCatalog } from '@/providers/codex/commands/CodexCommandCatalog';
-import type { CodexAppServerRuntime } from '@/providers/codex/runtime/CodexAppServerRuntime';
-import { CodexSkillListingService } from '@/providers/codex/skills/CodexSkillListingService';
-import { ResumeSessionDropdown } from '@/shared/components/ResumeSessionDropdown';
-import { ComposerDropdownController } from '@/shared/composer-dropdown/ComposerDropdownController';
-import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
+import type { ProviderCommandDiscoveryResult} from '@/core/providers/commands/ProviderCommandDiscoveryResult';
+import type { ProviderCommandDiscoverySnapshot} from '@/core/providers/commands/ProviderCommandDiscoveryStore';
+import type { ProviderCommandEntry} from '@/core/providers/commands/ProviderCommandEntry';
+import { ComposerContextTray} from '@/features/chat/composer/ComposerContextTray';
+import { ComposerEditor} from '@/features/chat/composer/ComposerEditor';
+import { ComposerInfoRow} from '@/features/chat/composer/ComposerInfoRow';
+import { ComposerPromptSuggestion} from '@/features/chat/composer/ComposerPromptSuggestion';
+import { formatComposerSessionMention} from '@/features/chat/composer/composerSessionMentions';
+import { FileContextManager} from '@/features/chat/composer/FileContextManager';
+import { ImageContextManager} from '@/features/chat/composer/ImageContextManager';
+import { MainChatComposerDropdown} from '@/features/chat/composer/MainChatComposerDropdown';
+import { CanvasSelectionController} from '@/features/chat/input/CanvasSelectionController';
+import { LinkedContentChip} from '@/features/chat/linked-content/LinkedContentChip';
+import { sendTabInputMessageFromExplicitEnterShortcut} from '@/features/chat/tabs/TabInputEvents';
+import { setLocale} from '@/i18n/i18n';
+import type { Locale} from '@/i18n/types';
+import { ResumeSessionDropdown} from '@/shared/components/ResumeSessionDropdown';
+import { ComposerDropdownController} from '@/shared/composer-dropdown/ComposerDropdownController';
+import { VaultMentionDataProvider} from '@/shared/mention/VaultMentionDataProvider';
 
 const nativeLinks: Record<string, { target: string; label: string }> = {
   '[[Notes/A note.md]]': { target: 'Notes/A note.md', label: 'A note' },
@@ -762,76 +758,6 @@ it('renders known commands and skills as chips while unknown tokens stay text', 
     expect(editor.element.value).toBe('Run ');
   } finally { dropdown.destroy(); editor.destroy(); parent.remove(); }
 });
-
-it('reloads Codex skills for typed tokens while keeping completed chips atomic', async () => {
-  const parent = document.body.createDiv();
-  const editor = createEditor(parent);
-  let name = 'first-skill';
-  const nativeRequest = jest.fn(async () => ({ data: [{ cwd: '/vault', skills: [{
-    name, path: '/skills/SKILL.md', scope: 'user', enabled: true,
-  }] }] }));
-  const skills = new CodexSkillListingService({
-    onSkillsChanged: () => () => undefined,
-    acquire: async () => ({
-      connection: {
-        launchSpec: { targetCwd: '/vault', pathMapper: { toHostPath: (path: string) => path } },
-        transport: { request: nativeRequest }, refreshPlugins: async () => undefined,
-      },
-      release: async () => undefined,
-    }),
-  } as unknown as CodexAppServerRuntime);
-  const catalog = new CodexCommandCatalog(skills);
-  const dropdown = new MainChatComposerDropdown(parent, editor.element, new FileContextManager(new VaultMentionDataProvider(createApp())), {
-    providerId: 'codex', providerConfig: catalog.getDropdownConfig(),
-    // Codex has no command loader; its catalog discovers skills itself.
-    providerDiscovery: createCatalogCommandDiscoveryStore(catalog, async () => ({ result: { status: 'empty' } })),
-  });
-  const handleInput = jest.fn(() => dropdown.handleInputChange());
-  editor.element.addEventListener('input', handleInput);
-  try {
-    editor.element.value = '$';
-    editor.element.selectionStart = editor.element.selectionEnd = 1;
-    dropdown.handleInputChange();
-    await waitFor(() => within(parent).getByRole('option', { name: '$first-skill' }));
-    editor.element.value = '$first';
-    editor.element.selectionStart = editor.element.selectionEnd = 6;
-    dropdown.handleInputChange();
-    await waitFor(() => within(parent).getByRole('option', { name: '$first-skill' }));
-    expect(nativeRequest).toHaveBeenCalledTimes(1);
-    dropdown.hide();
-    name = 'second-skill';
-    editor.element.value = '$';
-    editor.element.selectionStart = editor.element.selectionEnd = 1;
-    dropdown.handleInputChange();
-    await waitFor(() => within(parent).getByRole('option', { name: '$second-skill' }));
-    expect(within(parent).queryByRole('option', { name: '$first-skill' })).toBeNull();
-    expect(nativeRequest).toHaveBeenCalledTimes(2);
-    expect((await axe(within(parent).getByRole('option', { name: '$second-skill' }))).violations).toEqual([]);
-
-    fireEvent.click(within(parent).getByRole('option', { name: '$second-skill' }));
-    expect(editor.element.value).toBe('$second-skill ');
-    expect((await axe(within(parent).getByRole('img', { name: 'Skill: second-skill' }))).violations).toEqual([]);
-    const textbox = within(parent).getByRole('textbox', { name: 'Message' });
-    fireEvent.keyDown(textbox, { key: 'Backspace', code: 'Backspace' });
-    await waitFor(() => expect(handleInput).toHaveBeenCalledTimes(1));
-    expect(editor.element.value).toBe('$second-skill');
-    expect(within(parent).getByRole('img', { name: 'Skill: second-skill' })).toBeTruthy();
-    expect(dropdown.isVisible()).toBe(false);
-    fireEvent.keyDown(textbox, { key: 'Backspace', code: 'Backspace' });
-    await waitFor(() => expect(handleInput).toHaveBeenCalledTimes(2));
-    expect(editor.element.value).toBe('');
-    expect(within(parent).queryByRole('img', { name: 'Skill: second-skill' })).toBeNull();
-    expect(dropdown.isVisible()).toBe(false);
-    expect(nativeRequest).toHaveBeenCalledTimes(2);
-  } finally {
-    editor.element.removeEventListener('input', handleInput);
-    dropdown.destroy();
-    editor.destroy();
-    parent.remove();
-    await skills.dispose();
-  }
-});
-
 
 it('accepts a visible prompt suggestion with Tab only, without sending', async () => {
   const parent = document.body.createDiv();

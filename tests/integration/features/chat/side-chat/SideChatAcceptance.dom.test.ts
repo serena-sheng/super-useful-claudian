@@ -43,7 +43,7 @@ it.each([true, false])('freezes the side-chat Main Agent prompt and project text
   const projects = createProjectsFake(live ? [record] : []);
   Object.assign(harness.plugin, {
     projects,
-    getConversationSync: (id: string) => ({ id, providerId: 'claude', projectId: record.id }),
+    getConversationSync: (id: string) => ({ id, providerId: 'omp', projectId: record.id }),
   });
   const { started } = await startSideChat(harness);
   harness.backend.latest.establishChild('child-session');
@@ -52,7 +52,7 @@ it.each([true, false])('freezes the side-chat Main Agent prompt and project text
 
   // Later project edits, deletion or the parent leaving never reach the started side chat.
   projects.put({ ...record, name: 'Renamed', instructions: 'Changed.' });
-  Object.assign(harness.plugin, { getConversationSync: (id: string) => ({ id, providerId: 'claude' }) });
+  Object.assign(harness.plugin, { getConversationSync: (id: string) => ({ id, providerId: 'omp' }) });
   Object.assign((harness.plugin as { settings: object }).settings, { systemPrompt: 'Changed custom prompt.', userName: 'Changed user' });
   const second = harness.controller.runtime!.submit({ content: 'Explore C' });
   await waitFor(() => expect(harness.backend.latest.requests).toHaveLength(2));

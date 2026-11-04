@@ -1,5 +1,5 @@
 /** SDK catalog fixture for tests whose subject assumes model discovery has completed. */
-export function claudeCatalogFixture(
+export function ompCatalogFixture(
   ids = ['haiku', 'sonnet', 'opus', 'fable'],
   supportedEffortLevels?: string[],
 ) {

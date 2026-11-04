@@ -34,9 +34,9 @@ jest.mock('@/core/providers/ProviderRegistry', () => (
 
 function createRuntimeCatalog(): RuntimeCommandCatalog {
   const catalog = new RuntimeCommandCatalog({
-    dropdownConfig: { providerId: 'claude', triggerChars: ['/'], builtInPrefix: '/', skillPrefix: '/', commandPrefix: '/' },
+    dropdownConfig: { providerId: 'omp', triggerChars: ['/'], builtInPrefix: '/', skillPrefix: '/', commandPrefix: '/' },
     projectEntry: command => ({
-      ...command, providerId: 'claude', kind: 'command', scope: 'runtime', source: 'sdk',
+      ...command, providerId: 'omp', kind: 'command', scope: 'runtime', source: 'sdk',
       isEditable: false, isDeletable: false, displayPrefix: '/', insertPrefix: '/',
     }),
   });
@@ -67,7 +67,7 @@ describe('TabCommandDiscovery', () => {
     mockTabs.length = 0;
     jest.clearAllMocks();
     (ProviderRegistry.getCapabilities as jest.Mock).mockReturnValue({
-      providerId: 'claude',
+      providerId: 'omp',
       supportsProviderCommands: true,
     });
     commandLoader.loadCommands.mockResolvedValue({
@@ -91,10 +91,10 @@ describe('TabCommandDiscovery', () => {
     };
     const { manager } = createManager(createPlugin());
     const tab = await manager.createTab();
-    boundary.register('claude', {
+    boundary.register('omp', {
       initialize: async () => ({ commandCatalog: catalog, commandLoader: commandsA }),
     });
-    await boundary.ensureInitialized(hostA, 'claude', 'host-a');
+    await boundary.ensureInitialized(hostA, 'omp', 'host-a');
     jest.mocked(ProviderWorkspaceRegistry.getIfInitialized).mockImplementation(id => boundary.getIfInitialized(id));
     jest.mocked(ProviderWorkspaceRegistry.ensureInitialized).mockImplementation((host, id, reason) => boundary.ensureInitialized(host, id, reason));
     jest.mocked(ProviderWorkspaceRegistry.getCommandLoader).mockImplementation(id => boundary.getIfInitialized(id)?.commandLoader ?? null);
@@ -152,7 +152,7 @@ describe('TabCommandDiscovery', () => {
   });
 
   it('does not start isolated command metadata for a background tab', async () => {
-    const conversation = { id: 'background-conversation', providerId: 'claude' };
+    const conversation = { id: 'background-conversation', providerId: 'omp' };
     const { manager } = createManager(createPlugin({
       getCachedConversation: jest.fn().mockReturnValue(conversation),
       getConversationSync: jest.fn().mockReturnValue(conversation),
@@ -179,7 +179,7 @@ describe('TabCommandDiscovery', () => {
       name: 'review',
     }]);
     (ProviderRegistry.getCapabilities as jest.Mock).mockReturnValue({
-      providerId: 'opencode',
+      providerId: 'deepseek',
       supportsProviderCommands: true,
     });
     commandCatalog.getDropdownConfig.mockReturnValue({
@@ -189,7 +189,7 @@ describe('TabCommandDiscovery', () => {
 
     try {
       const tab = await manager.createTab();
-      tab!.session.selectDraft('opencode', tab!.draftModel);
+      tab!.session.selectDraft('deepseek', tab!.draftModel);
       const discovery = discoveryFor(0, tab);
 
       const load = discovery.load();
@@ -218,13 +218,13 @@ describe('TabCommandDiscovery', () => {
     const conversationB = {
       id: 'conversation-b',
       messages: [],
-      providerId: 'claude',
+      providerId: 'omp',
     };
     const getConversationById = jest.fn()
       .mockImplementationOnce(() => firstLookup.promise)
       .mockResolvedValue(conversationB);
     const { manager } = createManager(createPlugin({
-      getCachedConversation: jest.fn((id: string) => ({ id, providerId: 'claude' })),
+      getCachedConversation: jest.fn((id: string) => ({ id, providerId: 'omp' })),
       getConversationById,
     }));
     const tab = await manager.createTab('conversation-a');
@@ -239,7 +239,7 @@ describe('TabCommandDiscovery', () => {
     firstLookup.resolve({
       id: 'conversation-a',
       messages: [{ role: 'user', content: 'A' }],
-      providerId: 'claude',
+      providerId: 'omp',
     });
 
     // The rebind invalidates the picker's source, aborting its in-flight stale load.
@@ -267,7 +267,7 @@ describe('TabCommandDiscovery', () => {
     await expect(reloadDiscovery(0, tab)).resolves.toMatchObject({ status: 'ready' });
     expect(commandLoader.loadCommands).toHaveBeenCalledTimes(1);
 
-    await executionLifecycleRegistry.runTransition(['claude'], async () => undefined);
+    await executionLifecycleRegistry.runTransition(['omp'], async () => undefined);
 
     await expect(reloadDiscovery(0, tab)).resolves.toMatchObject({ status: 'ready' });
     expect(commandLoader.loadCommands).toHaveBeenCalledTimes(2);
@@ -292,7 +292,7 @@ describe('TabCommandDiscovery', () => {
     }
     expect(commandLoader.loadCommands).toHaveBeenCalledTimes(1);
 
-    await executionLifecycleRegistry.runTransition(['claude'], async () => undefined);
+    await executionLifecycleRegistry.runTransition(['omp'], async () => undefined);
     oldDiscovery.resolve({
       status: 'ready',
       items: [{ description: 'Old command', name: 'old' }],

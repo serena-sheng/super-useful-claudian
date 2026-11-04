@@ -18,7 +18,7 @@ afterEach(() => { jest.restoreAllMocks(); });
 test.each(['execution initialization', 'handoff authority'] as const)(
   'Stop during %s prevents a later native handoff', async phase => {
     const native = createHarness();
-    await native.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
+    await native.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'omp' });
     const started = deferred<void>();
     const release = deferred<void>();
     if (phase === 'handoff authority') {
@@ -51,7 +51,7 @@ test.each(['execution initialization', 'handoff authority'] as const)(
     expect(input.state.messages).toEqual([]);
     await native.coordinator.dispose();
     await native.registry.dispose();
-    expect(native.backends.get('claude')!.sessions.flatMap(session => session.requests)).toHaveLength(0);
+    expect(native.backends.get('omp')!.sessions.flatMap(session => session.requests)).toHaveLength(0);
   },
 );
 
@@ -59,9 +59,9 @@ test.each(['execution initialization', 'handoff authority'] as const)(
 
 test('shutdown cancels a preparing turn and retains its unsent input for the final snapshot', async () => {
   const native = createHarness();
-  await native.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
+  await native.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'omp' });
   const session = createTabSession({
-    id: 'tab-1', conversationId: 'conversation-1', providerId: 'claude', draftModel: null, lifecycleState: 'open',
+    id: 'tab-1', conversationId: 'conversation-1', providerId: 'omp', draftModel: null, lifecycleState: 'open',
   }, native.coordinator).runtime;
   const started = deferred<void>();
   const release = deferred<void>();
@@ -84,7 +84,7 @@ test('shutdown cancels a preparing turn and retains its unsent input for the fin
   await Promise.all([sending, draining]);
   await native.coordinator.dispose();
   await native.registry.dispose();
-  expect(native.backends.get('claude')!.sessions.flatMap(value => value.requests)).toHaveLength(0);
+  expect(native.backends.get('omp')!.sessions.flatMap(value => value.requests)).toHaveLength(0);
   expect(input.state.messages).toEqual([expect.objectContaining({ role: 'user', content: 'Retain this unsent input' })]);
   expect(input.input.value).toBe('');
   expect(session.turns.isActive).toBe(false);

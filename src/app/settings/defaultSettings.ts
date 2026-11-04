@@ -15,7 +15,7 @@ export const DEFAULT_CLAUDIAN_SETTINGS: ClaudianSettings = {
 
   permissionMode: 'auto',
 
-  model: 'haiku',
+  model: '',
   effortLevel: DEFAULT_REASONING_VALUE,
   serviceTier: 'default',
   enableAutoTitleGeneration: true,
@@ -43,7 +43,7 @@ export const DEFAULT_CLAUDIAN_SETTINGS: ClaudianSettings = {
 
   providerConfigs: {},
 
-  settingsProvider: 'claude',
+  settingsProvider: 'omp',
   lastSelectedChatModel: null,
   inlineEditModel: null,
   savedProviderModel: {},

@@ -91,7 +91,7 @@ export function createInlineEditHarness() {
   const lifecycle = new ProviderExecutionLifecycleRegistry();
   const owner = new InlineEditSessionOwner();
   ProviderWorkspaceRegistry.clear();
-  const backend = registerFakeInlineEditProvider('claude');
+  const backend = registerFakeInlineEditProvider('omp');
   const app: any = {
     vault: { adapter: { basePath: '/vault' }, getFiles: () => [], getAllLoadedFiles: () => [] },
   };
@@ -126,7 +126,7 @@ export function createInlineEditHarness() {
   const settled = jest.fn();
   const notePath = 'note.md';
   const createSession = () => new InlineEditSession(
-    app, plugin, plugin, editorView, editor, context, notePath, settled, { providerId: 'claude' },
+    app, plugin, plugin, editorView, editor, context, notePath, settled, { providerId: 'omp' },
   );
   /** Mirrors Obsidian's editorCallback: a callback editor plus the view that owns the current editor. */
   const createModal = (callbackEditor: any = editor, viewEditor: any = editor) =>

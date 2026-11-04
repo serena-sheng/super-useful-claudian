@@ -79,7 +79,7 @@ function createHost(deepseekEnabled: boolean) {
   let transitionActive = false;
   const mutationsInsideTransition: boolean[] = [];
   const host: any = {
-    settings: { providerConfigs: { claude: { enabled: !deepseekEnabled }, deepseek: { enabled: deepseekEnabled } } },
+    settings: { providerConfigs: { omp: { enabled: !deepseekEnabled }, deepseek: { enabled: deepseekEnabled } } },
     storage: { installationKey: 'device:current' },
     getResolvedProviderCliPath: async () => null,
     mutateSettings: jest.fn(async (mutation: (settings: Record<string, unknown>) => void) => {
@@ -337,7 +337,7 @@ describe('DeepSeekSettingsTab', () => {
     await waitFor(() => expect(context.notifyProviderModelOptionsChanged).toHaveBeenCalledWith('deepseek'));
     expect(toggle.checked).toBe(true);
 
-    host.settings.providerConfigs.claude.enabled = false;
+    host.settings.providerConfigs.omp.enabled = false;
     fireEvent.click(toggle);
     await waitFor(() => expect(toggle.checked).toBe(true));
     expect(getDeepSeekProviderSettings(host.settings).enabled).toBe(true);

@@ -6,9 +6,6 @@ import { type ApplicationDomains, startApplication } from '@/app/startup/Applica
 import { ProviderExecutionLifecycleRegistry } from '@/core/execution/ProviderExecutionLifecycleRegistry';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
-import { isVersionedRuntimeInputFingerprint } from '@/core/providers/settings/RuntimeInputFingerprint';
-import * as sdkSession from '@/providers/claude/history/ClaudeHistoryStore';
-import { getCodexProviderSettings } from '@/providers/codex/settings';
 
 // Provider history readers touch the filesystem through Node's fs.
 jest.mock('fs');
@@ -58,16 +55,6 @@ describe('startApplication', () => {
   beforeEach(() => {
     jest.restoreAllMocks();
     jest.clearAllMocks();
-    jest.spyOn(sdkSession, 'locateSDKSession').mockImplementation(async (_vaultPath, sessionId) => ({
-      availability: 'available',
-      sessionPath: `/test/claude-project/${sessionId}.jsonl`,
-    }));
-    jest.spyOn(sdkSession, 'locateSDKSessions').mockImplementation(async (_vaultPath, sessionIds) => new Map(
-      sessionIds.map(sessionId => [sessionId, {
-        availability: 'available' as const,
-        sessionPath: `/test/claude-project/${sessionId}.jsonl`,
-      }]),
-    ));
     mockApp = {
       vault: {
         adapter: {
@@ -127,7 +114,11 @@ describe('startApplication', () => {
       const domains = await loadApplication();
 
       // Compare persisted values; provider discovery may attach transient symbol metadata.
-      expect(JSON.parse(JSON.stringify(domains.settings.getCommittedSettings()))).toEqual(DEFAULT_CLAUDIAN_SETTINGS);
+      expect(JSON.parse(JSON.stringify(domains.settings.getCommittedSettings()))).toEqual({
+        ...DEFAULT_CLAUDIAN_SETTINGS,
+        // OMP is the default settings provider and normalizes the provider-neutral default.
+        permissionMode: 'always-ask',
+      });
     });
 
     it('should use defaults when loadData returns empty object', async () => {
@@ -138,7 +129,11 @@ describe('startApplication', () => {
       const domains = await loadApplication();
 
       // Compare persisted values; provider discovery may attach transient symbol metadata.
-      expect(JSON.parse(JSON.stringify(domains.settings.getCommittedSettings()))).toEqual(DEFAULT_CLAUDIAN_SETTINGS);
+      expect(JSON.parse(JSON.stringify(domains.settings.getCommittedSettings()))).toEqual({
+        ...DEFAULT_CLAUDIAN_SETTINGS,
+        // OMP is the default settings provider and normalizes the provider-neutral default.
+        permissionMode: 'always-ask',
+      });
     });
 
     it('preserves the saved model while applying environment configuration', async () => {
@@ -149,7 +144,7 @@ describe('startApplication', () => {
       mockApp.vault.adapter.read.mockImplementation(async (path: string) => {
         if (path === '.super-useful-claudian/claudian-settings.json') {
           return JSON.stringify({
-            providerConfigs: { claude: { environmentVariables: 'ANTHROPIC_MODEL=custom-model' } },
+            providerConfigs: { omp: { environmentVariables: 'ANTHROPIC_MODEL=custom-model' } },
             lastEnvHash: '',
           });
         }
@@ -165,72 +160,11 @@ describe('startApplication', () => {
   });
 
   describe('session metadata', () => {
-    it('migrates a legacy Codex fingerprint before reconciling persisted sessions', async () => {
-      const timestamp = Date.now();
-      const metadataPath = '.super-useful-claudian/sessions/conv-codex-legacy.meta.json';
-      const sessionMetadata = {
-        id: 'conv-codex-legacy',
-        providerId: 'codex',
-        title: 'Legacy Codex Chat',
-        createdAt: timestamp,
-        lastActivityAt: timestamp,
-        sessionId: 'codex-thread-123',
-        selectedModel: 'openai-codex/gpt-5',
-        providerState: {
-          threadId: 'codex-thread-123',
-          sessionFilePath: 'C:\\Users\\tester\\.codex\\sessions\\codex-thread-123.jsonl',
-        },
-      };
-
-      mockApp.vault.adapter.exists.mockImplementation(async (path: string) => (
-        path === '.super-useful-claudian/claudian-settings.json'
-        || path === '.super-useful-claudian/sessions'
-        || path === metadataPath
-      ));
-      mockApp.vault.adapter.list.mockImplementation(async (path: string) => (
-        path === '.super-useful-claudian/sessions'
-          ? { files: [metadataPath], folders: [] }
-          : { files: [], folders: [] }
-      ));
-      mockApp.vault.adapter.read.mockImplementation(async (path: string) => {
-        if (path === '.super-useful-claudian/claudian-settings.json') {
-          return JSON.stringify({
-            providerConfigs: {
-              codex: {
-                cliPath: 'C:\\Users\\tester\\codex.exe',
-                enabled: true,
-                environmentHash: '',
-                environmentVariables: '',
-              },
-            },
-          });
-        }
-        if (path === metadataPath) {
-          return JSON.stringify(sessionMetadata);
-        }
-        return '';
-      });
-
-      const domains = await loadApplicationWithMetadata();
-
-      expect(domains.conversations.getCachedConversation(sessionMetadata.id)).toMatchObject({
-        sessionId: sessionMetadata.sessionId,
-        providerState: sessionMetadata.providerState,
-      });
-      expect(isVersionedRuntimeInputFingerprint(
-        getCodexProviderSettings(domains.settings.getCommittedSettings()).environmentHash,
-      )).toBe(true);
-      expect(mockApp.vault.adapter.write).not.toHaveBeenCalledWith(
-        metadataPath,
-        expect.any(String),
-      );
-    });
-
-    it('should preserve Claude metadata during startup when local native history is missing', async () => {
+    it('should preserve OMP metadata during startup when local native history is missing', async () => {
       const timestamp = Date.now();
       const sessionMeta = JSON.stringify({
         id: 'conv-stale-1',
-        providerId: 'claude',
+        providerId: 'omp',
         title: 'Stale Chat',
         createdAt: timestamp,
         lastActivityAt: timestamp,
@@ -314,7 +248,7 @@ describe('startApplication', () => {
       expect(loaded?.title).toBe('Saved Chat');
     });
 
-    it('should clear session IDs when provider base URL changes', async () => {
+    it('should clear session IDs when the provider session environment changes', async () => {
       const timestamp = Date.now();
       const sessionMeta = JSON.stringify({
         id: 'conv-saved-1',
@@ -339,7 +273,7 @@ describe('startApplication', () => {
         if (path === '.super-useful-claudian/claudian-settings.json') {
           // All these fields are now in claudian-settings.json
           return JSON.stringify({
-            providerConfigs: { claude: { environmentHash: 'old-hash', environmentVariables: 'ANTHROPIC_BASE_URL=https://api.example.com' } },
+            providerConfigs: { omp: { environmentHash: 'old-hash', environmentVariables: 'PI_CODING_AGENT_DIR=/custom/omp-sessions' } },
           });
         }
         if (path === '.super-useful-claudian/sessions/conv-saved-1.meta.json') {

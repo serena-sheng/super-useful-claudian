@@ -78,7 +78,7 @@ describe('TitleGenerationService', () => {
     const generation = service.generateTitle('conversation-1', 'Request', callback);
     await waitFor(() => backend.sessions[0]?.requests.length === 1);
 
-    await lifecycleRegistry.runTransition(['claude'], async () => undefined);
+    await lifecycleRegistry.runTransition(['omp'], async () => undefined);
     await generation;
 
     expect(callback).toHaveBeenCalledWith('conversation-1', {

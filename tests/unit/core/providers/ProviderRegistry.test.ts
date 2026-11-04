@@ -1,18 +1,16 @@
 import '@/providers';
 
-import {
-  TEST_CODEX_CATALOG,
-  TEST_CODEX_MODEL,
-  TEST_CODEX_MODEL_LABEL,
-} from '@test/helpers/codexModels';
+import { ompCatalogFixture} from '@test/helpers/ompModels';
 
-import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
-import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
+import { ProviderRegistry} from '@/core/providers/ProviderRegistry';
+import { ProviderWorkspaceRegistry} from '@/core/providers/ProviderWorkspaceRegistry';
+import { updateOmpProviderSettings} from '@/providers/omp/settings';
+
 
 describe('ProviderRegistry', () => {
   beforeEach(() => {
     ProviderWorkspaceRegistry.clear();
-    ProviderWorkspaceRegistry.setServices('claude', {
+    ProviderWorkspaceRegistry.setServices('omp', {
     } as any);
     jest.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized')
       .mockResolvedValue(undefined);
@@ -24,7 +22,7 @@ describe('ProviderRegistry', () => {
 
   it('returns capabilities for the default provider', () => {
     const caps = ProviderRegistry.getCapabilities();
-    expect(caps.providerId).toBe('claude');
+    expect(caps.providerId).toBe('omp');
     expect(caps).toHaveProperty('supportsFork');
   });
 
@@ -34,201 +32,131 @@ describe('ProviderRegistry', () => {
     )).toThrow('Provider "nonexistent" is not registered.');
   });
 
-  it('returns Codex capabilities', () => {
-    const caps = ProviderRegistry.getCapabilities('codex');
-    expect(caps.providerId).toBe('codex');
+  it('returns DeepSeek Harness capabilities', () => {
+    const caps = ProviderRegistry.getCapabilities('deepseek');
+    expect(caps.providerId).toBe('deepseek');
     expect(caps.supportsFork).toBe(true);
-    expect(caps.supportsRewind).toBe(false);
+    expect(caps.startsSharedRuntimeOnTabPresence).toBe(true);
     expect(caps.reasoningControl).toBe('effort');
   });
 
-  it('returns OpenCode capabilities', () => {
-    const caps = ProviderRegistry.getCapabilities('opencode');
-    expect(caps.providerId).toBe('opencode');
-    expect(caps.supportsProviderCommands).toBe(true);
-    expect(caps.supportsFork).toBe(true);
-  });
-
-  it.each([undefined, 1, 2] as const)('resolves OpenCode fork mode for native version %s without changing other providers', nativeVersion => {
-    const state = nativeVersion ? { nativeVersion } : undefined;
-    expect(ProviderRegistry.getCapabilities('opencode', state).forkMode).toBe(nativeVersion === 2 ? 'checkpoint' : 'full-session');
-    expect(ProviderRegistry.getCapabilities('opencode', state).supportsEphemeralFork).toBe(nativeVersion === 2);
-    expect(ProviderRegistry.getCapabilities('claude', state)).toEqual(ProviderRegistry.getCapabilities('claude'));
-    expect(ProviderRegistry.getCapabilities('opencode').forkMode).toBe('full-session');
-  });
-
-  it('registers provider-owned subagent protocols outside the capability matrix', () => {
-    const claudeAdapter = ProviderRegistry.getSubagentAdapter('claude');
-    expect(claudeAdapter).toMatchObject({
-      protocol: 'managed-agent',
-    });
-    const opencodeAdapter = ProviderRegistry.getSubagentAdapter('opencode');
-    expect(opencodeAdapter).toMatchObject({
-      protocol: 'managed-agent',
-    });
-    expect(ProviderRegistry.getSubagentAdapter('grok')).toMatchObject({
-      protocol: 'lifecycle',
-    });
-    expect(ProviderRegistry.getSubagentAdapter('codex')).toMatchObject({
-      protocol: 'lifecycle',
-    });
-    expect(ProviderRegistry.getSubagentAdapter('pi')).toMatchObject({
-      protocol: 'lifecycle',
-    });
-
-    expect(claudeAdapter?.isSpawnTool('Agent')).toBe(true);
-    expect(claudeAdapter?.isSpawnTool('Task')).toBe(false);
-    expect(opencodeAdapter?.isSpawnTool('Agent')).toBe(true);
-    expect(opencodeAdapter?.isSpawnTool('Task')).toBe(false);
-
-    for (const providerId of ['claude', 'opencode', 'grok', 'codex', 'pi'] as const) {
-      expect(ProviderRegistry.getCapabilities(providerId)).not.toHaveProperty(
-        'supportsLegacySubagentTools',
-      );
-    }
-  });
-
-  it('returns Pi capabilities', () => {
-    const caps = ProviderRegistry.getCapabilities('pi');
-    expect(caps.providerId).toBe('pi');
+  it('returns OMP capabilities', () => {
+    const caps = ProviderRegistry.getCapabilities('omp');
+    expect(caps.providerId).toBe('omp');
     expect(caps.supportsProviderCommands).toBe(true);
     expect(caps.supportsImageAttachments).toBe(true);
     expect(caps.supportsTurnSteer).toBe(true);
     expect(caps.supportsFork).toBe(true);
   });
 
+  it('registers provider-owned subagent protocols outside the capability matrix', () => {
+    const deepseekAdapter = ProviderRegistry.getSubagentAdapter('deepseek');
+    expect(deepseekAdapter).toMatchObject({
+      protocol: 'lifecycle',
+    });
+    expect(deepseekAdapter?.isSpawnTool('spawn_agent')).toBe(true);
+    expect(deepseekAdapter?.isSpawnTool('Agent')).toBe(false);
+    expect(deepseekAdapter?.isSpawnTool('Task')).toBe(false);
+
+    expect(ProviderRegistry.getSubagentAdapter('omp')).toBeNull();
+    for (const providerId of ['deepseek', 'omp'] as const) {
+      expect(ProviderRegistry.getCapabilities(providerId)).not.toHaveProperty(
+        'supportsLegacySubagentTools',
+      );
+    }
+  });
+
   it('lists registered provider ids', () => {
-    const ids = ProviderRegistry.getRegisteredProviderIds();
-    expect(ids).toContain('claude');
-    expect(ids).toContain('codex');
-    expect(ids).toContain('grok');
-    expect(ids).toContain('pi');
+    expect(ProviderRegistry.getRegisteredProviderIds()).toEqual(['deepseek', 'omp']);
   });
 
   it('filters enabled provider ids using registration metadata', () => {
+    const deepseekEnabled = (enabled: boolean) => ({ providerConfigs: { deepseek: { enabled } } });
+    expect(ProviderRegistry.getEnabledProviderIds(deepseekEnabled(false))).toEqual(['omp']);
+    expect(ProviderRegistry.getEnabledProviderIds(deepseekEnabled(true))).toContain('deepseek');
+    expect(ProviderRegistry.getEnabledProviderIds(deepseekEnabled(true))).toContain('omp');
     expect(ProviderRegistry.getEnabledProviderIds({
       providerConfigs: {
-        codex: { enabled: false },
+        deepseek: { enabled: true },
+        omp: { enabled: false },
       },
-    })).toEqual(['claude']);
-    expect(ProviderRegistry.getEnabledProviderIds({
-      providerConfigs: {
-        codex: { enabled: true },
-      },
-    })).toEqual(['codex', 'claude']);
-    expect(ProviderRegistry.getEnabledProviderIds({
-      providerConfigs: {
-        claude: { enabled: false },
-        codex: { enabled: true },
-      },
-    })).toEqual(['codex']);
-    expect(ProviderRegistry.getEnabledProviderIds({
-      providerConfigs: {
-        codex: { enabled: true },
-        opencode: { enabled: true },
-      },
-    })).toEqual(['opencode', 'codex', 'claude']);
-    expect(ProviderRegistry.getEnabledProviderIds({
-      providerConfigs: {
-        codex: { enabled: true },
-        grok: { enabled: true },
-        opencode: { enabled: true },
-        pi: { enabled: true },
-      },
-    })).toEqual(['opencode', 'pi', 'grok', 'codex', 'claude']);
+    })).toEqual(['deepseek']);
+    expect(ProviderRegistry.getEnabledProviderIds({ providerConfigs: { omp: { enabled: false } } })).toEqual([]);
   });
 
   it('exposes the blank-tab default-provider priority', () => {
     expect(ProviderRegistry.getBlankTabProviderIds({
       providerConfigs: {
-        codex: { enabled: true },
-        grok: { enabled: true },
-        opencode: { enabled: true },
-        pi: { enabled: true },
+        deepseek: { enabled: true },
+        omp: { enabled: true },
       },
-    })).toEqual(['claude', 'codex', 'grok', 'pi', 'opencode']);
+    })).toEqual(['omp', 'deepseek']);
+    expect(ProviderRegistry.getBlankTabProviderIds({
+      providerConfigs: {
+        deepseek: { enabled: true },
+        omp: { enabled: false },
+      },
+    })).toEqual(['deepseek']);
   });
 
   it('exposes title generation models only from enabled providers', () => {
+    const catalog = ompCatalogFixture(['anthropic/selected', 'anthropic/unselected']);
     const disabledSettings = {
       providerConfigs: {
-        codex: {
-          discoveredModels: TEST_CODEX_CATALOG,
-          enabled: false,
-        },
+        omp: { enabled: false, visibleModels: catalog.visibleModels, discoveredModels: catalog.discoveredModels },
       },
     };
     const enabledSettings = {
       providerConfigs: {
-        codex: {
-          discoveredModels: TEST_CODEX_CATALOG,
-          enabled: true,
-        },
+        omp: { enabled: true, visibleModels: catalog.visibleModels, discoveredModels: catalog.discoveredModels },
       },
     };
 
     expect(
       ProviderRegistry.getTitleGenerationModelOptions(disabledSettings)
-        .some(option => option.value === `openai-codex/${TEST_CODEX_MODEL}`),
+        .some(option => option.value === 'omp:anthropic/selected'),
     ).toBe(false);
     expect(
       ProviderRegistry.getTitleGenerationModelOptions(enabledSettings)
-        .some(option => option.value === `openai-codex/${TEST_CODEX_MODEL}`),
+        .some(option => option.value === 'omp:anthropic/selected'),
     ).toBe(true);
 
-    const claudeDisabledSettings = {
-      providerConfigs: {
-        claude: { enabled: false },
-        codex: {
-          discoveredModels: TEST_CODEX_CATALOG,
-          enabled: true,
-        },
-      },
-    };
     expect(
-      ProviderRegistry.getTitleGenerationModelOptions(claudeDisabledSettings)
-        .some(option => option.value === 'sonnet'),
+      ProviderRegistry.getTitleGenerationModelOptions(disabledSettings)
+        .some(option => option.value === 'omp:anthropic/unselected'),
     ).toBe(false);
   });
 
   it('prefixes title generation model labels with their provider names', () => {
+    const catalog = ompCatalogFixture(['anthropic/selected']);
     const options = ProviderRegistry.getTitleGenerationModelOptions({
       providerConfigs: {
-        claude: { discoveredModels: [{ value: 'sonnet', label: 'Sonnet', description: '' }], visibleModels: ['sonnet'] },
-        codex: {
-          discoveredModels: TEST_CODEX_CATALOG,
+        omp: { enabled: true, visibleModels: catalog.visibleModels, discoveredModels: catalog.discoveredModels },
+        deepseek: {
           enabled: true,
-        },
-        opencode: {
-          enabled: true,
-          discoveredModels: [{ label: 'zai-coding-plan/GLM-5.3', rawId: 'zai-coding-plan/glm-5.3' }],
-          visibleModels: ['zai-coding-plan/glm-5.3'],
+          visibleModels: ['deepseek:native/selected'],
+          discoveredModels: [{ encodedId: 'deepseek:native/selected', id: 'selected', provider: 'native', providerName: 'Native', label: 'Selected label', reasoning: [] }],
         },
       },
     });
 
-    // An upstream group stays in the label, since the flat list has no headings.
-    expect(options.find(option => option.value === 'opencode:zai-coding-plan/glm-5.3')?.label)
-      .toBe('OpenCode: zai-coding-plan/GLM-5.3');
-
-    expect(options.find(option => option.value === `openai-codex/${TEST_CODEX_MODEL}`)?.label)
-      .toBe(`Codex: ${TEST_CODEX_MODEL_LABEL}`);
-    expect(options.find(option => option.value === 'sonnet')?.label)
-      .toBe('Claude Code: Sonnet');
+    expect(options.find(option => option.value === 'omp:anthropic/selected')?.label)
+      .toBe('OMP: anthropic/selected');
+    expect(options.find(option => option.value === 'deepseek:native/selected')?.label)
+      .toBe('DeepSeek Harness: Native/Selected label');
   });
 
   it('returns the display name from provider registration metadata', () => {
-    expect(ProviderRegistry.getProviderDisplayName('claude')).toBe('Claude Code');
-    expect(ProviderRegistry.getProviderDisplayName('codex')).toBe('Codex');
-    expect(ProviderRegistry.getProviderDisplayName('grok')).toBe('Grok Build');
+    expect(ProviderRegistry.getProviderDisplayName('omp')).toBe('OMP');
+    expect(ProviderRegistry.getProviderDisplayName('deepseek')).toBe('DeepSeek Harness');
   });
 
-  it('requires an explicit title model instead of selecting Claude automatically', async () => {
+  it('requires an explicit title model instead of selecting the default provider automatically', async () => {
     const service = ProviderRegistry.createTitleGenerationService({
       settings: {
         titleGenerationModel: '',
         providerConfigs: {
-          codex: { enabled: true },
+          omp: { enabled: true },
         },
       },
     } as any);
@@ -246,11 +174,11 @@ describe('ProviderRegistry', () => {
   it('does not select another provider when the title model is empty', async () => {
     const service = ProviderRegistry.createTitleGenerationService({
       settings: {
-        settingsProvider: 'codex',
+        settingsProvider: 'deepseek',
         titleGenerationModel: '',
         providerConfigs: {
-          claude: { enabled: false },
-          codex: { enabled: true },
+          omp: { enabled: true },
+          deepseek: { enabled: true },
         },
       },
     } as any);
@@ -266,15 +194,16 @@ describe('ProviderRegistry', () => {
   });
 
   it('rejects a disabled title selection before initializing its provider', async () => {
+    const settings: Record<string, unknown> = {};
+    updateOmpProviderSettings(settings, {
+      enabled: false,
+      visibleModels: ['omp:anthropic/selected'],
+      discoveredModels: ompCatalogFixture(['anthropic/selected']).discoveredModels as any,
+    });
     const service = ProviderRegistry.createTitleGenerationService({
       settings: {
-        titleGenerationModel: TEST_CODEX_MODEL,
-        providerConfigs: {
-          codex: {
-            discoveredModels: TEST_CODEX_CATALOG,
-            enabled: false,
-          },
-        },
+        ...settings,
+        titleGenerationModel: 'omp:anthropic/selected',
       },
     } as any);
 
@@ -288,13 +217,13 @@ describe('ProviderRegistry', () => {
     });
   });
 
-  it.each(['unknown-title-model', TEST_CODEX_MODEL])(
+  it.each(['unknown-title-model', 'omp:anthropic/selected'])(
     'preserves an unavailable title selection without starting a provider: %s',
     async titleGenerationModel => {
       const settings = {
         titleGenerationModel,
         providerConfigs: {
-          codex: { enabled: true, visibleModels: [], discoveredModels: TEST_CODEX_CATALOG },
+          omp: { enabled: true, ...ompCatalogFixture(['anthropic/selected']), visibleModels: [] },
         },
       };
       const callback = jest.fn();
@@ -311,13 +240,13 @@ describe('ProviderRegistry', () => {
 
   it('rechecks title availability after provider initialization', async () => {
     const settings = {
-      titleGenerationModel: TEST_CODEX_MODEL,
+      titleGenerationModel: 'omp:anthropic/selected',
       providerConfigs: {
-        codex: { enabled: true, visibleModels: [TEST_CODEX_MODEL], discoveredModels: TEST_CODEX_CATALOG },
+        omp: { enabled: true, ...ompCatalogFixture(['anthropic/selected']), visibleModels: ['omp:anthropic/selected'] },
       },
     };
     jest.mocked(ProviderWorkspaceRegistry.ensureInitialized).mockImplementation(async () => {
-      settings.providerConfigs.codex.enabled = false;
+      settings.providerConfigs.omp.enabled = false;
     });
     const createBackend = jest.spyOn(ProviderRegistry, 'createExecutionBackend');
     const service = ProviderRegistry.createTitleGenerationService({ settings } as any);
@@ -329,5 +258,4 @@ describe('ProviderRegistry', () => {
       error: expect.stringContaining('became unavailable'),
     });
   });
-
 });

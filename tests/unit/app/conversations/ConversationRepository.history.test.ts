@@ -4,22 +4,31 @@ import { ConversationRepository } from '@/app/conversations/ConversationReposito
 import type { ConversationPersistence } from '@/app/storage/ConversationPersistenceStore';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
-import type { Conversation } from '@/core/types';
-import { ClaudeConversationHistoryService } from '@/providers/claude/history/ClaudeConversationHistoryService';
-import * as claudeHistory from '@/providers/claude/history/ClaudeHistoryStore';
-import { OpencodeConversationHistoryService } from '@/providers/opencode/history/OpencodeConversationHistoryService';
-import * as history from '@/providers/opencode/history/OpencodeHistoryStore';
+import type { ProviderConversationHistoryService } from '@/core/providers/types';
+import type { ChatMessage, Conversation } from '@/core/types';
 
 function createConversation(id = 'conversation-1'): Conversation {
   return {
     id,
-    providerId: 'claude',
+    providerId: 'omp',
     title: 'Conversation',
     createdAt: 1,
     lastActivityAt: 1,
     sessionId: 'session-1',
     messages: [],
   };
+}
+
+function createHistoryService(
+  overrides: Partial<ProviderConversationHistoryService> = {},
+): ProviderConversationHistoryService {
+  return {
+    buildForkProviderState: () => ({}),
+    hydrateConversationHistory: async () => ({}),
+    isPendingForkConversation: () => false,
+    resolveSessionIdForConversation: value => value?.sessionId ?? null,
+    ...overrides,
+  } as ProviderConversationHistoryService;
 }
 
 function createRepository(conversation = createConversation()) {
@@ -66,11 +75,15 @@ afterEach(() => jest.restoreAllMocks());
 test('releases cached history behind pending writes, preserves overlays, and reloads native history', async () => {
   const conversation = createConversation();
   conversation.messages = [{ id: 'local', role: 'assistant', content: 'Live client fragment', timestamp: 1 }];
-  const service = new ClaudeConversationHistoryService();
-  const projection = jest.spyOn(service, 'buildPersistedProviderState').mockImplementation((input, options) =>
-    options?.preserveProviderState ? input.providerState : { overlay: input.messages.map(message => message.content) });
-  const hydrate = jest.spyOn(service, 'hydrateConversationHistory').mockResolvedValue({
-    messages: [{ id: 'native', role: 'assistant', content: 'Native history', timestamp: 2 }],
+  const projection = jest.fn((input: any, options?: { preserveProviderState?: boolean }) => (
+    options?.preserveProviderState ? input.providerState : { overlay: input.messages.map((message: ChatMessage) => message.content) }
+  ));
+  const hydrate = jest.fn(async () => ({
+    messages: [{ id: 'native', role: 'assistant' as const, content: 'Native history', timestamp: 2 }],
+  }));
+  const service = createHistoryService({
+    buildPersistedProviderState: projection as never,
+    hydrateConversationHistory: hydrate,
   });
   jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(service);
   const { repository, persistence } = createRepository(conversation);
@@ -106,16 +119,16 @@ test('a superseded native history read cannot overwrite the current conversation
   const newMessages: Conversation['messages'] = [
     { id: 'new-message', role: 'assistant', content: 'Current session response', timestamp: 2 },
   ];
-  jest.spyOn(history, 'loadOpencodeSessionMessages').mockImplementation(async () => {
-    started();
-    await deferred;
-    return oldMessages;
+  const service = createHistoryService({
+    hydrateConversationHistory: async () => {
+      started();
+      await deferred;
+      return { messages: oldMessages };
+    },
   });
-  jest.spyOn(ProviderRegistry, 'getConversationHistoryService')
-    .mockReturnValue(new OpencodeConversationHistoryService());
+  jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(service);
   const conversation = createConversation();
-  conversation.providerId = 'opencode';
-  conversation.selectedModel = 'opencode/example';
+  conversation.selectedModel = 'omp:anthropic/sonnet';
   const { repository } = createRepository(conversation);
   const pending = repository.ensureHydrated(conversation.id);
   await reading;
@@ -129,33 +142,26 @@ test('a superseded native history read cannot overwrite the current conversation
 test('does not publish recovered identity after concurrent deletion', async () => {
   const conversation = createConversation();
   const { repository, persistence } = createRepository(conversation);
-  jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
-    hydrateConversationHistory: async () => ({}),
-    resolveSessionIdForConversation: value => value?.sessionId ?? null,
-    isPendingForkConversation: () => false,
-    buildForkProviderState: () => ({}),
+  jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(createHistoryService({
     recoverConversationSessionReference: async () => {
       await repository.delete(conversation.id);
       return { sessionId: 'recovered-session' };
     },
-  });
+  }));
   expect(await repository.ensureHydrated(conversation.id)).toBeNull();
   expect(repository.getCachedConversation(conversation.id)).toBeNull();
   expect(persistence.saveMetadata).not.toHaveBeenCalled();
 });
 
-test('keeps relocated Claude history readable after its metadata save fails', async () => {
+test('keeps relocated native history readable after its metadata save fails', async () => {
   const conversation = createConversation();
-  conversation.selectedModel = 'sonnet';
+  conversation.selectedModel = 'omp:anthropic/sonnet';
   const messages: Conversation['messages'] = [
     { id: 'native-response', role: 'assistant', content: 'Native history', timestamp: 2 },
   ];
-  const location = { availability: 'relocated' as const, sessionPath: '/old-vault/session-1.jsonl' };
-  jest.spyOn(claudeHistory, 'locateSDKSession').mockResolvedValue(location);
-  jest.spyOn(claudeHistory, 'locateSDKSessions').mockResolvedValue(new Map([['session-1', location]]));
-  jest.spyOn(claudeHistory, 'loadSDKSessionMessages').mockResolvedValue({ messages, skippedLines: 0 });
-  jest.spyOn(ProviderRegistry, 'getConversationHistoryService')
-    .mockReturnValue(new ClaudeConversationHistoryService());
+  jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(createHistoryService({
+    hydrateConversationHistory: async () => ({ messages }),
+  }));
   const { repository, persistence } = createRepository(conversation);
   persistence.saveMetadata.mockRejectedValue(new Error('Metadata unavailable'));
 
@@ -163,29 +169,12 @@ test('keeps relocated Claude history readable after its metadata save fails', as
   expect(repository.getCachedConversation(conversation.id)?.sessionId).toBe('session-1');
 });
 
-test('OpenCode hydrates a fresh projection after another projection was discarded', async () => {
-  const service = new OpencodeConversationHistoryService();
-  const first = { ...createConversation(), providerId: 'opencode' };
-  const nativeMessages: Conversation['messages'] = [
-    { id: 'native-response', role: 'assistant', content: 'Native history', timestamp: 2 },
-  ];
-  jest.spyOn(history, 'loadOpencodeSessionMessages').mockResolvedValue(nativeMessages);
-  Object.assign(first, await service.hydrateConversationHistory(first, '/vault'));
-  const fresh = { ...createConversation(), providerId: 'opencode', messages: [
-    { id: 'local-input', role: 'user' as const, content: 'Local draft', timestamp: 1 },
-  ] };
-  Object.assign(fresh, await service.hydrateConversationHistory(fresh, '/vault'));
-  expect(fresh.messages).toEqual(nativeMessages);
-});
-
 test('restores the conversation when missing-session metadata removal fails', async () => {
   const conversation = createConversation();
   const { repository, persistence } = createRepository(conversation);
-  jest.spyOn(claudeHistory, 'locateSDKSessions').mockResolvedValue(new Map([
-    ['session-1', { availability: 'missing' as const }],
-  ]));
-  jest.spyOn(ProviderRegistry, 'getConversationHistoryService')
-    .mockReturnValue(new ClaudeConversationHistoryService());
+  jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(createHistoryService({
+    resolveMissingConversationSession: async () => ({ outcome: 'delete' }),
+  }));
   persistence.deleteCurrentMetadata.mockRejectedValue(new Error('Metadata cleanup failed'));
 
   await expect(repository.handleMissingProviderSession(conversation.id, 'session-1'))
@@ -194,10 +183,11 @@ test('restores the conversation when missing-session metadata removal fails', as
 });
 
 test('surfaces a failed missing-session reset save while preserving live identity', async () => {
-  const conversation = { ...createConversation(), providerId: 'opencode' };
+  const conversation = createConversation();
   const { repository, persistence } = createRepository(conversation);
-  jest.spyOn(ProviderRegistry, 'getConversationHistoryService')
-    .mockReturnValue(new OpencodeConversationHistoryService());
+  jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(createHistoryService({
+    resolveMissingConversationSession: async () => ({ outcome: 'reset' }),
+  }));
   persistence.saveMetadata.mockRejectedValue(new Error('Metadata save failed'));
 
   await expect(repository.handleMissingProviderSession(conversation.id, 'session-1'))
@@ -209,18 +199,14 @@ test('late accepted binding survives a missing-session decision', async () => {
   const conversation = createConversation();
   const { repository } = createRepository(conversation);
   let updating: Promise<void> | undefined;
-  jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
-    hydrateConversationHistory: async () => ({}),
-    resolveSessionIdForConversation: value => value?.sessionId ?? null,
-    isPendingForkConversation: () => false,
-    buildForkProviderState: () => ({}),
+  jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(createHistoryService({
     resolveMissingConversationSession: async () => {
       queueMicrotask(() => queueMicrotask(() => queueMicrotask(() => {
         updating = repository.update(conversation.id, { sessionId: 'new-session' });
       })));
       return { outcome: 'delete' };
     },
-  });
+  }));
   const outcome = await repository.handleMissingProviderSession(conversation.id, 'session-1');
   await updating;
   expect(outcome).toBe('preserved');

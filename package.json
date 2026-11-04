@@ -1,7 +1,7 @@
 {
   "name": "super-useful-claudian",
   "version": "1.8.0",
-  "description": "Run Oh My Pi, DeepSeek Harness, Claude Code, Codex, Grok, OpenCode and Pi inside your vault as chat collaborators. A fork of Claudian with provider readiness checks, a capability matrix, a token usage meter and full session restore.",
+  "description": "Run OMP, the Oh My Pi agent CLI, in your vault as the default chat provider, with DeepSeek Harness optional. A Claudian fork with readiness checks, a capability matrix, token meter, session restore and a personal pack.",
   "main": "main.js",
   "engines": {
     "node": ">=24 <25"
@@ -29,11 +29,12 @@
     "ship": "node scripts/ship.mjs"
   },
   "keywords": [
-    "claude-code",
     "obsidian",
     "obsidian-plugin",
-    "productivity",
-    "ide"
+    "omp",
+    "oh-my-pi",
+    "deepseek",
+    "ai"
   ],
   "author": "Serena Sheng",
   "license": "MIT",
@@ -63,7 +64,6 @@
     "typescript": "^6.0.2"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.293",
     "@codemirror/commands": "6.10.0",
     "@codemirror/state": "6.5.0",
     "@codemirror/view": "6.38.6",

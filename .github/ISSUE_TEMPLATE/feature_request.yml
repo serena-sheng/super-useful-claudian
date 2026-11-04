@@ -40,11 +40,7 @@ body:
       description: Select the closest match.
       options:
         - Not provider-specific
-        - Claude
-        - Codex
-        - Grok
-        - OpenCode
-        - Pi
+        - OMP (Oh My Pi)
         - DeepSeek Harness
         - Other or new provider
     validations:

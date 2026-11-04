@@ -6,8 +6,9 @@ import { fireEvent, within } from '@testing-library/dom';
 import { Component, MarkdownRenderer } from 'obsidian';
 
 import type { ProviderExecutionEvent, ProviderRequestedEventScope } from '@/core/execution';
+import { NOOP_TASK_RESULT_INTERPRETER } from '@/core/providers/NoopTaskResultInterpreter';
 import type { ProviderCapabilities } from '@/core/providers/types';
-import { TOOL_SPAWN_AGENT, TOOL_SUBAGENT, TOOL_WAIT_AGENT } from '@/core/tools/toolNames';
+import { TOOL_SPAWN_AGENT } from '@/core/tools/toolNames';
 import type { ChatMessage } from '@/core/types';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
 import { SessionTranscript } from '@/features/chat/sessions/SessionTranscript';
@@ -18,7 +19,6 @@ import { renderSessionTaskNotification } from '@/features/chat/turns/BackgroundT
 import { ResponseStream } from '@/features/chat/turns/ResponseStream';
 import { StreamController } from '@/features/chat/turns/StreamController';
 import { TurnCoordinator } from '@/features/chat/turns/TurnCoordinator';
-import { ClaudeTaskResultInterpreter } from '@/providers/claude/runtime/ClaudeTaskResultInterpreter';
 
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };
@@ -40,10 +40,10 @@ function createSession(providerId?: ProviderCapabilities['providerId']) {
   const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
   const turns = new TurnCoordinator();
   const state = new ChatState({}, undefined, turns);
-  const subagents = new SubagentManager(info => stream.subagents.onAsyncSubagentStateChange(info), new ClaudeTaskResultInterpreter());
+  const subagents = new SubagentManager(info => stream.subagents.onAsyncSubagentStateChange(info), NOOP_TASK_RESULT_INTERPRETER);
   const stream: StreamController = new StreamController({ plugin, state, subagentManager: subagents,
     get renderer() { return transcript.renderer; }, getMessagesEl: () => transcript.messagesEl,
-    getProviderId: () => providerId ?? 'claude', updateQueueIndicator: () => undefined });
+    getProviderId: () => providerId ?? 'deepseek', updateQueueIndicator: () => undefined });
   const transcript: SessionTranscript = new SessionTranscript(state, stream, subagents);
   let nextId = 0;
   const host = { state, stream, turns, get renderer() { return transcript.renderer; }, createMessageId: () => `message-${++nextId}` };
@@ -53,7 +53,7 @@ function createSession(providerId?: ProviderCapabilities['providerId']) {
   const scope = (): ProviderRequestedEventScope => ({ kind: 'requested', sessionInstanceId: 'native', executionId: 'execution', turnId: 'turn', sequence: ++sequence });
   const emit = (event: Omit<ProviderExecutionEvent, 'scope'>) => response.handleEvent({ ...event, scope: scope() } as ProviderExecutionEvent);
   const createRenderer = (root: HTMLElement) => new MessageRenderer(plugin, new Component(), root, undefined, undefined,
-    providerId ? () => ({ providerId } as ProviderCapabilities) : undefined);
+    () => ({ providerId: providerId ?? 'deepseek' } as ProviderCapabilities));
   const attach = () => {
     const root = document.body.createDiv();
     const renderer = createRenderer(root);
@@ -86,19 +86,22 @@ it.each(['text', 'thinking'] as const)('reattaches during %s without losing open
   for (const session of [control, moved]) {
     await session.emit({ type: `${openKind}_delta`, text: ' Reattached.' } as Omit<ProviderExecutionEvent, 'scope'>);
     await session.stream.handleStreamChunk({ type: 'tool_use', id: 'read', name: 'Read', input: { file_path: 'note.md' } }, session.response.active!);
-    await session.stream.handleStreamChunk({ type: 'tool_use', id: 'task', name: TOOL_SUBAGENT, input: { description: 'Research', run_in_background: false } }, session.response.active!);
+    await session.stream.handleStreamChunk({ type: 'tool_use', id: 'task', name: TOOL_SPAWN_AGENT, input: { description: 'Research', prompt: 'Look', run_in_background: false } }, session.response.active!);
   }
   // Detach with live tool cards; their later results must update a new view.
   moved.transcript.detach();
   root.remove();
   for (const session of [control, moved]) {
-    await session.stream.handleStreamChunk({ type: 'subagent_tool_use', subagentId: 'task', id: 'child-read', name: 'Read', input: { file_path: 'child.md' } }, session.response.active!);
+    await session.stream.subagents.handleSubagentUpdate({ id: 'task', lifecycleSource: 'session', description: 'Research',
+      prompt: 'Look', mode: 'sync', status: 'running', isExpanded: false,
+      toolCalls: [{ id: 'child-read', name: 'Read', input: { file_path: 'child.md' }, status: 'running' }] });
   }
   const finalRoot = moved.attach();
   for (const session of [control, moved]) {
     await session.stream.handleStreamChunk({ type: 'tool_result', id: 'read', content: 'Parent note.' }, session.response.active!);
-    await session.stream.handleStreamChunk({ type: 'subagent_tool_result', subagentId: 'task', id: 'child-read', content: 'Child note.' }, session.response.active!);
-    await session.stream.handleStreamChunk({ type: 'tool_result', id: 'task', content: 'Research finished.' }, session.response.active!);
+    await session.stream.subagents.handleSubagentUpdate({ id: 'task', lifecycleSource: 'session', description: 'Research',
+      prompt: 'Look', mode: 'sync', status: 'completed', result: 'Research finished.', isExpanded: false,
+      toolCalls: [{ id: 'child-read', name: 'Read', input: { file_path: 'child.md' }, status: 'completed', result: 'Child note.' }] });
     await session.emit({ type: 'text_delta', text: 'Final answer.' } as Omit<ProviderExecutionEvent, 'scope'>);
     await session.finish();
   }
@@ -107,7 +110,7 @@ it.each(['text', 'thinking'] as const)('reattaches during %s without losing open
   expect(moved.state.messages[0].contentBlocks).toEqual([
     { type: openKind, content: 'Before detached. Reattached.', ...(openKind === 'thinking' ? { durationSeconds: 2 } : {}) },
     { type: 'tool_use', toolId: 'read' },
-    { type: 'subagent', subagentId: 'task' },
+    { type: 'tool_use', toolId: 'task' },
     { type: 'text', content: 'Final answer.' },
   ]);
   expect(within(finalRoot).getByText('Final answer.')).toBeTruthy();
@@ -141,13 +144,13 @@ it('keeps one live card when a buffered subagent resolves after reattachment', a
   const session = createSession();
   const previous = session.attach();
   session.response.start();
-  await session.stream.handleStreamChunk({ type: 'tool_use', id: 'task', name: TOOL_SUBAGENT, input: { description: 'Research' } }, session.response.active!);
+  await session.stream.handleStreamChunk({ type: 'tool_use', id: 'task', name: TOOL_SPAWN_AGENT, input: { description: 'Research', prompt: 'Look' } }, session.response.active!);
   session.transcript.detach();
   previous.remove();
   const root = session.attach();
-  await session.stream.handleStreamChunk({ type: 'subagent_tool_use', subagentId: 'task', id: 'child-read', name: 'Read', input: { file_path: 'child.md' } }, session.response.active!);
-  await session.stream.handleStreamChunk({ type: 'subagent_tool_result', subagentId: 'task', id: 'child-read', content: 'Child note.' }, session.response.active!);
-  await session.stream.handleStreamChunk({ type: 'tool_result', id: 'task', content: 'Research finished.' }, session.response.active!);
+  await session.stream.subagents.handleSubagentUpdate({ id: 'task', lifecycleSource: 'session', description: 'Research',
+    prompt: 'Look', mode: 'sync', status: 'completed', result: 'Research finished.', isExpanded: false,
+    toolCalls: [{ id: 'child-read', name: 'Read', input: { file_path: 'child.md' }, status: 'completed', result: 'Child note.' }] });
   expect(within(root).getAllByRole('button', { name: /Subagent task: Research/ })).toHaveLength(1);
   fireEvent.click(within(root).getByRole('button', { name: /Subagent task: Research.*completed/ }));
   expect(root.textContent).toContain('Child note.');
@@ -155,23 +158,15 @@ it('keeps one live card when a buffered subagent resolves after reattachment', a
   await session.finish();
 });
 
-it.each<[string, ProviderCapabilities['providerId'], Pick<ChatMessage, 'toolCalls' | 'contentBlocks'>]>([
-  ['a managed-agent task whose block hint makes it async', 'claude', {
-    toolCalls: [{ id: 'task', name: TOOL_SUBAGENT, input: { description: 'Research' }, status: 'completed', result: 'Launched.',
-      subagent: { id: 'task', description: 'Research', prompt: '', mode: 'sync', status: 'completed', toolCalls: [], isExpanded: false } }],
-    contentBlocks: [{ type: 'subagent', subagentId: 'task', mode: 'async' }],
+it.each<[string, Pick<ChatMessage, 'toolCalls' | 'contentBlocks'>]>([
+  ['a native lifecycle spawn with session-owned identity', {
+    toolCalls: [{ id: 'task', name: TOOL_SPAWN_AGENT, input: { description: 'Research', prompt: 'Look' }, status: 'completed',
+      subagent: { id: 'task', lifecycleSource: 'session', description: 'Research', prompt: 'Look', mode: 'sync',
+        status: 'completed', result: 'Research finished.', toolCalls: [], isExpanded: false } }],
+    contentBlocks: [{ type: 'tool_use', toolId: 'task' }],
   }],
-  ['a finished Codex spawn whose result arrives through wait', 'codex', {
-    toolCalls: [
-      { id: 'spawn', name: TOOL_SPAWN_AGENT, input: { message: 'Inspect utils.ts.', model: 'gpt-5.4-mini' }, status: 'completed',
-        result: '{"agent_id":"agent-1","nickname":"Zeno"}',
-        subagent: { id: 'spawn', description: 'Zeno', prompt: 'Inspect utils.ts.', status: 'running', toolCalls: [], isExpanded: false } },
-      { id: 'wait', name: TOOL_WAIT_AGENT, input: { targets: ['agent-1'] }, status: 'completed',
-        result: '{"status":{"agent-1":{"completed":"Patched utils.ts."}},"timed_out":false}' },
-    ],
-    contentBlocks: [{ type: 'tool_use', toolId: 'spawn' }, { type: 'tool_use', toolId: 'wait' }],
-  }],
-])('renders %s the same on reattach as on first hydration', (_name, providerId, response) => {
+])('renders %s the same on reattach as on first hydration', (_name, response) => {
+  const providerId = 'deepseek';
   const clock = testClock();
   const session = createSession(providerId);
   session.state.messages = [
@@ -186,12 +181,12 @@ it.each<[string, ProviderCapabilities['providerId'], Pick<ChatMessage, 'toolCall
 
   const transcript = (root: HTMLElement) => [...root.querySelectorAll('.claudian-message')].map(el => el.outerHTML);
   expect(transcript(reattached)).toEqual(transcript(hydrated));
-  expect(within(reattached).getAllByRole('button', { name: /Zeno|Research/ })).toHaveLength(1);
+  expect(within(reattached).getAllByRole('button', { name: /Research/ })).toHaveLength(1);
 });
 
 it('keeps a lifecycle update for an unrendered earlier turn out of the streaming reply', async () => {
   const clock = testClock();
-  const session = createSession('codex');
+  const session = createSession('deepseek');
   const filler = Array.from({ length: 25 }, (_, index): ChatMessage[] => [
     { id: `u${index}`, role: 'user', content: `Prompt ${index}`, timestamp: clock().getTime() },
     { id: `a${index}`, role: 'assistant', content: `Answer ${index}`, timestamp: clock().getTime(), durationSeconds: 1 },
@@ -199,7 +194,7 @@ it('keeps a lifecycle update for an unrendered earlier turn out of the streaming
   session.state.messages = [
     { id: 'prompt', role: 'user', content: 'Spawn.', timestamp: clock().getTime() },
     { id: 'answer', role: 'assistant', content: '', timestamp: clock().getTime(), durationSeconds: 1,
-      toolCalls: [{ id: 'spawn', name: TOOL_SPAWN_AGENT, input: { message: 'Inspect utils.ts.' }, status: 'running' }],
+      toolCalls: [{ id: 'spawn', name: TOOL_SPAWN_AGENT, input: { description: 'Inspect utils.ts.' }, status: 'running' }],
       contentBlocks: [{ type: 'tool_use', toolId: 'spawn' }] },
     ...filler,
   ];
@@ -208,8 +203,8 @@ it('keeps a lifecycle update for an unrendered earlier turn out of the streaming
   await session.emit({ type: 'text_delta', text: 'Working.' } as Omit<ProviderExecutionEvent, 'scope'>);
   expect(root.querySelector('[data-message-id="answer"]')).toBeNull();
 
-  expect(session.stream.subagents.handleSubagentUpdate({ id: 'spawn', description: 'Zeno', prompt: 'Inspect utils.ts.',
-    status: 'completed', result: 'Patched utils.ts.', toolCalls: [], isExpanded: false })).toBe(true);
+  expect(session.stream.subagents.handleSubagentUpdate({ id: 'spawn', lifecycleSource: 'session', description: 'Zeno', prompt: 'Inspect utils.ts.',
+    mode: 'sync', status: 'completed', result: 'Patched utils.ts.', toolCalls: [], isExpanded: false })).toBe(true);
   expect(within(root).queryAllByRole('button', { name: /Subagent task/ })).toHaveLength(0);
   session.transcript.renderer!.revealEarlierMessages(true);
   // The update still reaches the earlier message it belongs to.
@@ -219,13 +214,14 @@ it('keeps a lifecycle update for an unrendered earlier turn out of the streaming
   await session.finish();
 });
 
-it('keeps a background task from a settled response connected across reattachment', async () => {
+it('keeps a subagent task from a settled response connected across reattachment', async () => {
   const session = createSession();
   const previous = session.attach();
   session.response.start();
-  await session.stream.handleStreamChunk({ type: 'tool_use', id: 'task', name: TOOL_SUBAGENT,
-    input: { description: 'Survey', prompt: 'Survey the vault.', run_in_background: true } }, session.response.active!);
-  await session.stream.handleStreamChunk({ type: 'tool_result', id: 'task', content: 'agentId: child-1' }, session.response.active!);
+  await session.stream.handleStreamChunk({ type: 'tool_use', id: 'task', name: TOOL_SPAWN_AGENT,
+    input: { description: 'Survey', prompt: 'Survey the vault.' } }, session.response.active!);
+  await session.stream.subagents.handleSubagentUpdate({ id: 'task', lifecycleSource: 'session', description: 'Survey',
+    prompt: 'Survey the vault.', mode: 'sync', status: 'running', isExpanded: false, toolCalls: [] });
   await session.emit({ type: 'text_delta', text: 'Started.' } as Omit<ProviderExecutionEvent, 'scope'>);
   await session.finish();
   session.transcript.detach();
@@ -233,10 +229,10 @@ it('keeps a background task from a settled response connected across reattachmen
 
   const root = session.attach();
   fireEvent.click(within(root).getByRole('button', { name: 'Worked' }));
-  expect(within(root).getByRole('button', { name: /Background task: Survey.*Running/ })).toBeTruthy();
-  await session.stream.subagents.handleAsyncSubagentCompletion({ type: 'async_subagent_completion', providerSessionId: 'native',
-    taskId: 'child-1', status: 'completed', result: 'Survey complete.' });
-  expect(within(root).getAllByRole('button', { name: /Background task: Survey/ })).toHaveLength(1);
-  expect(within(root).queryByRole('button', { name: /Background task: Survey.*Running/ })).toBeNull();
+  expect(within(root).getByRole('button', { name: /Subagent task: Survey.*running/ })).toBeTruthy();
+  await session.stream.subagents.handleSubagentUpdate({ id: 'task', lifecycleSource: 'session', description: 'Survey',
+    prompt: 'Survey the vault.', mode: 'sync', status: 'completed', result: 'Survey complete.', isExpanded: false, toolCalls: [] });
+  expect(within(root).getAllByRole('button', { name: /Subagent task: Survey/ })).toHaveLength(1);
+  expect(within(root).queryByRole('button', { name: /Subagent task: Survey.*running/ })).toBeNull();
   expect(root.textContent).toContain('Survey complete.');
 });

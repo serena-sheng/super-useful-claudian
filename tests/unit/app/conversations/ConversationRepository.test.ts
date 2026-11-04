@@ -9,7 +9,7 @@ import type { Conversation, ProjectRecord } from '@/core/types';
 function createConversation(id = 'conversation-1'): Conversation {
   return {
     id,
-    providerId: 'claude',
+    providerId: 'omp',
     title: 'Conversation',
     createdAt: 1,
     lastActivityAt: 1,
@@ -67,13 +67,13 @@ function createRepository(
 describe('ConversationRepository hydration', () => {
   it.each([false, true])('does not copy unrelated history when invalidating providers (Claude: %s)', (invalidateClaude) => {
     const affected = createConversation();
-    const unrelated = { ...createConversation('other'), providerId: 'codex' as const };
+    const unrelated = { ...createConversation('other'), providerId: 'deepseek' as const };
     const serializeUnrelated = jest.fn(() => []);
     Object.defineProperty(unrelated.messages, 'toJSON', { value: serializeUnrelated });
     const { repository } = createRepository(affected);
     repository.replaceAll([affected, unrelated]);
 
-    const result = repository.invalidateProviderSessions(invalidateClaude ? ['claude'] : []);
+    const result = repository.invalidateProviderSessions(invalidateClaude ? ['omp'] : []);
 
     expect(result).toEqual(invalidateClaude ? [repository.getSync(affected.id)] : []);
     expect(repository.getSync(affected.id)!.sessionId).toBe(invalidateClaude ? null : 'session-1');
@@ -87,7 +87,7 @@ describe('ConversationRepository hydration', () => {
     const getConfig = ProviderRegistry.getModelPolicy.bind(ProviderRegistry);
     jest.spyOn(ProviderRegistry, 'getModelPolicy').mockImplementation(id => {
       const config = getConfig(id);
-      return id === 'claude' ? {
+      return id === 'omp' ? {
         ...config,
         preserveUnavailableModelSelection: false,
         getModelOptions: () => ['haiku', 'sonnet', 'opus', 'fable'].map(value => ({ value, label: value })),
@@ -300,7 +300,7 @@ describe('ConversationRepository hydration', () => {
 
   it('recovers from preserved metadata after live session state is invalidated', async () => {
     const recoverySource = createConversation('invalidated-session');
-    recoverySource.providerId = 'codex';
+    recoverySource.providerId = 'deepseek';
     recoverySource.providerState = { threadId: 'thread-before-invalidation' };
     recoverySource.sessionId = 'thread-before-invalidation';
     const invalidated = {
@@ -333,7 +333,7 @@ describe('ConversationRepository hydration', () => {
 
   it('persists unresolved recovery locators for retry after restart', async () => {
     const recoverySource = createConversation('retry-after-restart');
-    recoverySource.providerId = 'codex';
+    recoverySource.providerId = 'deepseek';
     recoverySource.sessionId = 'thread-before-invalidation';
     recoverySource.providerState = { threadId: 'thread-before-invalidation' };
     const invalidated: Conversation = {
@@ -391,7 +391,7 @@ describe('ConversationRepository hydration', () => {
 
   it('retires an unresolved recovery locator when a fresh provider session is accepted', async () => {
     const recoverySource = createConversation('fresh-session-supersedes-recovery');
-    recoverySource.providerId = 'codex';
+    recoverySource.providerId = 'deepseek';
     recoverySource.sessionId = 'old-thread';
     recoverySource.providerState = { threadId: 'old-thread' };
     const invalidated: Conversation = {
@@ -421,7 +421,7 @@ describe('ConversationRepository hydration', () => {
       'binding-1',
       1,
       {
-        providerId: 'codex',
+        providerId: 'deepseek',
         revision: 1,
         status: 'idle',
         providerSessionId: 'fresh-thread',
@@ -576,12 +576,12 @@ describe('ConversationRepository hydration', () => {
     const affected = createConversation('affected-model');
     affected.selectedModel = 'claude-code/retired-model';
     const unaffected = createConversation('unaffected-model');
-    unaffected.providerId = 'codex';
+    unaffected.providerId = 'deepseek';
     unaffected.selectedModel = 'openai-codex/retired-model';
     const { repository, persistence } = createRepository(affected);
     repository.replaceAll([affected, unaffected]);
 
-    await expect(repository.reconcileSelectedModels('claude'))
+    await expect(repository.reconcileSelectedModels('omp'))
       .resolves.toEqual([]);
 
     expect(repository.getSync(affected.id)!.selectedModel).toBe('claude-code/retired-model');
@@ -650,7 +650,7 @@ describe('ConversationRepository hydration', () => {
       'binding-1',
       1,
       {
-        providerId: 'claude',
+        providerId: 'omp',
         revision: 1,
         providerSessionId: 'native-session',
         status: 'idle',
@@ -1099,7 +1099,7 @@ describe('ConversationRepository hydration', () => {
       'binding-1',
       1,
       {
-        providerId: 'claude',
+        providerId: 'omp',
         revision: 1,
         status: 'idle',
         providerSessionId: 'provider-session-1',
@@ -1138,7 +1138,7 @@ describe('ConversationRepository hydration', () => {
       'replacement-binding',
       2,
       {
-        providerId: 'claude',
+        providerId: 'omp',
         revision: 1,
         status: 'idle',
         providerSessionId: 'replacement-provider-session',
@@ -1168,7 +1168,7 @@ it('does not require a metadata write to keep an unavailable selection', async (
   };
   const { repository, persistence } = createRepository(conversation);
   persistence.saveMetadata.mockRejectedValue(new Error('disk full'));
-  await expect(repository.reconcileSelectedModels('claude')).resolves.toEqual([]);
+  await expect(repository.reconcileSelectedModels('omp')).resolves.toEqual([]);
   expect(repository.getSync(conversation.id)!.selectedModel).toBe('claude-code/retired-model');
   expect(persistence.saveMetadata).not.toHaveBeenCalled();
   expect(repository.getSync(conversation.id)!.providerState).toEqual({

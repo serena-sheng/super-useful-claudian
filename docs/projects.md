@@ -45,7 +45,8 @@ Members are told to use the [cross-session tools](cross-session-messaging.md) wi
 - `claudian_read_session` reads a member, and `claudian_send_message` hands off, delegates or coordinates work. Messages must be self-contained, since the recipient cannot see the sender's conversation.
 - A session started with `claudian_send_message` joins the sender's project.
 
-On Codex, project listing needs a thread started with the current session tools; older threads lack it.
+Project listing uses the cross-session tools. OMP does not expose those tools, so listing
+works from a DeepSeek Harness session.
 
 ## Creating a project
 
@@ -55,9 +56,9 @@ Create a project with the `+` in the session list's **Projects** header, or with
 |---|---|
 | Name | Shown in the session list and in member sessions. Required. |
 | Instructions | Added to every member's system prompt from its next turn. No length limit. |
-| Memory file | Vault path of the memory file. Defaults to `.claudian/projects/<project-name>/MEMORY.md`, based on the name; a missing `.md` extension is added. The path must be inside the vault and must not already be used by a file or another project. |
+| Memory file | Vault path of the memory file. Defaults to `.super-useful-claudian/projects/<project-name>/MEMORY.md`, based on the name; a missing `.md` extension is added. The path must be inside the vault and must not already be used by a file or another project. |
 
-Project records are stored one per project in `.claudian/projects/<id>.json`.
+Project records are stored one per project in `.super-useful-claudian/projects/<id>.json`.
 
 ## Adding sessions
 
@@ -91,6 +92,6 @@ Changing the memory file path in the editor moves the file to the new path.
 
 ### Deleting a project
 
-Deleting a project removes its record and moves its memory file to the system trash, or to the vault's `.trash` folder when the system trash is unavailable. An empty project folder inside `.claudian/projects/` is removed too. If another project still uses the same memory file, the file is kept.
+Deleting a project removes its record and moves its memory file to the system trash, or to the vault's `.trash` folder when the system trash is unavailable. An empty project folder inside `.super-useful-claudian/projects/` is removed too. If another project still uses the same memory file, the file is kept.
 
 The project's sessions are kept and leave the project.

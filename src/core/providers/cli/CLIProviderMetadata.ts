@@ -31,10 +31,10 @@ export interface CLIPlatformOverrides {
  * so a new provider can start with a minimal entry and grow it later.
  */
 export interface CLIProviderMetadata {
-  /** Binary name used for PATH lookup (e.g. "omp", "pi", "codex"). */
+  /** Binary name used for PATH lookup (e.g. "omp", "dsh"). */
   binaryName: string;
 
-  /** Human-readable display name for the CLI (e.g. "OMP", "Pi"). */
+  /** Human-readable display name for the CLI (e.g. "OMP", "DeepSeek Harness"). */
   displayName: string;
 
   /** npm package name used for registry latest-version checks and default installs. */

@@ -57,7 +57,7 @@ it.each([
   const native = createHarness();
   const fixture = createFixture({ selections, getInputEl: () => input, getExecutionCoordinator: () => native.coordinator });
   try {
-    await native.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
+    await native.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'omp' });
     canvas.poll();
     if (action === 'ordinary editor') activeLeaf = editorLeaf;
     if (['own composer', 'source closed', 'source navigated', 'own composer unfocused', 'other composer'].includes(action)) {
@@ -74,7 +74,7 @@ it.each([
 
     input.value = 'Explain these nodes';
     await fixture.controller.sendMessage();
-    const requests = native.backends.get('claude')!.sessions.flatMap(session => session.requests);
+    const requests = native.backends.get('omp')!.sessions.flatMap(session => session.requests);
     expect(requests).toHaveLength(1);
     const attached = action === 'active canvas' || action === 'own composer';
     expect(requests[0].context?.selections ?? []).toEqual(attached ? [{

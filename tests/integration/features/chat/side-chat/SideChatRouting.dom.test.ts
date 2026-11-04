@@ -72,7 +72,7 @@ function createRouting(
     getInputContainerEl: () => harness.inputContainerEl,
     getInputEl: () => harness.inputEl,
     getSideChatController: () => harness.controller,
-    getTabProviderId: () => 'claude',
+    getTabProviderId: () => 'omp',
     generateId: () => `main-${mainExecutions.length}`,
     getMessagesEl: () => document.body,
     getLinkedContentController: () => ({
@@ -442,7 +442,7 @@ it('uses saved native execution when the provider requires persistent forks', as
 });
 
 it('uses the captured conversation capabilities for ephemeral side execution', async () => {
-  const base = ProviderRegistry.getCapabilities('claude');
+  const base = ProviderRegistry.getCapabilities('omp');
   const state = { version: 'supports-ephemeral-forks' };
   const harness = createHarness({
     supportsEphemeralFork: false, providerState: state,
@@ -457,7 +457,7 @@ it('uses the captured conversation capabilities for ephemeral side execution', a
 it('uses the configured provider environment when preparing the native side fork', async () => {
   let database: string | undefined;
   const harness = createHarness({
-    settings: { providerConfigs: { claude: { environmentVariables: 'OPENCODE_DB=/custom/chat.db' } } },
+    settings: { providerConfigs: { omp: { environmentVariables: 'OPENCODE_DB=/custom/chat.db' } } },
     buildForkProviderState: (_session, _checkpoint, _state, _vault, context, options) => {
       expect(options).toEqual({ lifecycle: 'ephemeral' });
       database = context?.environment.OPENCODE_DB;
@@ -568,7 +568,7 @@ it('forks the settled transcript while the admitted main turn is still preparing
   await sideSent;
 
   hydration.resolve({
-    id: 'conv-1-source', title: 'Old', providerId: 'claude', createdAt: testDate().getTime(), lastActivityAt: testDate().getTime(),
+    id: 'conv-1-source', title: 'Old', providerId: 'omp', createdAt: testDate().getTime(), lastActivityAt: testDate().getTime(),
     messages: [{ id: 'u', role: 'user', content: 'source prompt', timestamp: testDate().getTime() }],
   });
   await main.mainStarted;
@@ -712,7 +712,7 @@ it.each([false, true])('keeps the captured side mention after collapse (cancel m
   }
   harness.inputEl.value = 'new main draft';
   hydration.resolve({
-    id: 'conv-1-source', title: 'Renamed', providerId: 'codex', createdAt: testDate().getTime(), lastActivityAt: testDate().getTime(),
+    id: 'conv-1-source', title: 'Renamed', providerId: 'deepseek', createdAt: testDate().getTime(), lastActivityAt: testDate().getTime(),
     messages: [{ id: 'u', role: 'user', content: 'source prompt', timestamp: testDate().getTime() }],
   });
   await waitFor(() => expect(harness.backend.latest.requests).toHaveLength(2));
@@ -793,7 +793,7 @@ it.each(['side', 'btw'].flatMap(command => ['new', 'collapsed', 'queued'].map(mo
   const token = '@[Old](claudian-session:conv-1-source)';
   Object.assign(routing.deps.plugin, {
     getConversationById: async () => ({
-      id: 'conv-1-source', title: 'Renamed', providerId: 'codex', createdAt: testDate().getTime(), lastActivityAt: testDate().getTime(),
+      id: 'conv-1-source', title: 'Renamed', providerId: 'deepseek', createdAt: testDate().getTime(), lastActivityAt: testDate().getTime(),
       messages: [{ id: 'u', role: 'user', content: 'source prompt', timestamp: testDate().getTime() }],
     }),
     findConversationAcrossViews: () => null,
@@ -836,7 +836,7 @@ it('reserves command order and resolves queued mentions before the child becomes
   expect(harness.controller.runtime?.queuedCount).toBe(2);
   native.complete();
   hydration.resolve({
-    id: 'conv-1-source', title: 'Captured', providerId: 'codex', createdAt: testDate().getTime(), lastActivityAt: testDate().getTime(),
+    id: 'conv-1-source', title: 'Captured', providerId: 'deepseek', createdAt: testDate().getTime(), lastActivityAt: testDate().getTime(),
     messages: [{ id: 'u', role: 'user', content: 'source prompt', timestamp: testDate().getTime() }],
   });
   await first;

@@ -74,7 +74,7 @@ describe('InstructionRefineService', () => {
     backend.sessions[0].complete();
     await first;
 
-    await lifecycleRegistry.runTransition(['claude'], async () => undefined);
+    await lifecycleRegistry.runTransition(['omp'], async () => undefined);
     await expect(service.continueConversation('The search query')).resolves.toMatchObject({
       resetRequired: true,
       success: false,

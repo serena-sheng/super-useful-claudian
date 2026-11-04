@@ -227,26 +227,7 @@
     "permissionMode": {
       "label": "Modo de permisos",
       "current": "Modo de permisos: {mode}",
-      "changeFailed": "No se pudo cambiar el modo de permisos",
-      "claude": {
-        "auto": "Automático",
-        "manual": "Manual",
-        "acceptEdits": "Aceptar ediciones",
-        "yolo": "YOLO",
-        "autoDesc": "Claude decide los permisos",
-        "manualDesc": "Preguntar siempre antes de cambiar",
-        "acceptEditsDesc": "Aceptar automáticamente todas las ediciones de archivos",
-        "yoloDesc": "Aceptar todos los permisos sin preguntar"
-      },
-      "codex": {
-        "autoReview": "Aprobar por mí",
-        "normal": "Pedir aprobación",
-        "yolo": "Acceso completo",
-        "autoReviewDesc": "Revisar automáticamente el acceso adicional.",
-        "readOnlyDesc": "Preguntar antes de editar o usar internet.",
-        "normalDesc": "Preguntar antes del acceso adicional.",
-        "yoloDesc": "Acceso sin restricciones a archivos e internet."
-      }
+      "changeFailed": "No se pudo cambiar el modo de permisos"
     },
     "thinking": {
       "active": "Pensando {seconds}s…",
@@ -317,10 +298,6 @@
       "permissionDenied": "{message} (Permiso denegado)",
       "preview": "Vista previa de imagen: {name}",
       "closePreview": "Cerrar vista previa de imagen"
-    },
-    "pi": {
-      "extension": "Extensión Pi",
-      "notification": "Notificación de la extensión Pi."
     },
     "sessionMessage": {
       "undelivered": "No se pudieron entregar los mensajes de {senders}.",
@@ -542,10 +519,6 @@
       "name": "Cargar configuración de usuario de Claude Code",
       "desc": "Carga la configuración de Claude Code a nivel de usuario desde ~/.claude: settings.json, skills, comandos, agentes y plugins. Si está deshabilitado, solo está disponible la configuración a nivel de bóveda. Si está habilitado, las reglas de permisos del usuario pueden eludir el modo seguro."
     },
-    "codexSandbox": {
-      "name": "Sandbox",
-      "desc": "Acceso a archivos en los modos Aprobar por mí y Pedir aprobación. Solo lectura pide aprobación antes de cada edición; Acceso completo lo ignora."
-    },
     "environment": "Entorno",
     "sharedEnvironment": {
       "name": "Entorno compartido",
@@ -709,72 +682,6 @@
       "loadingCatalog": "Cargando modelos de {provider}…",
       "stale": "El catálogo de modelos de {provider} está desactualizado. Haz clic en Descubrir para actualizarlo."
     },
-    "claude": {
-      "promptSuggestions": {
-        "name": "Sugerencias de prompts",
-        "desc": "Mostrar el siguiente prompt predicho por Claude en el campo vacío. Cada sugerencia es una solicitud adicional a Claude tras cada turno y puede agotar tus límites de uso más rápido."
-      },
-      "configuration": "Configuración",
-      "responseStyle": {
-        "name": "Estilo de respuesta",
-        "desc": "Estilo de salida de Claude Code para las respuestas, incluidos los estilos personalizados. «Configuración de Claude Code» sigue tu configuración de Claude Code. La lista se actualiza al refrescar los modelos o al iniciar un chat.",
-        "default": "Predeterminado",
-        "inherit": "Configuración de Claude Code"
-      }
-    },
-    "codex": {
-      "installationMethod": {
-        "name": "Método de instalación",
-        "desc": "Cómo debe iniciar Claudian Codex en Windows. Windows nativo usa una ruta de ejecutable de Windows. WSL inicia la CLI de Linux dentro de una distribución seleccionada.",
-        "nativeWindows": "Windows nativo",
-        "wsl": "WSL"
-      },
-      "cliPath": {
-        "name": "Ruta de Codex CLI",
-        "validation": {
-          "wslWindowsPath": "El modo WSL espera un comando Linux o una ruta absoluta de Linux, no una ruta de ejecutable de Windows."
-        }
-      },
-      "wslDistroOverride": {
-        "name": "Sobrescritura de distribución WSL",
-        "desc": "Sobrescritura avanzada opcional. Déjala vacía para inferir la distribución desde una ruta de espacio de trabajo WSL cuando sea posible; si no, se usa la distribución WSL predeterminada."
-      },
-      "safeMode": {
-        "workspaceWrite": "Escritura en espacio de trabajo",
-        "readOnly": "Solo lectura"
-      },
-      "responseStyle": {
-        "name": "Estilo de respuesta",
-        "desc": "Elige cómo se comunica Codex en los modelos compatibles.",
-        "pragmatic": "Pragmático",
-        "friendly": "Amigable",
-        "neutral": "Neutral"
-      },
-      "responseVerbosity": {
-        "name": "Nivel de detalle de las respuestas",
-        "desc": "Elige el nivel de detalle de las respuestas en los modelos compatibles. La opción predeterminada usa tu configuración de Codex.",
-        "default": "Predeterminado",
-        "low": "Bajo",
-        "medium": "Medio",
-        "high": "Alto"
-      },
-      "reasoningSummary": {
-        "name": "Resumen de razonamiento",
-        "desc": "Muestra un resumen del proceso de razonamiento del modelo en el bloque de pensamiento.",
-        "auto": "Auto",
-        "concise": "Conciso",
-        "detailed": "Detallado",
-        "off": "Desactivado"
-      },
-      "ultraEffort": {
-        "name": "Activar esfuerzo ultra",
-        "desc": "Muestra Ultra en el selector de esfuerzo para los modelos Codex compatibles. Ultra usa el razonamiento máximo con delegación automática de tareas."
-      },
-      "environment": {
-        "name": "Entorno de Codex",
-        "desc": "Solo variables de ejecución propiedad de Codex. Úsalo para ajustes OPENAI_* y CODEX_*. Si la autodetección de Codex necesita ayuda, añade su directorio de instalación al PATH compartido en lugar de esta sección del proveedor."
-      }
-    },
     "agentSkills": {
       "sharedExpectation": "Gestiona los skills compartidos en .agents/skills/ para los proveedores compatibles.",
       "noSkills": "No hay skills compartidos configurados. Haz clic en + para crear uno.",
@@ -810,32 +717,6 @@
         "title": "Eliminar skill compartido",
         "description": "Toda la carpeta del skill, incluidos scripts, referencias y recursos, se moverá a la papelera.",
         "confirm": "Mover a la papelera"
-      }
-    },
-    "opencode": {
-      "emptyModels": "El servidor OpenCode no devolvió modelos habilitados para esta bóveda. Revise .opencode/opencode.json en la bóveda y los registros de OpenCode (opencode debug paths muestra su ubicación). En OpenCode v2, los plugins V1 configurados pueden ser incompatibles. Compare con opencode models --standalone en la bóveda y vuelva a descubrir modelos.",
-      "environment": {
-        "name": "Variables de entorno de OpenCode",
-        "desc": "Variables de entorno adicionales que se pasan a OpenCode."
-      },
-      "migrationNotice": {
-        "text": "Claudian ahora es compatible con OpenCode v2. La compatibilidad con OpenCode v1 finaliza el 30 de octubre de 2026.",
-        "link": "Migrar a OpenCode v2"
-      }
-    },
-    "pi": {
-      "environment": {
-        "name": "Variables de entorno de Pi",
-        "desc": "Variables de entorno que se pasan solo a Pi."
-      },
-      "models": {
-        "desc": "Claudian mantiene su propia lista de modelos, independiente de enabledModels de Pi. Discover muestra todos los modelos que Pi puede autenticar en su entorno actual, agrupados por la ruta de proveedor que Pi usará. La ruta determina las credenciales y la facturación."
-      }
-    },
-    "grok": {
-      "environment": {
-        "name": "Variables de entorno de Grok Build",
-        "desc": "Variables de entorno que se pasan solo a Grok Build. Los secretos de los modelos personalizados permanecen en el ámbito de este proveedor y se referencian desde la configuración nativa mediante env_key."
       }
     },
     "deepseek": {

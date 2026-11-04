@@ -1,35 +1,33 @@
 /** @jest-environment jsdom */
 import '@/providers';
 
-import { deserialize, serialize } from 'node:v8';
+import { deserialize, serialize} from 'node:v8';
 
-import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
-import { createHarness, releaseSideChatHarnesses } from '@test/helpers/features/chat/SideChatDOMHarness';
-import { FakeSideSession } from '@test/helpers/features/chat/SideChatSessionHarness';
-import { modelCatalogCases } from '@test/helpers/providerModelCatalogs';
-import { writeGrokCatalog } from '@test/helpers/providers/grokSettings';
-import { fireEvent, waitFor, within } from '@testing-library/dom';
-import { axe } from 'jest-axe';
-import { App, Component, Notice } from 'obsidian';
+import { installSessionRuntimePool} from '@test/helpers/features/chat/SessionRuntimePoolHarness';
+import { createHarness, releaseSideChatHarnesses} from '@test/helpers/features/chat/SideChatDOMHarness';
+import { FakeSideSession} from '@test/helpers/features/chat/SideChatSessionHarness';
+import { modelCatalogCases} from '@test/helpers/providerModelCatalogs';
+import { fireEvent, waitFor, within} from '@testing-library/dom';
+import { axe} from 'jest-axe';
+import { App, Component, Notice} from 'obsidian';
 
-import { ChatModelSelectionCoordinator } from '@/app/settings/ChatModelSelectionCoordinator';
-import { DEFAULT_CLAUDIAN_SETTINGS } from '@/app/settings/defaultSettings';
-import { SettingsCoordinator } from '@/app/settings/SettingsCoordinator';
-import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
-import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
-import { formatReasoningValueLabel } from '@/core/providers/reasoning';
-import type { ProviderId } from '@/core/providers/types';
-import type { ClaudianSettings, Conversation } from '@/core/types';
-import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
-import { getChatSettingsSnapshot } from '@/features/chat/ChatSettings';
-import { updateSessionProviderSettings, updateSessionReasoning } from '@/features/chat/sessions/sessionSettings';
-import { destroyTab } from '@/features/chat/tabs/TabLifecycle';
-import { refreshTabProviderUI } from '@/features/chat/tabs/tabProviderUI';
-import { createTabRuntime } from '@/features/chat/tabs/TabRuntimeFactory';
-import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
-import { setLocale } from '@/i18n/i18n';
-import { getCodexProviderSettings, updateCodexProviderSettings } from '@/providers/codex/settings';
-import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
+import { ChatModelSelectionCoordinator} from '@/app/settings/ChatModelSelectionCoordinator';
+import { DEFAULT_CLAUDIAN_SETTINGS} from '@/app/settings/defaultSettings';
+import { SettingsCoordinator} from '@/app/settings/SettingsCoordinator';
+import { ProviderRegistry} from '@/core/providers/ProviderRegistry';
+import { ProviderWorkspaceRegistry} from '@/core/providers/ProviderWorkspaceRegistry';
+import { formatReasoningValueLabel} from '@/core/providers/reasoning';
+import type { ProviderId} from '@/core/providers/types';
+import type { ClaudianSettings, Conversation} from '@/core/types';
+import type { ChatFeatureHost} from '@/features/chat/ChatFeatureHost';
+import { getChatSettingsSnapshot} from '@/features/chat/ChatSettings';
+import { updateSessionProviderSettings} from '@/features/chat/sessions/sessionSettings';
+import { destroyTab} from '@/features/chat/tabs/TabLifecycle';
+import { refreshTabProviderUI} from '@/features/chat/tabs/tabProviderUI';
+import { createTabRuntime} from '@/features/chat/tabs/TabRuntimeFactory';
+import type { AssembledTabRuntime} from '@/features/chat/tabs/types';
+import { setLocale} from '@/i18n/i18n';
+import { VaultMentionDataProvider} from '@/shared/mention/VaultMentionDataProvider';
 
 const originalResizeObserver = globalThis.ResizeObserver;
 const originalStructuredClone = globalThis.structuredClone;
@@ -50,24 +48,24 @@ function createSettings({ id, populate }: typeof modelCatalogCases[number], adve
   populate(settings);
   const config = settings.providerConfigs[id]!;
   const levels = advertisesHigh ? ['low', 'medium', 'high'] : ['low', 'medium'];
-  if (id === 'claude') (config.discoveredModels as Array<Record<string, unknown>>)[0].supportedEffortLevels = levels;
-  if (id === 'codex' && !advertisesHigh) Object.assign((config.discoveredModels as Array<Record<string, unknown>>)[0], {
-    supportedReasoningEfforts: levels.map(value => ({ value, description: value })), defaultReasoningEffort: 'medium',
-  });
-  if (id === 'deepseek') (config.discoveredModels as Array<Record<string, unknown>>)[0].reasoning = levels.map(id => ({ id, name: formatReasoningValueLabel(id) }));
-  if (id === 'pi') (config.discoveredModels as Array<Record<string, unknown>>)[0].thinkingLevels = ['off', ...levels];
-  if (id === 'opencode') config.thinkingOptionsByModel = {
-    'anthropic/selected': [{ value: 'default', label: 'Default' }, ...levels.map(value => ({ value, label: formatReasoningValueLabel(value) }))],
-  };
-  if (id === 'grok') writeGrokCatalog(settings, {
-    defaultModelId: 'selected', fingerprint: 'test', refreshedAt: 10,
-    models: [{ rawId: 'selected', displayName: 'Selected label', reasoningMetadataResolved: true,
-      defaultReasoningEffort: 'medium', supportsReasoning: true,
-      reasoningEfforts: levels.map(value => ({ value, label: formatReasoningValueLabel(value) })) }],
-  });
+  const discovered = config.discoveredModels as Array<Record<string, unknown>>;
+  const selectedModel = discovered[0];
+  if (id === 'deepseek') {
+    selectedModel.reasoning = levels.map(level => ({ id: level, name: formatReasoningValueLabel(level) }));
+    discovered.push({
+      ...selectedModel, encodedId: 'deepseek:native/alternate', id: 'alternate', label: 'Alternate',
+    });
+    (config.visibleModels as string[]).push('deepseek:native/alternate');
+  }
+  if (id === 'omp') {
+    selectedModel.thinkingLevels = ['off', ...levels];
+    discovered.push({
+      ...selectedModel, encodedId: 'omp:anthropic/alternate', id: 'alternate', label: 'Alternate',
+    });
+    (config.visibleModels as string[]).push('omp:anthropic/alternate');
+  }
   settings.savedProviderModel = { [id]: 'old-model' };
-  settings.savedProviderEffort = { [id]: id === 'opencode' ? 'low' : 'high' };
-  if (id === 'opencode') config.preferredThinkingByModel = { 'anthropic/selected': 'high' };
+  settings.savedProviderEffort = { [id]: 'high' };
   return settings;
 }
 
@@ -83,7 +81,7 @@ function createChatHarness(settings: ClaudianSettings, id: ProviderId, selected:
   const sessions: FakeSideSession[] = [];
   const persist = jest.fn(async () => undefined);
   const settingsCoordinator = new SettingsCoordinator(settings, persist);
-  jest.spyOn(ProviderRegistry, 'createExecutionBackend').mockImplementation((_host, providerId = 'claude') => ({
+  jest.spyOn(ProviderRegistry, 'createExecutionBackend').mockImplementation((_host, providerId = 'omp') => ({
     providerId,
     createSession: config => {
       const session = new FakeSideSession(config);
@@ -211,7 +209,7 @@ it.each(modelCatalogCases.flatMap(entry => [true, false].map(advertisesHigh => (
       expect(getChatSettingsSnapshot(settings, id, selected).reasoning).toBe('high');
       expect(settings).not.toHaveProperty('reasoning');
       const permissionButton = within(tab.dom.inputComposerEl).queryByRole('button', { name: /^Permission mode:/ });
-      expect(permissionButton !== null).toBe(id !== 'pi');
+      expect(permissionButton).not.toBeNull();
       for (const reasoning of ['high', 'low']) {
         if (reasoning !== 'high') await selectReasoning(tab, reasoning);
         await expectSubmission(tab, sessions, getChatSettingsSnapshot(settings, id, selected).model, reasoning);
@@ -223,82 +221,32 @@ it.each(modelCatalogCases.flatMap(entry => [true, false].map(advertisesHigh => (
   },
 );
 
-it.each(['en', 'zh-CN'] as const)('defaults Codex to automatic review and persists and submits each permission selection in %s', async locale => {
+it.each(['en', 'zh-CN'] as const)('defaults omp to always ask and persists and submits each permission selection in %s', async locale => {
   setLocale(locale);
   const prefix = locale === 'en' ? 'Permission mode:' : '权限模式：';
-  const labels = locale === 'en' ? ['Approve for me', 'Ask for approval', 'Full access'] : ['代我审批', '请求审批', '完全访问'];
-  const entry = modelCatalogCases.find(({ id }) => id === 'codex')!;
+  const labels = ['Always ask', 'Write', 'YOLO'];
+  const modes = ['always-ask', 'write', 'yolo'];
+  const entry = modelCatalogCases.find(({ id }) => id === 'omp')!;
   const settings = createSettings(entry);
-  const initialPermissionMode = settings.permissionMode;
   const { createTab, sessions, tabs } = createChatHarness(settings, entry.id, entry.selected);
   try {
     const tab = await createTab();
+    const initialPermissionMode = settings.permissionMode;
     const ui = within(tab.dom.inputComposerEl);
     expect(ui.getByRole('button', { name: `${prefix}${locale === 'en' ? ' ' : ''}${labels[0]}` })).toBeDefined();
-    for (const [label, mode] of [
-      [labels[1], 'normal'], [labels[2], 'yolo'], [labels[0], 'auto-review'],
-    ]) {
+    for (const [index, mode] of [[1, 'write'], [2, 'yolo'], [0, 'always-ask']] as const) {
       fireEvent.click(ui.getByRole('button', { name: new RegExp(`^${prefix}`) }));
-      fireEvent.click(ui.getByRole('menuitemradio', { name: new RegExp(`^${label}`) }));
-      await waitFor(() => expect(settings.savedProviderPermissionMode.codex).toBe(mode));
+      fireEvent.click(ui.getByRole('menuitemradio', { name: new RegExp(`^${labels[index]}`) }));
+      await waitFor(() => expect(settings.savedProviderPermissionMode.omp).toBe(mode));
       await expectSubmission(tab, sessions, getChatSettingsSnapshot(settings, entry.id, entry.selected).model, 'high');
-      expect(sessions.at(-1)?.requests.at(-1)?.configuration.permissionMode).toBe(mode);
+      expect(sessions.at(-1)?.requests.at(-1)?.configuration.permissionMode).toBe(modes[index] === 'always-ask' ? 'always-ask' : mode);
     }
     const reopened = await createTab();
     expect(within(reopened.dom.inputComposerEl).getByRole('button', { name: `${prefix}${locale === 'en' ? ' ' : ''}${labels[0]}` })).toBeDefined();
-    expect(settings.permissionMode).toBe(initialPermissionMode);
+    expect(settings.savedProviderPermissionMode.omp).toBe(modes[0]);
+    expect(initialPermissionMode).toBe('auto');
   } finally {
     setLocale('en');
-    for (const tab of tabs) await destroyTab(tab);
-  }
-});
-
-it('keeps permission and service tier independent across sessions and parent model eviction', async () => {
-  const entry = modelCatalogCases.find(({ id }) => id === 'codex')!;
-  const { createTab, sessions, tabs, plugin } = createChatHarness(createSettings(entry), entry.id, entry.selected);
-  try {
-    const first = await createTab();
-    const second = await createTab();
-    await updateSessionProviderSettings(first.session.runtime, plugin, snapshot => {
-      snapshot.permissionMode = 'yolo';
-      snapshot.serviceTier = 'fast';
-    });
-    const model = getChatSettingsSnapshot(plugin.settings, entry.id, entry.selected).model;
-    await expectSubmission(second, sessions, model, 'high');
-    expect(sessions.at(-1)?.requests.at(-1)?.configuration).toMatchObject({ permissionMode: 'auto-review', serviceTier: 'default' });
-    // An unrelated change commits only itself; the second session's own selections stay local.
-    await updateSessionReasoning(second.session.runtime, plugin, 'low');
-    expect(plugin.settings).toMatchObject({
-      savedProviderEffort: { codex: 'low' }, savedProviderPermissionMode: { codex: 'yolo' }, savedProviderServiceTier: { codex: 'fast' },
-    });
-    refreshTabProviderUI(second);
-    await expectSubmission(second, sessions, model, 'low');
-    expect(sessions.at(-1)?.requests.at(-1)?.configuration).toMatchObject({ permissionMode: 'auto-review', serviceTier: 'default' });
-    const identity = first.conversationId!;
-    const runtime = first.session.runtime;
-    await first.session.runtime.model.hydrate();
-    await destroyTab(first);
-    await waitFor(() => expect(runtime.peekModel).toBeNull());
-    const reopened = await createTab(false, identity);
-    expect(reopened.session.runtime).toBe(runtime);
-    await expectSubmission(reopened, sessions, model, 'high');
-    expect(sessions.at(-1)?.requests.at(-1)?.configuration).toMatchObject({ permissionMode: 'yolo', serviceTier: 'fast' });
-  } finally {
-    for (const tab of tabs) await destroyTab(tab);
-  }
-});
-
-it('displays and submits High for a saved OpenCode Default preference', async () => {
-  const entry = modelCatalogCases.find(({ id }) => id === 'opencode')!;
-  const settings = createSettings(entry);
-  settings.savedProviderEffort.opencode = 'default';
-  settings.providerConfigs.opencode!.preferredThinkingByModel = { 'anthropic/selected': 'default' };
-  const { createTab, sessions, tabs } = createChatHarness(settings, entry.id, entry.selected);
-  try {
-    const tab = await createTab();
-    expect(reasoningStops(tab)).not.toContain('Default');
-    await expectSubmission(tab, sessions, entry.selected, 'high');
-  } finally {
     for (const tab of tabs) await destroyTab(tab);
   }
 });
@@ -343,7 +291,7 @@ it.each(modelCatalogCases)('$id keeps displayed and submitted reasoning independ
   const settings = createSettings(entry);
   const { createTab, sessions, tabs } = createChatHarness(settings, id, selected);
   const model = getChatSettingsSnapshot(settings, id, selected).model;
-  const otherReasoning = id === 'codex' ? 'medium' : 'low';
+  const otherReasoning = 'low';
   try {
     const tabA = await createTab();
     const tabB = await createTab();
@@ -367,13 +315,8 @@ it.each(modelCatalogCases)('$id keeps displayed and submitted reasoning independ
 });
 
 it('restores the tab effort when returning to a previously selected model', async () => {
-  const entry = modelCatalogCases.find(candidate => candidate.id === 'codex')!;
+  const entry = modelCatalogCases.find(candidate => candidate.id === 'omp')!;
   const settings = createSettings(entry);
-  const catalog = getCodexProviderSettings(settings).discoveredModels;
-  updateCodexProviderSettings(settings, {
-    visibleModels: [entry.selected, 'gpt-alternate'],
-    discoveredModels: [catalog[0], { ...catalog[0], model: 'gpt-alternate', displayName: 'Alternate' }],
-  });
   const { createTab, sessions, tabs } = createChatHarness(settings, entry.id, entry.selected);
   try {
     const tab = await createTab();
@@ -385,22 +328,17 @@ it('restores the tab effort when returning to a previously selected model', asyn
     await selectReasoning(tab, 'low');
     await selectModel('Alternate');
     await selectReasoning(tab, 'high');
-    await expectSubmission(tab, sessions, 'openai-codex/gpt-alternate', 'high');
-    await selectModel('GPT-5.5');
-    await expectSubmission(tab, sessions, 'openai-codex/gpt-5.5', 'low');
+    await expectSubmission(tab, sessions, 'omp:anthropic/alternate', 'high');
+    await selectModel('Selected label');
+    await expectSubmission(tab, sessions, 'omp:anthropic/selected', 'low');
   } finally {
     for (const tab of tabs) await destroyTab(tab);
   }
 });
 
 it('keeps the displayed SDK report across model selection until the new model reports a window', async () => {
-  const entry = modelCatalogCases.find(candidate => candidate.id === 'codex')!;
+  const entry = modelCatalogCases.find(candidate => candidate.id === 'omp')!;
   const settings = createSettings(entry);
-  const catalog = getCodexProviderSettings(settings).discoveredModels;
-  updateCodexProviderSettings(settings, {
-    visibleModels: [entry.selected, 'gpt-alternate'],
-    discoveredModels: [catalog[0], { ...catalog[0], model: 'gpt-alternate', displayName: 'Alternate' }],
-  });
   const { createTab, tabs } = createChatHarness(settings, entry.id, entry.selected);
   try {
     const tab = await createTab();
@@ -417,17 +355,17 @@ it('keeps the displayed SDK report across model selection until the new model re
       fireEvent.click(ui.getByText(label, { selector: '.claudian-model-option span' }));
       await waitFor(() => expect(ui.getByText(label, { selector: '.claudian-model-label' })).toBeDefined());
     };
-    await report('gpt-5.5', 100_000, 1_000_000);
+    await report('omp:anthropic/selected', 100_000, 1_000_000);
     const meter = ui.getByRole('progressbar', { name: 'Context usage: 10% · 100k / 1000k' });
     await selectModel('Alternate');
     expect(ui.getByRole('progressbar', { name: 'Context usage: 10% · 100k / 1000k' })).toBe(meter);
     expect(meter.classList.contains('claudian-hidden')).toBe(false);
-    await report('gpt-alternate', 50_000, 0);
+    await report('omp:anthropic/alternate', 50_000, 0);
     expect(meter.getAttribute('aria-valuetext')).toBe('100k / 1000k');
-    await report('gpt-alternate', 50_000, 200_000);
+    await report('omp:anthropic/alternate', 50_000, 200_000);
     expect(meter.getAttribute('aria-valuetext')).toBe('50k / 200k');
     expect(meter.getAttribute('aria-valuenow')).toBe('25');
-    await selectModel('GPT-5.5');
+    await selectModel('Selected label');
     expect(meter.getAttribute('aria-valuetext')).toBe('50k / 200k');
     expect(meter.classList.contains('claudian-hidden')).toBe(false);
     expect((await axe(meter)).violations).toEqual([]);
@@ -437,9 +375,10 @@ it('keeps the displayed SDK report across model selection until the new model re
 });
 
 it('keeps the previous tab effort and future-tab seed when saving a selection fails', async () => {
-  const entry = modelCatalogCases.find(candidate => candidate.id === 'codex')!;
+  const entry = modelCatalogCases.find(candidate => candidate.id === 'omp')!;
   const settings = createSettings(entry);
   const { createTab, sessions, tabs, persist } = createChatHarness(settings, entry.id, entry.selected);
+  const model = getChatSettingsSnapshot(settings, entry.id, entry.selected).model;
   try {
     const tab = await createTab();
     await selectReasoning(tab, 'medium');
@@ -447,45 +386,18 @@ it('keeps the previous tab effort and future-tab seed when saving a selection fa
     chooseReasoning(tab, 'High');
     await waitFor(() => expect(Notice).toHaveBeenCalledWith('Failed to change effort level'));
     refreshTabProviderUI(tab);
-    await expectSubmission(tab, sessions, 'openai-codex/gpt-5.5', 'medium');
-    await expectSubmission(await createTab(), sessions, 'openai-codex/gpt-5.5', 'medium');
-  } finally {
-    for (const tab of tabs) await destroyTab(tab);
-  }
-});
-
-it('refreshes a cached effort when provider settings remove it from the available choices', async () => {
-  const entry = modelCatalogCases.find(candidate => candidate.id === 'codex')!;
-  const settings = createSettings(entry);
-  const catalog = getCodexProviderSettings(settings).discoveredModels;
-  updateCodexProviderSettings(settings, {
-    enableUltraEffort: true,
-    discoveredModels: [{
-      ...catalog[0],
-      supportedReasoningEfforts: [...catalog[0].supportedReasoningEfforts, { value: 'ultra', description: 'Ultra' }],
-    }],
-  });
-  const { createTab, sessions, tabs } = createChatHarness(settings, entry.id, entry.selected);
-  try {
-    const tab = await createTab();
-    await selectReasoning(tab, 'ultra');
-    const peer = await createTab();
-    await selectReasoning(peer, 'medium');
-    updateCodexProviderSettings(settings, { enableUltraEffort: false });
-    refreshTabProviderUI(tab);
-    expect(reasoningStops(tab)).not.toContain('Ultra');
-    // Losing a supported choice uses the model default, not another tab's saved effort.
-    await expectSubmission(tab, sessions, 'openai-codex/gpt-5.5', 'high');
-    await expectSubmission(peer, sessions, 'openai-codex/gpt-5.5', 'medium');
+    await expectSubmission(tab, sessions, model, 'medium');
+    await expectSubmission(await createTab(), sessions, model, 'medium');
   } finally {
     for (const tab of tabs) await destroyTab(tab);
   }
 });
 
 it.each([true, false])('seeds tabs from committed reasoning while a save is pending (succeeds: %s)', async (succeeds) => {
-  const entry = modelCatalogCases.find(candidate => candidate.id === 'codex')!;
+  const entry = modelCatalogCases.find(candidate => candidate.id === 'omp')!;
   const settings = createSettings(entry);
   const { createTab, sessions, tabs, persist, plugin } = createChatHarness(settings, entry.id, entry.selected);
+  const model = getChatSettingsSnapshot(settings, entry.id, entry.selected).model;
   let resolveSave!: (value: undefined) => void;
   let rejectSave!: (error: Error) => void;
   const save = new Promise<undefined>((resolve, reject) => {
@@ -501,7 +413,7 @@ it.each([true, false])('seeds tabs from committed reasoning while a save is pend
     await waitFor(() => expect(persist).toHaveBeenCalled());
 
     const duringSave = await createTab();
-    await expectSubmission(duringSave, sessions, 'openai-codex/gpt-5.5', 'high');
+    await expectSubmission(duringSave, sessions, model, 'high');
     if (succeeds) {
       resolveSave(undefined);
     } else {
@@ -512,8 +424,8 @@ it.each([true, false])('seeds tabs from committed reasoning while a save is pend
       ? { status: 'fulfilled', value: undefined }
       : { status: 'rejected', reason: saveError }]);
     refreshTabProviderUI(duringSave);
-    await expectSubmission(duringSave, sessions, 'openai-codex/gpt-5.5', 'high');
-    await expectSubmission(await createTab(), sessions, 'openai-codex/gpt-5.5', succeeds ? 'medium' : 'high');
+    await expectSubmission(duringSave, sessions, model, 'high');
+    await expectSubmission(await createTab(), sessions, model, succeeds ? 'medium' : 'high');
   } finally {
     resolveSave(undefined);
     await mutate.mock.results[0]?.value.catch(() => undefined);
@@ -522,7 +434,7 @@ it.each([true, false])('seeds tabs from committed reasoning while a save is pend
 });
 
 test.each(['provider switch', 'switch back', 'closing'] as const)('queued toolbar changes retain their session only across closing (%s)', async transition => {
-  const entry = modelCatalogCases.find(entry => entry.id === 'claude')!;
+  const entry = modelCatalogCases.find(entry => entry.id === 'omp')!;
   const settings = createSettings(entry);
   const { plugin, createTab } = createChatHarness(settings, entry.id, entry.selected);
   const tab = await createTab(true);
@@ -532,15 +444,16 @@ test.each(['provider switch', 'switch back', 'closing'] as const)('queued toolba
     const blocker = plugin.mutateSettings(() => new Promise<void>(resolve => { release = resolve; }));
     await Promise.resolve();
     const before = structuredClone(settings);
-    const pending = updateSessionProviderSettings(tab.session.runtime, plugin, snapshot => { snapshot.permissionMode = 'normal'; });
+    const projectedBefore = getChatSettingsSnapshot(before as unknown as ClaudianSettings, entry.id, entry.selected).permissionMode;
+    const pending = updateSessionProviderSettings(tab.session.runtime, plugin, snapshot => { snapshot.permissionMode = 'write'; });
     if (transition === 'closing') tab.session.beginClose();
     else {
-      tab.session.selectDraft('codex', 'openai-codex/gpt-5.5');
+      tab.session.selectDraft('deepseek', 'deepseek:native/selected');
       if (transition === 'switch back') tab.session.selectDraft(entry.id, entry.selected);
     }
     release();
     await Promise.all([blocker, pending]);
-    expect(tab.session.runtime.providerSelections.get(entry.id)?.permissionMode).toBe(transition === 'closing' ? 'normal' : before.permissionMode);
+    expect(tab.session.runtime.providerSelections.get(entry.id)?.permissionMode).toBe(transition === 'closing' ? 'write' : projectedBefore);
     expect(transition === 'closing' || JSON.stringify(settings) === JSON.stringify(before)).toBe(true);
   } finally { await destroyTab(tab); }
 });

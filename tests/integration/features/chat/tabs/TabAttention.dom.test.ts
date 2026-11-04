@@ -1,10 +1,10 @@
 /** @jest-environment jsdom */
 import '@/providers';
 
-import { claudeCatalogFixture } from '@test/helpers/claudeModels';
 import { createProjectsFake } from '@test/helpers/features/chat/ProjectsFake';
 import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
 import { FakeSideBackend } from '@test/helpers/features/chat/SideChatSessionHarness';
+import { ompCatalogFixture } from '@test/helpers/ompModels';
 import { testDate } from '@test/helpers/testClock';
 import { waitFor } from '@testing-library/dom';
 import { App, Component } from 'obsidian';
@@ -47,14 +47,14 @@ function setup() {
   Object.assign(app.vault, { on: () => ({}), offref() {} });
   const backend = new FakeSideBackend();
   jest.spyOn(ProviderRegistry, 'createExecutionBackend').mockReturnValue(backend);
-  jest.spyOn(ProviderRegistry.getConversationHistoryService('claude'), 'buildForkProviderState').mockResolvedValue({});
-  ProviderWorkspaceRegistry.setServices('claude', {});
+  jest.spyOn(ProviderRegistry.getConversationHistoryService('omp'), 'buildForkProviderState').mockResolvedValue({});
+  ProviderWorkspaceRegistry.setServices('omp', {});
   const settings = {
     model: 'claude-sonnet-4-5', permissionMode: 'normal', effortLevel: 'high', excludedTags: [],
-    providerConfigs: { claude: claudeCatalogFixture(['claude-sonnet-4-5'], ['low', 'high']) },
+    providerConfigs: { omp: ompCatalogFixture(['claude-sonnet-4-5'], ['low', 'high']) },
   } as unknown as ClaudianSettings;
   const conversation = {
-    id: 'conversation', providerId: 'claude', selectedModel: settings.model, sessionId: 'native',
+    id: 'conversation', providerId: 'omp', selectedModel: settings.model, sessionId: 'native',
     title: 'Conversation', messages: [], createdAt: testDate().getTime(), lastActivityAt: testDate().getTime(),
   } as Conversation;
   const registry = new ProviderExecutionLifecycleRegistry();

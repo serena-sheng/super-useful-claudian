@@ -1,24 +1,18 @@
 import '@/providers';
 
-import { createMockEl } from '@test/helpers/MockElement';
-import { testDate } from '@test/helpers/testClock';
-import { Component, Menu } from 'obsidian';
+import { createMockEl} from '@test/helpers/MockElement';
+import { testDate} from '@test/helpers/testClock';
+import { Component, Menu} from 'obsidian';
 
 import {
-  TOOL_AGENT_OUTPUT,
-  TOOL_APPLY_PATCH,
-  TOOL_SPAWN_AGENT,
-  TOOL_SUBAGENT,
-  TOOL_WAIT_AGENT,
-  TOOL_WRITE_STDIN,
-} from '@/core/tools/toolNames';
-import type { ChatMessage, ImageAttachment } from '@/core/types';
-import { renderCitationGroup } from '@/features/chat/rendering/CitationRenderer';
-import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
-import { renderStoredThinkingBlock } from '@/features/chat/rendering/ThinkingBlockRenderer';
-import { renderStoredToolCall } from '@/features/chat/rendering/tools/ToolCallRenderer';
-import { renderStoredWriteEdit } from '@/features/chat/rendering/tools/WriteEditRenderer';
-import { renderStoredAsyncSubagent, renderStoredSubagent } from '@/features/chat/subagents/SubagentRenderer';
+  TOOL_APPLY_PATCH, TOOL_WRITE_STDIN} from '@/core/tools/toolNames';
+import type { ChatMessage, ImageAttachment} from '@/core/types';
+import { renderCitationGroup} from '@/features/chat/rendering/CitationRenderer';
+import { MessageRenderer} from '@/features/chat/rendering/MessageRenderer';
+import { renderStoredThinkingBlock} from '@/features/chat/rendering/ThinkingBlockRenderer';
+import { renderStoredToolCall} from '@/features/chat/rendering/tools/ToolCallRenderer';
+import { renderStoredWriteEdit} from '@/features/chat/rendering/tools/WriteEditRenderer';
+
 
 jest.mock('@/features/chat/subagents/SubagentRenderer', () => ({
   renderStoredAsyncSubagent: jest.fn().mockReturnValue({ wrapperEl: {}, cleanup: jest.fn() }),
@@ -48,11 +42,11 @@ function createMockComponent() {
   return new Component();
 }
 
-function mockCapabilities(providerId: 'claude' | 'codex' | 'grok' = 'claude') {
+function mockCapabilities(providerId: 'omp' | 'deepseek' | 'deepseek' = 'omp') {
   return () => ({
     providerId,
     supportsEphemeralSessions: false,
-    supportsNativeHistory: providerId === 'claude',
+    supportsNativeHistory: providerId === 'omp',
     supportsRewind: true,
     supportsFork: true,
     supportsProviderCommands: true,
@@ -63,7 +57,7 @@ function mockCapabilities(providerId: 'claude' | 'codex' | 'grok' = 'claude') {
 
 function createRenderer(
   messagesEl?: any,
-  providerId: 'claude' | 'codex' | 'grok' = 'claude',
+  providerId: 'omp' | 'deepseek' | 'deepseek' = 'omp',
   settings: Record<string, unknown> = {},
 ) {
   const el = messagesEl ?? createMockEl();
@@ -159,7 +153,7 @@ describe('MessageRenderer', () => {
 
   it('renders timestamps when the setting is enabled', () => {
     const messagesEl = createMockEl();
-    const { renderer } = createRenderer(messagesEl, 'claude', { showMessageTimestamps: true });
+    const { renderer } = createRenderer(messagesEl, 'omp', { showMessageTimestamps: true });
     const timestamp = testDate().getTime();
 
     renderer.renderStoredMessage({
@@ -182,7 +176,7 @@ describe('MessageRenderer', () => {
 
   it('does not render timestamps when the setting is disabled', () => {
     const messagesEl = createMockEl();
-    const { renderer } = createRenderer(messagesEl, 'claude', { showMessageTimestamps: false });
+    const { renderer } = createRenderer(messagesEl, 'omp', { showMessageTimestamps: false });
 
     renderer.renderStoredMessage({
       id: 'untimed-user',
@@ -197,7 +191,7 @@ describe('MessageRenderer', () => {
 
   it('renders persisted citation content blocks', () => {
     const messagesEl = createMockEl();
-    const { renderer } = createRenderer(messagesEl, 'codex');
+    const { renderer } = createRenderer(messagesEl, 'deepseek');
     const citations = {
       kind: 'memory' as const,
       entries: [{
@@ -502,9 +496,7 @@ describe('MessageRenderer', () => {
   // ============================================
 
   it('renders assistant content blocks using specialized renderers', () => {
-    const messagesEl = createMockEl();
-    const mockComponent = createMockComponent();
-    const renderer = new MessageRenderer({} as any, mockComponent as any, messagesEl);
+    const { renderer } = createRenderer(undefined, 'deepseek');
     const renderContentSpy = jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
     const msg: ChatMessage = {
@@ -516,20 +508,6 @@ describe('MessageRenderer', () => {
         { id: 'todo', name: 'TodoWrite', input: { items: [] } } as any,
         { id: 'edit', name: 'Edit', input: { file_path: 'notes/test.md' } } as any,
         { id: 'read', name: 'Read', input: { file_path: 'notes/test.md' } } as any,
-        {
-          id: 'sub-1',
-          name: TOOL_SUBAGENT,
-          input: { description: 'Async subagent' },
-          status: 'running',
-          subagent: { id: 'sub-1', mode: 'async', status: 'running', toolCalls: [], isExpanded: false },
-        } as any,
-        {
-          id: 'sub-2',
-          name: TOOL_SUBAGENT,
-          input: { description: 'Sync subagent' },
-          status: 'running',
-          subagent: { id: 'sub-2', mode: 'sync', status: 'running', toolCalls: [], isExpanded: false },
-        } as any,
       ],
       contentBlocks: [
         { type: 'thinking', content: 'thinking', durationSeconds: 2 } as any,
@@ -537,8 +515,6 @@ describe('MessageRenderer', () => {
         { type: 'tool_use', toolId: 'todo' } as any,
         { type: 'tool_use', toolId: 'edit' } as any,
         { type: 'tool_use', toolId: 'read' } as any,
-        { type: 'subagent', subagentId: 'sub-1', mode: 'async' } as any,
-        { type: 'subagent', subagentId: 'sub-2' } as any,
       ],
     };
 
@@ -553,8 +529,6 @@ describe('MessageRenderer', () => {
     );
     expect(renderStoredWriteEdit).toHaveBeenCalled();
     expect(renderStoredToolCall).toHaveBeenCalled();
-    expect(renderStoredAsyncSubagent).toHaveBeenCalled();
-    expect(renderStoredSubagent).toHaveBeenCalled();
   });
 
   it('passes collapsed file-edit default to stored Write/Edit renderer', () => {
@@ -585,7 +559,7 @@ describe('MessageRenderer', () => {
 
   it('passes expanded file-edit default to stored Write/Edit renderer', () => {
     const messagesEl = createMockEl();
-    const { renderer } = createRenderer(messagesEl, 'claude', { expandFileEditsByDefault: true });
+    const { renderer } = createRenderer(messagesEl, 'omp', { expandFileEditsByDefault: true });
 
     const msg: ChatMessage = {
       id: 'm-write-expanded',
@@ -635,7 +609,7 @@ describe('MessageRenderer', () => {
 
   it('does not render stored Codex write_stdin transport tools', () => {
     const messagesEl = createMockEl();
-    const { renderer } = createRenderer(messagesEl, 'codex');
+    const { renderer } = createRenderer(messagesEl, 'deepseek');
 
     const msg: ChatMessage = {
       id: 'm1',
@@ -664,7 +638,7 @@ describe('MessageRenderer', () => {
 
   it('renders stored Codex write_stdin tools when they send real input', () => {
     const messagesEl = createMockEl();
-    const { renderer } = createRenderer(messagesEl, 'codex');
+    const { renderer } = createRenderer(messagesEl, 'deepseek');
 
     const msg: ChatMessage = {
       id: 'm1',
@@ -701,7 +675,7 @@ describe('MessageRenderer', () => {
 
   it('passes expanded file-edit default to stored apply_patch renderer', () => {
     const messagesEl = createMockEl();
-    const { renderer } = createRenderer(messagesEl, 'codex', { expandFileEditsByDefault: true });
+    const { renderer } = createRenderer(messagesEl, 'deepseek', { expandFileEditsByDefault: true });
 
     const msg: ChatMessage = {
       id: 'm-apply-patch-expanded',
@@ -787,203 +761,9 @@ describe('MessageRenderer', () => {
     );
   });
 
-  it('renders Task tool calls as subagents for backward compatibility', () => {
-    const messagesEl = createMockEl();
-    const { renderer } = createRenderer(messagesEl);
-
-    (renderStoredSubagent as jest.Mock).mockClear();
-
-    const msg: ChatMessage = {
-      id: 'm1',
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now(),
-      toolCalls: [
-        {
-          id: 'task-1',
-          name: TOOL_SUBAGENT,
-          input: { description: 'Run tests' },
-          status: 'completed',
-          result: 'All passed',
-        } as any,
-      ],
-      contentBlocks: [
-        { type: 'tool_use', toolId: 'task-1' } as any,
-      ],
-    };
-
-    renderer.renderStoredMessage(msg);
-
-    expect(renderStoredSubagent).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        id: 'task-1',
-        description: 'Run tests',
-        status: 'completed',
-        result: 'All passed',
-      })
-    );
-  });
-
-  it('renders Task tool as async subagent when linked subagent mode is async', () => {
-    const messagesEl = createMockEl();
-    const { renderer } = createRenderer(messagesEl);
-
-    (renderStoredAsyncSubagent as jest.Mock).mockClear();
-    (renderStoredSubagent as jest.Mock).mockClear();
-
-    const msg: ChatMessage = {
-      id: 'm-task-async',
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now(),
-      toolCalls: [
-        {
-          id: 'task-async-1',
-          name: TOOL_SUBAGENT,
-          input: { description: 'Background task', run_in_background: true },
-          status: 'completed',
-          result: 'Task running',
-          subagent: {
-            id: 'task-async-1',
-            description: 'Background task',
-            mode: 'async',
-            asyncStatus: 'running',
-            status: 'running',
-            toolCalls: [],
-            isExpanded: false,
-          },
-        } as any,
-      ],
-      contentBlocks: [
-        { type: 'tool_use', toolId: 'task-async-1' } as any,
-      ],
-    };
-
-    renderer.renderStoredMessage(msg);
-
-    expect(renderStoredAsyncSubagent).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        id: 'task-async-1',
-        mode: 'async',
-        asyncStatus: 'running',
-      })
-    );
-    expect(renderStoredSubagent).not.toHaveBeenCalled();
-  });
-
-  it('uses subagent block mode hint when linked subagent mode is missing', () => {
-    const messagesEl = createMockEl();
-    const { renderer } = createRenderer(messagesEl);
-
-    (renderStoredAsyncSubagent as jest.Mock).mockClear();
-    (renderStoredSubagent as jest.Mock).mockClear();
-
-    const msg: ChatMessage = {
-      id: 'm-task-mode-hint',
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now(),
-      toolCalls: [
-        {
-          id: 'task-hint-1',
-          name: TOOL_SUBAGENT,
-          input: { description: 'Background task from block hint' },
-          status: 'running',
-          subagent: {
-            id: 'task-hint-1',
-            description: 'Background task from block hint',
-            status: 'running',
-            toolCalls: [],
-            isExpanded: false,
-          },
-        } as any,
-      ],
-      contentBlocks: [
-        { type: 'subagent', subagentId: 'task-hint-1', mode: 'async' } as any,
-      ],
-    };
-
-    renderer.renderStoredMessage(msg);
-
-    expect(renderStoredAsyncSubagent).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        id: 'task-hint-1',
-        mode: 'async',
-      })
-    );
-    expect(renderStoredSubagent).not.toHaveBeenCalled();
-  });
-
   // ============================================
   // TaskOutput skipping
   // ============================================
-
-  it('should skip TaskOutput tool calls (internal async subagent communication)', () => {
-    const messagesEl = createMockEl();
-    const mockComponent = createMockComponent();
-    const renderer = new MessageRenderer({} as any, mockComponent as any, messagesEl);
-
-    (renderStoredToolCall as jest.Mock).mockClear();
-
-    const msg: ChatMessage = {
-      id: 'm1',
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now(),
-      toolCalls: [
-        { id: 'agent-output-1', name: TOOL_AGENT_OUTPUT, input: { task_id: 'abc', block: true } } as any,
-      ],
-      contentBlocks: [
-        { type: 'tool_use', toolId: 'agent-output-1' } as any,
-      ],
-    };
-
-    renderer.renderStoredMessage(msg);
-
-    expect(renderStoredToolCall).not.toHaveBeenCalled();
-  });
-
-  it('should render other tool calls but skip TaskOutput when mixed', () => {
-    const messagesEl = createMockEl();
-    const mockComponent = createMockComponent();
-    const renderer = new MessageRenderer({} as any, mockComponent as any, messagesEl);
-
-    (renderStoredToolCall as jest.Mock).mockClear();
-
-    const msg: ChatMessage = {
-      id: 'm1',
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now(),
-      toolCalls: [
-        { id: 'read-1', name: 'Read', input: { file_path: 'test.md' }, status: 'completed' } as any,
-        { id: 'agent-output-1', name: TOOL_AGENT_OUTPUT, input: { task_id: 'abc' } } as any,
-        { id: 'grep-1', name: 'Grep', input: { pattern: 'test' }, status: 'completed' } as any,
-      ],
-      contentBlocks: [
-        { type: 'tool_use', toolId: 'read-1' } as any,
-        { type: 'tool_use', toolId: 'agent-output-1' } as any,
-        { type: 'tool_use', toolId: 'grep-1' } as any,
-      ],
-    };
-
-    renderer.renderStoredMessage(msg);
-
-    expect(renderStoredToolCall).toHaveBeenCalledTimes(2);
-    expect(renderStoredToolCall).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ id: 'read-1', name: 'Read' }),
-      expect.objectContaining({ initiallyExpanded: false }),
-    );
-    expect(renderStoredToolCall).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ id: 'grep-1', name: 'Grep' }),
-      expect.objectContaining({ initiallyExpanded: false }),
-    );
-  });
 
   // ============================================
   // addMessage (streaming)
@@ -1200,114 +980,9 @@ describe('MessageRenderer', () => {
   // ============================================
 
   describe('Agent tool rendering - error and running status', () => {
-    it('renders Codex spawn_agent with the same prompt and result recovered on reload', () => {
-      const messagesEl = createMockEl();
-      const { renderer } = createRenderer(messagesEl, 'codex');
-
-      (renderStoredSubagent as jest.Mock).mockClear();
-
-      const msg: ChatMessage = {
-        id: 'm-codex-subagent',
-        role: 'assistant',
-        content: '',
-        timestamp: Date.now(),
-        toolCalls: [
-          {
-            id: 'spawn-1',
-            name: TOOL_SPAWN_AGENT,
-            input: {
-              message: 'Inspect utils.ts and return the final patch summary.',
-              model: 'gpt-5.4-mini',
-            },
-            status: 'completed',
-            result: '{"agent_id":"agent-1","nickname":"Zeno"}',
-          } as any,
-          {
-            id: 'wait-1',
-            name: TOOL_WAIT_AGENT,
-            input: { targets: ['agent-1'], timeout_ms: 30000 },
-            status: 'completed',
-            result: '{"status":{"agent-1":{"completed":"Patched utils.ts and verified imports."}},"timed_out":false}',
-          } as any,
-        ],
-        contentBlocks: [
-          { type: 'tool_use', toolId: 'spawn-1' } as any,
-        ],
-      };
-
-      renderer.renderStoredMessage(msg);
-
-      expect(renderStoredSubagent).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          id: 'spawn-1',
-          description: 'Zeno (gpt-5.4-mini)',
-          prompt: 'Inspect utils.ts and return the final patch summary.',
-          status: 'completed',
-          result: 'Patched utils.ts and verified imports.',
-        })
-      );
-    });
-
-    it('renders a stored Grok background task with the async subagent renderer', () => {
-      const messagesEl = createMockEl();
-      const { renderer } = createRenderer(messagesEl, 'grok');
-
-      const msg: ChatMessage = {
-        id: 'm-grok-subagent',
-        role: 'assistant',
-        content: '',
-        timestamp: Date.now(),
-        toolCalls: [
-          {
-            id: 'spawn-1',
-            name: 'spawn_subagent',
-            input: {
-              description: 'Inspect tools',
-              prompt: 'Inspect every mapping.',
-              run_in_background: true,
-              task_id: 'task-1',
-            },
-            status: 'completed',
-            result: 'Spawned task-1',
-          } as any,
-          {
-            id: 'output-1',
-            name: 'get_command_or_subagent_output',
-            input: { task_ids: ['task-1'] },
-            providerPayload: {
-              rawName: 'get_command_or_subagent_output',
-              rawOutput: {
-                Result: [{ output: 'All mappings verified.', status: 'completed', task_id: 'task-1' }],
-                type: 'task_output',
-              },
-            },
-            status: 'completed',
-            result: 'All mappings verified.',
-          } as any,
-        ],
-        contentBlocks: [{ type: 'tool_use', toolId: 'spawn-1' } as any],
-      };
-
-      renderer.renderStoredMessage(msg);
-
-      expect(renderStoredAsyncSubagent).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          asyncStatus: 'completed',
-          description: 'Inspect tools',
-          mode: 'async',
-          result: 'All mappings verified.',
-          status: 'completed',
-        }),
-      );
-      expect(renderStoredSubagent).not.toHaveBeenCalled();
-      expect(renderStoredToolCall).not.toHaveBeenCalled();
-    });
-
     it('renders Grok output calls that target background commands', () => {
       const messagesEl = createMockEl();
-      const { renderer } = createRenderer(messagesEl, 'grok');
+      const { renderer } = createRenderer(messagesEl, 'deepseek');
       const outputToolCall = {
         id: 'output-command',
         name: 'get_command_or_subagent_output',
@@ -1335,7 +1010,7 @@ describe('MessageRenderer', () => {
 
     it('renders stored Grok output calls with mixed command and subagent targets', () => {
       const messagesEl = createMockEl();
-      const { renderer } = createRenderer(messagesEl, 'grok');
+      const { renderer } = createRenderer(messagesEl, 'deepseek');
       const outputToolCall = {
         id: 'output-mixed',
         name: 'get_command_or_subagent_output',

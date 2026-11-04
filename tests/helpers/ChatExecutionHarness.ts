@@ -205,8 +205,8 @@ export function createHarness(options: {
 } = {}) {
   const registry = new ProviderExecutionLifecycleRegistry();
   const backends = new Map<ProviderId, FakeBackend>([
-    ['claude', new FakeBackend('claude')],
-    ['codex', new FakeBackend('codex')],
+    ['omp', new FakeBackend('omp')],
+    ['deepseek', new FakeBackend('deepseek')],
   ]);
   const repository = {
     registerExecutionBinding: jest.fn(),
@@ -295,7 +295,7 @@ export async function beginExecution(
 ) {
   await harness.coordinator.bindConversation({
     conversationId: 'conversation-1',
-    providerId: 'claude',
+    providerId: 'omp',
     resumeSeed: {
       providerSessionId: 'native-session',
       providerState: { leafId: 'leaf-1' },
@@ -306,7 +306,7 @@ export async function beginExecution(
   let run: FakeRun | undefined;
   for (let attempt = 0; attempt < 20 && !run; attempt += 1) {
     await Promise.resolve();
-    session = harness.backends.get('claude')!.sessions[0];
+    session = harness.backends.get('omp')!.sessions[0];
     run = session?.runs[0];
   }
   if (!session || !run) throw new Error('Execution did not start');

@@ -85,7 +85,7 @@ export function createMockTab(options: Record<string, any>): any {
   const tab = {
     id: options.tabId ?? `tab-${mockTabs.length + 1}`,
     conversationId: options.conversation?.id ?? null,
-    draftModel: options.conversation ? null : (options.draftModel ?? 'claude-default'),
+    draftModel: options.conversation ? null : (options.draftModel ?? 'omp-default'),
     executionCoordinator: {
       getCommandSnapshot: () => undefined,
       hasBackgroundWork: false,
@@ -95,7 +95,7 @@ export function createMockTab(options: Record<string, any>): any {
     },
     hydrationState: options.conversation ? 'idle' : 'ready',
     lifecycleState: options.lifecycleState ?? 'open',
-    providerId: options.conversation?.providerId ?? options.providerId ?? 'claude',
+    providerId: options.conversation?.providerId ?? options.providerId ?? 'omp',
     session: null as unknown as TabSession,
     ...options.initialState,
     captureReviewableSettlement: options.captureReviewableSettlement ?? null,
@@ -214,20 +214,20 @@ export function providerWorkspaceRegistryModuleMock() {
 export function providerRegistryModuleMock() {
   return {
     ProviderRegistry: {
-      getRegisteredProviderIds: jest.fn().mockReturnValue(['claude', 'codex', 'opencode']),
-      getEnabledProviderIds: jest.fn().mockReturnValue(['claude']),
-      getBlankTabProviderIds: jest.fn().mockReturnValue(['claude']),
+      getRegisteredProviderIds: jest.fn().mockReturnValue(['omp', 'deepseek']),
+      getEnabledProviderIds: jest.fn().mockReturnValue(['omp']),
+      getBlankTabProviderIds: jest.fn().mockReturnValue(['omp']),
       isEnabled: jest.fn().mockReturnValue(true),
-      getChatUIConfig: jest.fn().mockReturnValue({ getModelOptions: () => [{ value: 'claude-default' }], getDefaultModel: () => 'claude-default' }),
-      getModelPolicy: jest.fn().mockReturnValue({ getModelOptions: () => [{ value: 'claude-default' }], getDefaultModel: () => 'claude-default' }),
+      getChatUIConfig: jest.fn().mockReturnValue({ getModelOptions: () => [{ value: 'omp-default' }], getDefaultModel: () => 'omp-default' }),
+      getModelPolicy: jest.fn().mockReturnValue({ getModelOptions: () => [{ value: 'omp-default' }], getDefaultModel: () => 'omp-default' }),
       getCapabilities: jest.fn().mockReturnValue({
-        providerId: 'claude',
+        providerId: 'omp',
         supportsProviderCommands: true,
       }),
       getConversationHistoryService: jest.fn().mockReturnValue({
         buildForkProviderState: jest.fn().mockReturnValue({ fork: true }),
       }),
-      resolveProviderForModel: jest.fn().mockReturnValue('claude'),
+      resolveProviderForModel: jest.fn().mockReturnValue('omp'),
     },
   };
 }
@@ -257,7 +257,7 @@ export function createPlugin(overrides: Record<string, unknown> = {}) {
     },
     createConversation: jest.fn().mockResolvedValue({
       id: 'forked',
-      providerId: 'claude',
+      providerId: 'omp',
     }),
     deleteConversation: jest.fn().mockResolvedValue(undefined),
     findConversationAcrossViews: jest.fn().mockReturnValue(null),

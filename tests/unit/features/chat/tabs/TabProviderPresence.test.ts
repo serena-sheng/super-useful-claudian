@@ -10,7 +10,6 @@ import { Notice } from 'obsidian';
 
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
-import { OPENCODE_PROVIDER_CAPABILITIES } from '@/providers/opencode/capabilities';
 
 jest.mock('@/features/chat/tabs/TabLifecycle', () => (
   jest.requireActual('@test/helpers/features/chat/TabManagerTestHarness').tabLifecycleModuleMock()
@@ -48,21 +47,21 @@ describe('TabProviderPresence', () => {
     });
   });
 
-  it.each(['codex', 'opencode'].flatMap(providerId => [
+  it.each(['deepseek'].flatMap(providerId => [
     { provider: providerId, restored: { conversationId: `${providerId}-history` } },
     { provider: providerId, restored: { conversationId: null, providerId, draftModel: `${providerId}:model` } },
   ]))('starts a shared runtime for an inactive restored provider tab without preparing execution: %o', async ({ provider, restored }) => {
     const startRuntime = jest.fn().mockResolvedValue(undefined);
-    jest.mocked(ProviderRegistry.getCapabilities).mockImplementation(providerId => (providerId === 'opencode' ? OPENCODE_PROVIDER_CAPABILITIES : {
+    jest.mocked(ProviderRegistry.getCapabilities).mockImplementation(providerId => ({
       providerId, supportsProviderCommands: true, startsSharedRuntimeOnTabPresence: providerId === provider,
     } as any));
     jest.mocked(ProviderWorkspaceRegistry.getIfInitialized).mockImplementation(providerId => providerId === provider ? { startRuntime } : {});
     const { manager } = createManager(createPlugin({
-      getCachedConversation: (id: string) => ({ id, providerId: id === `${provider}-history` ? provider : 'claude' }),
+      getCachedConversation: (id: string) => ({ id, providerId: id === `${provider}-history` ? provider : 'omp' }),
     }));
     await manager.restoreState({
       openTabs: [
-        { tabId: 'visible', conversationId: 'claude-history' },
+        { tabId: 'visible', conversationId: 'omp-history' },
         { tabId: 'hidden', ...restored },
       ],
       activeTabId: 'visible',
@@ -74,9 +73,9 @@ describe('TabProviderPresence', () => {
     await manager.destroy();
   });
 
-  it.each(['codex', 'opencode'])('starts a shared runtime when a blank tab selects %s without preparing execution', async provider => {
+  it.each(['deepseek'])('starts a shared runtime when a blank tab selects %s without preparing execution', async provider => {
     const startRuntime = jest.fn().mockResolvedValue(undefined);
-    jest.mocked(ProviderRegistry.getCapabilities).mockImplementation(providerId => (providerId === 'opencode' ? OPENCODE_PROVIDER_CAPABILITIES : {
+    jest.mocked(ProviderRegistry.getCapabilities).mockImplementation(providerId => ({
       providerId, supportsProviderCommands: true, startsSharedRuntimeOnTabPresence: providerId === provider,
     } as any));
     jest.mocked(ProviderWorkspaceRegistry.getIfInitialized).mockImplementation(providerId => providerId === provider ? { startRuntime } : {});
@@ -92,14 +91,14 @@ describe('TabProviderPresence', () => {
   });
 
   it('keeps repeated passive runtime startup failures silent', async () => {
-    const startRuntime = jest.fn().mockRejectedValue(new Error('Codex missing'));
+    const startRuntime = jest.fn().mockRejectedValue(new Error('DeepSeek missing'));
     jest.mocked(ProviderRegistry.getCapabilities).mockImplementation(providerId => ({
-      providerId, supportsProviderCommands: true, startsSharedRuntimeOnTabPresence: providerId === 'codex',
+      providerId, supportsProviderCommands: true, startsSharedRuntimeOnTabPresence: providerId === 'deepseek',
     } as any));
-    jest.mocked(ProviderWorkspaceRegistry.getIfInitialized).mockImplementation(providerId => providerId === 'codex' ? { startRuntime } : {});
+    jest.mocked(ProviderWorkspaceRegistry.getIfInitialized).mockImplementation(providerId => providerId === 'deepseek' ? { startRuntime } : {});
     const { manager } = createManager();
     const tab = await manager.createTab();
-    tab!.session.selectDraft('codex', 'codex:gpt-5');
+    tab!.session.selectDraft('deepseek', 'deepseek:native/model');
     const changed = mockCreateTabRuntime.mock.calls[0][0].onDraftModelChanged;
     changed(tab, tab!.draftModel);
     await new Promise(resolve => setTimeout(resolve, 0));

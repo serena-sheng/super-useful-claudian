@@ -1,21 +1,15 @@
 import '@/providers';
 
-import { TEST_CODEX_CATALOG } from '@test/helpers/codexModels';
 import { DEFAULT_CLAUDIAN_SETTINGS as DEFAULT_SETTINGS } from '@test/helpers/defaultSettings';
+import { ompCatalogFixture } from '@test/helpers/ompModels';
 
 import {
   CLAUDIAN_SETTINGS_PATH,
   ClaudianSettingsStorage
 } from '@/app/settings/ClaudianSettingsStorage';
 import type { VaultFileAdapter } from '@/core/storage/VaultFileAdapter';
-import { getClaudeProviderSettings } from '@/providers/claude/settings';
-import {
-  getCodexProviderSettings,
-  updateCodexProviderSettings,
-} from '@/providers/codex/settings';
-import { getGrokProviderSettings } from '@/providers/grok/settings';
-import { getOpencodeProviderSettings } from '@/providers/opencode/settings';
-import { getPiProviderSettings } from '@/providers/pi/settings';
+import { getDeepSeekProviderSettings } from '@/providers/deepseek/settings';
+import { getOmpProviderSettings } from '@/providers/omp/settings';
 
 const mockGetHostnameKey = jest.fn(() => 'host-a');
 const mockGetLegacyDeviceSettingsKey = jest.fn<string | null, []>(() => null);
@@ -63,7 +57,7 @@ describe('ClaudianSettingsStorage', () => {
         maxWarmAgentProcesses: 7,
         projectSort: 'created',
         userName: 'Ada',
-        providerConfigs: { claude: { loadUserSettings: true } },
+        providerConfigs: { omp: { environmentVariables: 'OMP_TEST=1' } },
       }));
 
       const loaded = await storage.load();
@@ -71,7 +65,7 @@ describe('ClaudianSettingsStorage', () => {
 
       expect(loaded.userName).toBe('Ada');
       expect(written.userName).toBe('Ada');
-      expect(written.providerConfigs.claude.loadUserSettings).toBe(true);
+      expect(written.providerConfigs.omp.environmentVariables).toBe('OMP_TEST=1');
       expect(loaded).not.toHaveProperty('persistentExternalContextPaths');
       expect(written).not.toHaveProperty('persistentExternalContextPaths');
       expect(loaded).not.toHaveProperty('maxWarmAgentProcesses');
@@ -109,13 +103,13 @@ describe('ClaudianSettingsStorage', () => {
     it('should parse valid JSON and merge with defaults', async () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
-        model: 'claude-opus-4-5',
+        model: 'omp:anthropic/claude-opus-4-5',
         userName: 'TestUser',
       }));
 
       const result = await storage.load();
 
-      expect(result.model).toBe('claude-opus-4-5');
+      expect(result.model).toBe('omp:anthropic/claude-opus-4-5');
       expect(result.userName).toBe('TestUser');
       // Defaults should still be present for unspecified fields
       expect(result.effortLevel).toBe(DEFAULT_SETTINGS.effortLevel);
@@ -125,16 +119,16 @@ describe('ClaudianSettingsStorage', () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         lastSelectedChatModel: {
-          providerId: 'codex',
-          model: 'codex/gpt-5',
+          providerId: 'omp',
+          model: 'omp:anthropic/gpt-5',
         },
       }));
 
       const result = await storage.load();
 
       expect(result.lastSelectedChatModel).toEqual({
-        providerId: 'codex',
-        model: 'codex/gpt-5',
+        providerId: 'omp',
+        model: 'omp:anthropic/gpt-5',
       });
     });
 
@@ -154,7 +148,7 @@ describe('ClaudianSettingsStorage', () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         lastSelectedChatModel: {
-          providerId: 'codex',
+          providerId: 'omp',
           model: 42,
         },
       }));
@@ -168,11 +162,11 @@ describe('ClaudianSettingsStorage', () => {
 
     it.each([
       {
-        stored: { providerId: 'codex', model: 'codex/gpt-5', reasoning: 'low' },
-        expected: { providerId: 'codex', model: 'codex/gpt-5', reasoning: 'low' },
+        stored: { providerId: 'omp', model: 'omp:anthropic/gpt-5', reasoning: 'low' },
+        expected: { providerId: 'omp', model: 'omp:anthropic/gpt-5', reasoning: 'low' },
       },
-      { stored: { providerId: 'codex', model: 'codex/gpt-5', reasoning: 7 }, expected: { providerId: 'codex', model: 'codex/gpt-5' } },
-      { stored: { providerId: 'codex', model: 42 }, expected: null },
+      { stored: { providerId: 'omp', model: 'omp:anthropic/gpt-5', reasoning: 7 }, expected: { providerId: 'omp', model: 'omp:anthropic/gpt-5' } },
+      { stored: { providerId: 'omp', model: 42 }, expected: null },
       { stored: undefined, expected: null },
     ])('loads the inline edit default model $stored as $expected', async ({ stored, expected }) => {
       mockAdapter.exists.mockResolvedValue(true);
@@ -184,21 +178,21 @@ describe('ClaudianSettingsStorage', () => {
     it('migrates the live top-level model for the stored settings provider', async () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
-        settingsProvider: 'codex',
-        model: 'codex/gpt-5.7',
+        settingsProvider: 'omp',
+        model: 'omp:anthropic/gpt-5.7',
         savedProviderModel: {
-          codex: 'codex/gpt-5.6',
+          omp: 'omp:anthropic/gpt-5.6',
         },
         providerConfigs: {
-          codex: { enabled: true },
+          omp: { enabled: true },
         },
       }));
 
       const result = await storage.load();
 
       expect(result.lastSelectedChatModel).toEqual({
-        providerId: 'codex',
-        model: 'codex/gpt-5.7',
+        providerId: 'omp',
+        model: 'omp:anthropic/gpt-5.7',
       });
       expect(mockAdapter.write).toHaveBeenCalled();
     });
@@ -206,66 +200,51 @@ describe('ClaudianSettingsStorage', () => {
     it('uses the saved provider model when the legacy live projection is empty', async () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
-        settingsProvider: 'codex',
+        settingsProvider: 'omp',
         model: '',
         savedProviderModel: {
-          codex: 'codex/gpt-5.6',
+          omp: 'omp:anthropic/gpt-5.6',
         },
       }));
 
       const result = await storage.load();
 
       expect(result.lastSelectedChatModel).toEqual({
-        providerId: 'codex',
-        model: 'codex/gpt-5.6',
+        providerId: 'omp',
+        model: 'omp:anthropic/gpt-5.6',
       });
     });
 
     it('preserves a legacy seed for a disabled registered provider', async () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
-        settingsProvider: 'grok',
-        model: 'grok/kimi-coding',
+        settingsProvider: 'deepseek',
+        model: 'deepseek:native/seed',
         providerConfigs: {
-          grok: { enabled: false },
+          deepseek: { enabled: false },
         },
       }));
 
       const result = await storage.load();
 
       expect(result.lastSelectedChatModel).toEqual({
-        providerId: 'grok',
-        model: 'grok/kimi-coding',
+        providerId: 'deepseek',
+        model: 'deepseek:native/seed',
       });
     });
 
-    it('preserves a Claude environment-tier alias during legacy migration', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        settingsProvider: 'claude',
-        model: 'opus',
-      }));
-
-      const result = await storage.load();
-
-      expect(result.lastSelectedChatModel).toEqual({
-        providerId: 'claude',
-        model: 'opus',
-      });
-    });
-
-    it('uses Claude for an unknown legacy provider only when a top-level model exists', async () => {
+    it('uses the default chat provider for an unknown legacy provider only when a top-level model exists', async () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         settingsProvider: 'unknown-provider',
-        model: 'haiku',
+        model: 'omp:anthropic/haiku',
       }));
 
       const result = await storage.load();
 
       expect(result.lastSelectedChatModel).toEqual({
-        providerId: 'claude',
-        model: 'haiku',
+        providerId: 'omp',
+        model: 'omp:anthropic/haiku',
       });
     });
 
@@ -274,9 +253,9 @@ describe('ClaudianSettingsStorage', () => {
       mockAdapter.read.mockResolvedValue(JSON.stringify({ openInMainTab: true, claudeCliPath: '/retired', codexCliPath: '/retired', environmentVariables: 'ANTHROPIC_API_KEY=retired\nHTTP_PROXY=retired', hiddenSlashCommands: ['retired'] }));
       const result = await storage.load();
       expect(result.chatViewPlacement).toBe(DEFAULT_SETTINGS.chatViewPlacement);
-      expect(getClaudeProviderSettings(result).cliPath).toBe('');
-      expect(getCodexProviderSettings(result).cliPath).toBe('');
-      expect(getClaudeProviderSettings(result).environmentVariables).toBe('');
+      expect(getOmpProviderSettings(result).cliPath).toBe('');
+      expect(getDeepSeekProviderSettings(result).cliPath).toBe('');
+      expect(getOmpProviderSettings(result).environmentVariables).toBe('');
       expect(result.sharedEnvironmentVariables).toBe('');
       expect(result.hiddenCommands).toEqual([]);
     });
@@ -380,42 +359,42 @@ describe('ClaudianSettingsStorage', () => {
       expect(result.zenModePosition).toEqual(expected);
     });
 
-    it('normalizes claude provider CLI paths from loaded data', async () => {
+    it('normalizes omp provider CLI paths from loaded data', async () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         providerConfigs: {
-          claude: {
+          omp: {
             cliPathsByHost: {
-          'host-a': '/custom/path-a',
-          'host-b': '/custom/path-b',
-        }
-        }
+              'host-a': '/custom/path-a',
+              'host-b': '/custom/path-b',
+            },
+          },
         },
       }));
 
       const result = await storage.load();
 
-      expect(getClaudeProviderSettings(result).cliPathsByHost['host-a']).toBe('/custom/path-a');
-      expect(getClaudeProviderSettings(result).cliPathsByHost['host-b']).toBe('/custom/path-b');
+      expect(getOmpProviderSettings(result).cliPathsByHost['host-a']).toBe('/custom/path-a');
+      expect(getOmpProviderSettings(result).cliPathsByHost['host-b']).toBe('/custom/path-b');
     });
 
-    it('normalizes codex provider CLI paths from loaded data', async () => {
+    it('normalizes deepseek provider CLI paths from loaded data', async () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         providerConfigs: {
-          codex: {
+          deepseek: {
             cliPathsByHost: {
-          'host-a': '/custom/codex-a',
-          'host-b': '/custom/codex-b',
-        }
-        }
+              'host-a': '/custom/deepseek-a',
+              'host-b': '/custom/deepseek-b',
+            },
+          },
         },
       }));
 
       const result = await storage.load();
 
-      expect(getCodexProviderSettings(result).cliPathsByHost['host-a']).toBe('/custom/codex-a');
-      expect(getCodexProviderSettings(result).cliPathsByHost['host-b']).toBe('/custom/codex-b');
+      expect(getDeepSeekProviderSettings(result).cliPathsByHost['host-a']).toBe('/custom/deepseek-a');
+      expect(getDeepSeekProviderSettings(result).cliPathsByHost['host-b']).toBe('/custom/deepseek-b');
     });
 
     it('preserves hostname-scoped provider settings without assigning them to the current device', async () => {
@@ -425,82 +404,37 @@ describe('ClaudianSettingsStorage', () => {
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         lastSelectedChatModel: null,
         providerConfigs: {
-          claude: {
+          omp: {
             cliPathsByHost: {
-              'host-a': '/custom/claude-a',
-              'host-b': '/custom/claude-b',
+              'host-a': '/custom/omp-a',
+              'host-b': '/custom/omp-b',
             },
           },
-          codex: {
+          deepseek: {
             cliPathsByHost: {
-              'host-a': '/custom/codex-a',
-              'host-b': '/custom/codex-b',
-            },
-            installationMethodsByHost: {
-              'host-a': 'wsl',
-              'host-b': 'native-windows',
-            },
-            wslDistroOverridesByHost: {
-              'host-a': 'Ubuntu',
-              'host-b': 'Debian',
-            },
-          },
-          opencode: {
-            cliPathsByHost: {
-              'host-a': '/custom/opencode-a',
-              'host-b': '/custom/opencode-b',
-            },
-          },
-          pi: {
-            cliPathsByHost: {
-              'host-a': '/custom/pi-a',
-              'host-b': '/custom/pi-b',
+              'host-a': '/custom/deepseek-a',
+              'host-b': '/custom/deepseek-b',
             },
           },
         },
       }));
 
       const result = await storage.load();
-      const claudeSettings = getClaudeProviderSettings(result);
-      const codexSettings = getCodexProviderSettings(result);
-      const opencodeSettings = getOpencodeProviderSettings(result);
-      const piSettings = getPiProviderSettings(result);
-      const persistedOpencodeConfig = result.providerConfigs.opencode as Record<string, unknown>;
-      const persistedPiConfig = result.providerConfigs.pi as Record<string, unknown>;
+      const ompSettings = getOmpProviderSettings(result);
+      const deepseekSettings = getDeepSeekProviderSettings(result);
+      const persistedDeepSeekConfig = result.providerConfigs.deepseek as Record<string, unknown>;
 
-      expect(claudeSettings.cliPathsByHost).toEqual({
-        'host-a': '/custom/claude-a',
-        'host-b': '/custom/claude-b',
+      expect(ompSettings.cliPathsByHost).toEqual({
+        'host-a': '/custom/omp-a',
+        'host-b': '/custom/omp-b',
       });
-      expect(codexSettings.cliPathsByHost).toEqual({
-        'host-a': '/custom/codex-a',
-        'host-b': '/custom/codex-b',
+      expect(deepseekSettings.cliPathsByHost).toEqual({
+        'host-a': '/custom/deepseek-a',
+        'host-b': '/custom/deepseek-b',
       });
-      expect(codexSettings.installationMethod).toBe('native-windows');
-      expect(codexSettings.installationMethodsByHost).toEqual({
-        'host-a': 'wsl',
-        'host-b': 'native-windows',
-      });
-      expect(codexSettings.wslDistroOverride).toBe('');
-      expect(codexSettings.wslDistroOverridesByHost).toEqual({
-        'host-a': 'Ubuntu',
-        'host-b': 'Debian',
-      });
-      expect(opencodeSettings.cliPathsByHost).toEqual({
-        'host-a': '/custom/opencode-a',
-        'host-b': '/custom/opencode-b',
-      });
-      expect(piSettings.cliPathsByHost).toEqual({
-        'host-a': '/custom/pi-a',
-        'host-b': '/custom/pi-b',
-      });
-      expect(persistedOpencodeConfig.cliPathsByHost).toEqual({
-        'host-a': '/custom/opencode-a',
-        'host-b': '/custom/opencode-b',
-      });
-      expect(persistedPiConfig.cliPathsByHost).toEqual({
-        'host-a': '/custom/pi-a',
-        'host-b': '/custom/pi-b',
+      expect(persistedDeepSeekConfig.cliPathsByHost).toEqual({
+        'host-a': '/custom/deepseek-a',
+        'host-b': '/custom/deepseek-b',
       });
       expect(mockAdapter.write).toHaveBeenCalledTimes(1);
     });
@@ -513,249 +447,45 @@ describe('ClaudianSettingsStorage', () => {
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         lastSelectedChatModel: null,
         providerConfigs: {
-          claude: {
+          omp: {
             cliPathsByHost: {
-              'device:legacy': '/legacy/claude',
-              'device:other': '/other/claude',
+              'device:legacy': '/legacy/omp',
+              'device:other': '/other/omp',
             },
           },
-          codex: {
+          deepseek: {
             cliPathsByHost: {
-              'device:legacy': '/legacy/codex',
-              'device-portable': '/portable/codex',
-            },
-            installationMethodsByHost: {
-              'device:legacy': 'wsl',
+              'device:legacy': '/legacy/deepseek',
+              'device-portable': '/portable/deepseek',
             },
           },
         },
       }));
 
       const result = await storage.load();
-      const claudeSettings = getClaudeProviderSettings(result);
-      const codexSettings = getCodexProviderSettings(result);
+      const ompSettings = getOmpProviderSettings(result);
+      const deepseekSettings = getDeepSeekProviderSettings(result);
       const persisted = JSON.parse(mockAdapter.write.mock.calls[0][1]);
 
-      expect(claudeSettings.cliPathsByHost).toEqual({
-        'device-portable': '/legacy/claude',
-        'device:other': '/other/claude',
+      expect(ompSettings.cliPathsByHost).toEqual({
+        'device-portable': '/legacy/omp',
+        'device:other': '/other/omp',
       });
-      expect(codexSettings.cliPathsByHost).toEqual({
-        'device-portable': '/portable/codex',
+      expect(deepseekSettings.cliPathsByHost).toEqual({
+        'device-portable': '/portable/deepseek',
       });
-      expect(codexSettings.installationMethodsByHost).toEqual({
-        'device-portable': 'wsl',
-      });
-      expect(persisted.providerConfigs.claude.cliPathsByHost)
-        .toEqual(claudeSettings.cliPathsByHost);
-      expect(persisted.providerConfigs.codex.cliPathsByHost)
-        .toEqual(codexSettings.cliPathsByHost);
-    });
-
-    it('clears Codex Windows installation settings on non-Windows hosts during normalization', async () => {
-      Object.defineProperty(process, 'platform', { value: 'darwin' });
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        providerConfigs: {
-          codex: {
-            cliPathsByHost: {
-              'host-a': '/opt/homebrew/bin/codex',
-            },
-            installationMethodsByHost: {
-              'host-a': 'native-windows',
-              'host-b': 'wsl',
-            },
-            wslDistroOverridesByHost: {
-              'host-a': 'Ubuntu',
-              'host-b': 'Debian',
-            },
-          },
-        },
-      }));
-
-      const result = await storage.load();
-      const codexSettings = getCodexProviderSettings(result);
-      const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
-
-      expect(codexSettings.cliPathsByHost).toEqual({
-        'host-a': '/opt/homebrew/bin/codex',
-      });
-      expect(codexSettings.installationMethodsByHost).toEqual({
-        'host-b': 'wsl',
-      });
-      expect(codexSettings.wslDistroOverridesByHost).toEqual({
-        'host-b': 'Debian',
-      });
-      expect(writtenContent.providerConfigs.codex.installationMethodsByHost).toEqual({
-        'host-b': 'wsl',
-      });
-      expect(writtenContent.providerConfigs.codex.wslDistroOverridesByHost).toEqual({
-        'host-b': 'Debian',
-      });
-    });
-
-    it('preserves Grok hostname-scoped CLI and catalog maps', async () => {
-      mockGetHostnameKey.mockReturnValue('device:current');
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        providerConfigs: {
-          grok: {
-            catalogsByHost: {
-              'host-a': {
-                defaultModelId: 'grok-4.5',
-                fingerprint: 'current',
-                models: [{ displayName: 'Grok 4.5', rawId: 'grok-4.5' }],
-                refreshedAt: 1,
-              },
-              'host-b': {
-                defaultModelId: null,
-                fingerprint: 'other',
-                models: [],
-                refreshedAt: 2,
-              },
-            },
-            cliPathsByHost: {
-              'host-a': '/custom/grok-a',
-              'host-b': '/custom/grok-b',
-            },
-            enabled: true,
-          },
-        },
-      }));
-
-      const result = await storage.load();
-      const grokSettings = getGrokProviderSettings(result);
-      const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
-
-      expect(grokSettings.cliPathsByHost).toEqual({
-        'host-a': '/custom/grok-a',
-        'host-b': '/custom/grok-b',
-      });
-      expect(grokSettings.catalogsByHost).toEqual(expect.objectContaining({
-        'host-a': expect.objectContaining({ fingerprint: 'current' }),
-        'host-b': expect.objectContaining({ fingerprint: 'other' }),
-      }));
-      expect(writtenContent.providerConfigs.grok.cliPathsByHost).toEqual({
-        'host-a': '/custom/grok-a',
-        'host-b': '/custom/grok-b',
-      });
-      expect(writtenContent.providerConfigs.grok.selectedModelsByHost).toEqual(expect.objectContaining({
-        'host-a': expect.objectContaining({ fingerprint: 'current' }),
-        'host-b': expect.objectContaining({ fingerprint: 'other' }),
-      }));
-    });
-
-    it('ignores retired Codex installation scalars without rewriting them', async () => {
-      Object.defineProperty(process, 'platform', { value: 'darwin' });
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        providerConfigs: {
-          codex: {
-            enabled: true,
-            installationMethod: 'wsl',
-            wslDistroOverride: 'Ubuntu',
-            cliPathsByHost: {
-              'host-a': '/opt/homebrew/bin/codex',
-            },
-          },
-        },
-      }));
-
-      const result = await storage.load();
-      const codexConfig = result.providerConfigs.codex as Record<string, unknown>;
-      const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
-
-      expect(getCodexProviderSettings(result).installationMethod).toBe('native-windows');
-      expect(getCodexProviderSettings(result).wslDistroOverride).toBe('');
-      expect(codexConfig).toHaveProperty('installationMethod');
-      expect(codexConfig).toHaveProperty('wslDistroOverride');
-      expect(writtenContent.providerConfigs.codex).toHaveProperty('installationMethod');
-      expect(writtenContent.providerConfigs.codex).toHaveProperty('wslDistroOverride');
-    });
-
-    it('defaults Codex installation method and WSL distro override when missing', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({}));
-
-      const result = await storage.load();
-
-      expect(getCodexProviderSettings(result).installationMethod).toBe('native-windows');
-      expect(getCodexProviderSettings(result).wslDistroOverride).toBe('');
-    });
-
-    it('loads a persisted Codex model catalog with hand-picked model IDs', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        providerConfigs: {
-          codex: {
-            enabled: true,
-            discoveredModels: TEST_CODEX_CATALOG,
-            visibleModels: ['gpt-5.4-mini'],
-          },
-        },
-      }));
-
-      const result = await storage.load();
-      const codexSettings = getCodexProviderSettings(result);
-
-      expect(codexSettings.discoveredModels).toEqual(TEST_CODEX_CATALOG);
-      expect(codexSettings.visibleModels).toEqual(['gpt-5.4-mini']);
-    });
-
-    it('normalizes invalid Codex installation fields from provider config', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        providerConfigs: {
-          codex: {
-            installationMethod: 'auto',
-            wslDistroOverride: 42,
-          },
-        },
-      }));
-
-      const result = await storage.load();
-
-      expect(getCodexProviderSettings(result).installationMethod).toBe('native-windows');
-      expect(getCodexProviderSettings(result).wslDistroOverride).toBe('');
-    });
-
-    it('does not inherit another host WSL selection from host-scoped provider config', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        providerConfigs: {
-          codex: {
-            installationMethodsByHost: {
-              'host-b': 'wsl',
-            },
-            wslDistroOverridesByHost: {
-              'host-b': 'Ubuntu',
-            },
-          },
-        },
-      }));
-
-      const result = await storage.load();
-
-      expect(getCodexProviderSettings(result).installationMethod).toBe('native-windows');
-      expect(getCodexProviderSettings(result).wslDistroOverride).toBe('');
-    });
-
-    it('leaves retired Claude 1M toggles uninterpreted', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({ providerConfigs: { claude: {
-        enableOpus1M: true, enableSonnet1M: true,
-      } } }));
-      const result = await storage.load();
-      expect(result.providerConfigs.claude).toMatchObject({ enableOpus1M: true, enableSonnet1M: true });
+      expect(persisted.providerConfigs.omp.cliPathsByHost)
+        .toEqual(ompSettings.cliPathsByHost);
+      expect(persisted.providerConfigs.deepseek.cliPathsByHost)
+        .toEqual(deepseekSettings.cliPathsByHost);
     });
 
     it('merges per-provider hidden commands into one global list and retires the old key', async () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         hiddenProviderCommands: {
-          claude: ['commit', '/Review'],
-          codex: ['$commit'],
-          pi: ['skill:review', 'review'],
+          omp: ['commit', '/Review'],
+          deepseek: ['skill:review', 'review'],
         },
         hiddenSlashCommands: ['legacy'],
       }));
@@ -785,7 +515,7 @@ describe('ClaudianSettingsStorage', () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         hiddenCommands: ['kept', ' /kept ', ''],
-        hiddenProviderCommands: { claude: ['stale'] },
+        hiddenProviderCommands: { omp: ['stale'] },
       }));
 
       const result = await storage.load();
@@ -827,13 +557,15 @@ describe('ClaudianSettingsStorage', () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         providerConfigs: {
-          claude: {
+          omp: {
+            visibleModels: ['omp:anthropic/custom-model'],
+            discoveredModels: [{ id: 'custom-model', label: 'Custom', provider: 'anthropic', input: ['text'] }],
             modelAliases: {
-          ' custom-model ': '  Friendly model  ',
-          empty: '   ',
-          ignored: 123,
-        }
-        }
+              ' omp:anthropic/custom-model ': '  Friendly model  ',
+              empty: '   ',
+              ignored: 123,
+            },
+          },
         },
         envSnippets: [{
           id: 'snippet-1',
@@ -851,14 +583,16 @@ describe('ClaudianSettingsStorage', () => {
       const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
 
       expect(result).not.toHaveProperty('customModelAliases');
-      expect(result.providerConfigs.claude?.modelAliases).toEqual({
-        'custom-model': 'Friendly model',
+      expect(result.providerConfigs.omp?.modelAliases).toEqual({
+        'omp:anthropic/custom-model': 'Friendly model',
       });
       expect(result.envSnippets[0].modelAliases).toEqual({
         'custom-model': 'Snippet model',
       });
-      // The alias remains in runtime discovery, but this model is not selected for persistence.
-      expect(writtenContent.providerConfigs.claude.modelAliases).toEqual({});
+      // Only the selected model's alias persists, and it is normalized.
+      expect(writtenContent.providerConfigs.omp.modelAliases).toEqual({
+        'omp:anthropic/custom-model': 'Friendly model',
+      });
       expect(writtenContent.envSnippets[0].modelAliases).toEqual({
         'custom-model': 'Snippet model',
       });
@@ -883,7 +617,7 @@ describe('ClaudianSettingsStorage', () => {
     it('should write settings to file', async () => {
       const settings = {
         ...DEFAULT_SETTINGS,
-        model: 'claude-opus-4-5' as const,
+        model: 'omp:anthropic/claude-opus-4-5',
       };
 
       await storage.save(settings);
@@ -893,22 +627,22 @@ describe('ClaudianSettingsStorage', () => {
         expect.any(String)
       );
       const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
-      expect(writtenContent.model).toBe('claude-opus-4-5');
-      expect(writtenContent.providerConfigs.codex).not.toHaveProperty('installationMethod');
-      expect(writtenContent.providerConfigs.codex.installationMethodsByHost).toEqual({});
-      expect(writtenContent.providerConfigs.codex).not.toHaveProperty('wslDistroOverride');
-      expect(writtenContent.providerConfigs.codex.wslDistroOverridesByHost).toEqual({});
+      expect(writtenContent.model).toBe('omp:anthropic/claude-opus-4-5');
+      expect(writtenContent.providerConfigs.omp).not.toHaveProperty('discoveredModels');
+      expect(writtenContent.providerConfigs.omp.selectedModels).toEqual([]);
+      expect(writtenContent.providerConfigs.deepseek).not.toHaveProperty('discoveredModels');
     });
 
-    it('persists only selected Codex metadata with hand-picked model IDs', async () => {
+    it('persists only selected omp metadata with hand-picked model IDs', async () => {
+      const catalog = ompCatalogFixture(['anthropic/gpt-5.5', 'anthropic/gpt-5.4-mini']);
       const settings = {
         ...DEFAULT_SETTINGS,
         providerConfigs: {
           ...DEFAULT_SETTINGS.providerConfigs,
-          codex: {
-            ...DEFAULT_SETTINGS.providerConfigs.codex,
-            discoveredModels: TEST_CODEX_CATALOG,
-            visibleModels: ['gpt-5.4-mini'],
+          omp: {
+            ...DEFAULT_SETTINGS.providerConfigs.omp,
+            ...catalog,
+            visibleModels: ['omp:anthropic/gpt-5.4-mini'],
           },
         },
       };
@@ -916,23 +650,25 @@ describe('ClaudianSettingsStorage', () => {
       await storage.save(settings);
 
       const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
-      expect(writtenContent.providerConfigs.codex.selectedModels).toEqual([TEST_CODEX_CATALOG[1]]);
-      expect(writtenContent.providerConfigs.codex.visibleModels).toEqual(['gpt-5.4-mini']);
-      expect(getCodexProviderSettings(settings).discoveredModels).toEqual(TEST_CODEX_CATALOG);
+      const decoded = getOmpProviderSettings(settings).discoveredModels;
+      expect(writtenContent.providerConfigs.omp.selectedModels).toEqual([decoded[1]]);
+      expect(writtenContent.providerConfigs.omp.visibleModels).toEqual(['omp:anthropic/gpt-5.4-mini']);
+      expect(decoded).toHaveLength(2);
     });
 
-    it('preserves Codex model aliases and catalog across restart', async () => {
+    it('preserves omp model aliases and catalog across restart', async () => {
+      const catalog = ompCatalogFixture(['anthropic/gpt-5.5', 'anthropic/gpt-5.4-mini']);
       const settings = {
         ...DEFAULT_SETTINGS,
         providerConfigs: {
           ...DEFAULT_SETTINGS.providerConfigs,
-          codex: {
-            ...DEFAULT_SETTINGS.providerConfigs.codex,
-            discoveredModels: TEST_CODEX_CATALOG,
+          omp: {
+            ...DEFAULT_SETTINGS.providerConfigs.omp,
+            ...catalog,
             modelAliases: {
-              'gpt-5.5': 'Primary',
+              'omp:anthropic/gpt-5.5': 'Primary',
             },
-            visibleModels: null,
+            visibleModels: catalog.visibleModels,
           },
         },
       };
@@ -940,22 +676,23 @@ describe('ClaudianSettingsStorage', () => {
       await storage.save(settings);
       const persistedContent = mockAdapter.write.mock.calls[0][1];
       const persistedSettings = JSON.parse(persistedContent);
-      expect(persistedSettings.providerConfigs.codex.selectedModels).toEqual(TEST_CODEX_CATALOG);
-      expect(persistedSettings.providerConfigs.codex.modelAliases).toEqual({
-        'gpt-5.5': 'Primary',
+      const decoded = getOmpProviderSettings(settings).discoveredModels;
+      expect(persistedSettings.providerConfigs.omp.selectedModels).toEqual(decoded);
+      expect(persistedSettings.providerConfigs.omp.modelAliases).toEqual({
+        'omp:anthropic/gpt-5.5': 'Primary',
       });
 
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(persistedContent);
       const reloaded = await storage.load();
 
-      expect(getCodexProviderSettings(reloaded).modelAliases).toEqual({
-        'gpt-5.5': 'Primary',
+      expect(getOmpProviderSettings(reloaded).modelAliases).toEqual({
+        'omp:anthropic/gpt-5.5': 'Primary',
       });
-      expect(getCodexProviderSettings(reloaded).discoveredModels).toEqual(TEST_CODEX_CATALOG);
-      updateCodexProviderSettings(reloaded, { discoveredModels: TEST_CODEX_CATALOG as any });
-      expect(getCodexProviderSettings(reloaded).modelAliases).toEqual({
-        'gpt-5.5': 'Primary',
+      expect(getOmpProviderSettings(reloaded).discoveredModels).toEqual(decoded);
+      getOmpProviderSettings(reloaded);
+      expect(getOmpProviderSettings(reloaded).modelAliases).toEqual({
+        'omp:anthropic/gpt-5.5': 'Primary',
       });
     });
 

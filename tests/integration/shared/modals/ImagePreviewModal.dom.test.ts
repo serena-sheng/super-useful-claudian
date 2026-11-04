@@ -1,11 +1,11 @@
 /** @jest-environment jsdom */
 import '@/providers';
 
-import { claudeCatalogFixture } from '@test/helpers/claudeModels';
 import { createClaudianView } from '@test/helpers/features/chat/ClaudianViewHarness';
 import { createProjectsFake } from '@test/helpers/features/chat/ProjectsFake';
 import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
 import { FakeSideBackend, type FakeSideSession } from '@test/helpers/features/chat/SideChatSessionHarness';
+import { ompCatalogFixture } from '@test/helpers/ompModels';
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, waitFor, within } from '@testing-library/dom';
 import { axe } from 'jest-axe';
@@ -65,12 +65,12 @@ async function createView() {
     model: 'claude-sonnet-4-5', effortLevel: 'high', permissionMode: 'manual',
     enableAutoTitleGeneration: false, excludedTags: [], mediaFolder: '', systemPrompt: '', userName: '',
     keyboardNavigation: { scrollUpKey: 'w', scrollDownKey: 's', focusInputKey: 'i' },
-    providerConfigs: { claude: {
-      ...claudeCatalogFixture(['claude-sonnet-4-5'], ['low', 'high']), promptSuggestions: true,
+    providerConfigs: { omp: {
+      ...ompCatalogFixture(['claude-sonnet-4-5'], ['low', 'high']), promptSuggestions: true,
     } },
   } as unknown as ClaudianSettings;
   const conversation = {
-    id: 'conversation-1', providerId: 'claude', selectedModel: 'claude-sonnet-4-5',
+    id: 'conversation-1', providerId: 'omp', selectedModel: 'claude-sonnet-4-5',
     sessionId: 'main-session', messages: [], title: 'Existing conversation',
     createdAt: testDate().getTime(), lastActivityAt: testDate().getTime(),
   } as unknown as Conversation;
@@ -108,7 +108,7 @@ async function createView() {
     openConversation: async () => {}, startNewConversation: async () => {},
   });
   tab.hydrationState = 'ready';
-  await tab.executionCoordinator.bindConversation({ conversationId: conversation.id, providerId: 'claude' });
+  await tab.executionCoordinator.bindConversation({ conversationId: conversation.id, providerId: 'omp' });
   await tab.executionCoordinator.prepare();
   jest.spyOn(tab.dom.messagesEl, 'getClientRects').mockImplementation(() =>
     (tab.dom.contentEl.classList.contains('claudian-hidden') ? [] : [{}]) as unknown as DOMRectList);

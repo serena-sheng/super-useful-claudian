@@ -227,26 +227,7 @@
     "permissionMode": {
       "label": "権限モード",
       "current": "権限モード：{mode}",
-      "changeFailed": "権限モードの変更に失敗しました",
-      "claude": {
-        "auto": "自動",
-        "manual": "手動",
-        "acceptEdits": "編集を許可",
-        "yolo": "YOLO",
-        "autoDesc": "Claude が権限を判断",
-        "manualDesc": "変更前に毎回確認",
-        "acceptEditsDesc": "すべてのファイル編集を自動許可",
-        "yoloDesc": "確認せずすべての権限を許可"
-      },
-      "codex": {
-        "autoReview": "承認を任せる",
-        "normal": "承認を求める",
-        "yolo": "フルアクセス",
-        "autoReviewDesc": "追加アクセスを自動審査。",
-        "readOnlyDesc": "編集やインターネット利用前に確認。",
-        "normalDesc": "追加アクセス前に確認。",
-        "yoloDesc": "ファイルとインターネットへの無制限アクセス。"
-      }
+      "changeFailed": "権限モードの変更に失敗しました"
     },
     "thinking": {
       "active": "思考中 {seconds}秒…",
@@ -317,10 +298,6 @@
       "permissionDenied": "{message}（アクセスが拒否されました）",
       "preview": "画像プレビュー：{name}",
       "closePreview": "画像プレビューを閉じる"
-    },
-    "pi": {
-      "extension": "Pi 拡張機能",
-      "notification": "Pi 拡張機能の通知。"
     },
     "sessionMessage": {
       "undelivered": "{senders} からのメッセージを配信できませんでした。",
@@ -542,10 +519,6 @@
       "name": "ユーザーの Claude Code 設定を読み込む",
       "desc": "~/.claude からユーザーレベルの Claude Code 設定（settings.json、スキル、コマンド、エージェント、プラグイン）を読み込みます。無効にすると、Vault レベルの設定のみ利用できます。有効にすると、ユーザーの許可ルールがセキュリティモードをバイパスする可能性があります。"
     },
-    "codexSandbox": {
-      "name": "サンドボックス",
-      "desc": "承認を任せる と 承認を求める モードでのファイルアクセスです。読み取り専用では編集のたびに確認します。フルアクセス では無視されます。"
-    },
     "environment": "環境",
     "sharedEnvironment": {
       "name": "共有環境",
@@ -709,72 +682,6 @@
       "loadingCatalog": "{provider} モデルを読み込んでいます…",
       "stale": "{provider} のモデルカタログが古くなっています。「検出」をクリックして更新してください。"
     },
-    "claude": {
-      "promptSuggestions": {
-        "name": "プロンプトの提案",
-        "desc": "空の入力欄に Claude が予測した次のプロンプトを表示します。提案ごとに各ターン後に追加の Claude リクエストが発生し、使用量の上限を早く消費する可能性があります。"
-      },
-      "configuration": "構成",
-      "responseStyle": {
-        "name": "応答スタイル",
-        "desc": "返信に使う Claude Code の出力スタイルです（カスタムスタイルを含む）。「Claude Code の設定」は Claude Code の構成に従います。モデルの更新時またはチャット開始時に一覧が更新されます。",
-        "default": "デフォルト",
-        "inherit": "Claude Code の設定"
-      }
-    },
-    "codex": {
-      "installationMethod": {
-        "name": "インストール方式",
-        "desc": "Windows で Claudian が Codex を起動する方法。ネイティブ Windows は Windows 実行ファイルパスを使い、WSL は選択したディストリビューション内で Linux CLI を起動します。",
-        "nativeWindows": "ネイティブ Windows",
-        "wsl": "WSL"
-      },
-      "cliPath": {
-        "name": "Codex CLI パス",
-        "validation": {
-          "wslWindowsPath": "WSL モードでは Windows 実行ファイルパスではなく、Linux コマンドまたは Linux 絶対パスが必要です。"
-        }
-      },
-      "wslDistroOverride": {
-        "name": "WSL ディストリビューション上書き",
-        "desc": "任意の詳細上書き。空欄の場合、可能なら WSL ワークスペースパスから推測し、それ以外は既定の WSL ディストリビューションを使用します。"
-      },
-      "safeMode": {
-        "workspaceWrite": "ワークスペース書き込み",
-        "readOnly": "読み取り専用"
-      },
-      "responseStyle": {
-        "name": "応答スタイル",
-        "desc": "対応モデルでの Codex の話し方を選択します。",
-        "pragmatic": "実用的",
-        "friendly": "フレンドリー",
-        "neutral": "ニュートラル"
-      },
-      "responseVerbosity": {
-        "name": "回答の詳しさ",
-        "desc": "対応モデルの回答の詳しさを選択します。デフォルトでは Codex の設定を使用します。",
-        "default": "デフォルト",
-        "low": "低",
-        "medium": "中",
-        "high": "高"
-      },
-      "reasoningSummary": {
-        "name": "推論サマリー",
-        "desc": "思考ブロックにモデルの推論プロセスのサマリーを表示します。",
-        "auto": "自動",
-        "concise": "簡潔",
-        "detailed": "詳細",
-        "off": "オフ"
-      },
-      "ultraEffort": {
-        "name": "Ultra 推論レベルを有効化",
-        "desc": "Ultra をサポートする Codex モデルの推論レベル選択に表示します。Ultra は最大限の推論とタスクの自動委任を使用します。"
-      },
-      "environment": {
-        "name": "Codex 環境",
-        "desc": "Codex が所有するランタイム変数のみ。OPENAI_* と CODEX_* 設定に使用します。Codex の自動検出に補助が必要な場合は、このプロバイダー環境ではなく共有 PATH にインストールディレクトリを追加してください。"
-      }
-    },
     "agentSkills": {
       "sharedExpectation": "対応プロバイダー向けに .agents/skills/ の共有スキルを管理します。",
       "noSkills": "共有スキルは設定されていません。+ をクリックして作成してください。",
@@ -810,32 +717,6 @@
         "title": "共有スキルを削除",
         "description": "スクリプト、参照資料、アセットを含むスキルフォルダー全体がゴミ箱に移動されます。",
         "confirm": "ゴミ箱に移動"
-      }
-    },
-    "opencode": {
-      "emptyModels": "OpenCode サーバーから、この保管庫で有効なモデルが返されませんでした。保管庫の .opencode/opencode.json と OpenCode ログを確認してください（opencode debug paths で場所を確認できます）。OpenCode v2 では、設定された V1 プラグインに互換性がない場合があります。保管庫で opencode models --standalone を実行して比較し、再度検出してください。",
-      "environment": {
-        "name": "OpenCode 環境変数",
-        "desc": "OpenCode に渡す追加の環境変数。"
-      },
-      "migrationNotice": {
-        "text": "Claudian は OpenCode v2 に対応しました。OpenCode v1 のサポートは 2026年10月30日に終了します。",
-        "link": "OpenCode v2 に移行"
-      }
-    },
-    "pi": {
-      "environment": {
-        "name": "Pi 環境変数",
-        "desc": "Pi にのみ渡す環境変数。"
-      },
-      "models": {
-        "desc": "Claudian は Pi の enabledModels とは別に独自のモデル一覧を保持します。Discover は Pi が現在の環境で認証できるすべてのモデルを、Pi が呼び出すプロバイダールートごとに表示します。ルートによって認証情報と課金が決まります。"
-      }
-    },
-    "grok": {
-      "environment": {
-        "name": "Grok Build 環境変数",
-        "desc": "Grok Build にのみ渡す環境変数。カスタムモデルのシークレットはこのプロバイダーのスコープ内に留まり、ネイティブ設定からは env_key で参照されます。"
       }
     },
     "deepseek": {

@@ -7,10 +7,9 @@ import suites from './testSuites.cjs';
 
 const fullSelection = {
   testFiles: null, scriptTests: null, crossPlatformTests: null,
-  crossPlatform: true, piWindows: true,
+  crossPlatform: true,
 };
 const docsTest = 'tests/unit/docs/Documentation.test.ts';
-const piTest = 'tests/integration/providers/pi/runtime/PiSubprocess.windows.test.ts';
 const isDocumentation = file => file.endsWith('.md') || file.startsWith('docs/');
 const isJestTest = file => /^tests\/(?:unit|integration)\/.*\.test\.ts$/.test(file);
 const isGraphInput = file => /^(?:src|tests)\/.*\.(?:[cm]?[jt]sx?|json)$/.test(file);
@@ -26,7 +25,7 @@ const styleSuites = (existsSync(styleSuiteDirectory) ? readdirSync(styleSuiteDir
 
 // These consumers read files through fs rather than imports, so Jest cannot find their edges.
 const fileConsumers = [
-  [/^(?:tests\/fixtures\/providers\/models\/|src\/providers\/(?:grok|opencode)\/(?:settings|config|models|discoveryState|internal\/compareCollections)\.ts$|src\/core\/(?:device\/InstallationKey\.ts|providers\/(?:providerConfig\.ts|settings\/|models\/)))/, ['tests/integration/app/settings/ProviderModelDictionaryPersistence.test.ts']],
+  [/^(?:tests\/fixtures\/providers\/models\/|src\/core\/(?:device\/InstallationKey\.ts|providers\/(?:providerConfig\.ts|settings\/|models\/)))/, ['tests/integration/app/settings/ProviderModelDictionaryPersistence.test.ts']],
   [/^src\/i18n\/locales\/.*\.json$/, ['tests/integration/build/dependency-envelope.test.ts']],
   [/^src\/style\//, [
     ...styleSuites,
@@ -34,24 +33,6 @@ const fileConsumers = [
     'tests/unit/features/chat/rendering/MessageRenderer.codeFences.dom.test.ts',
   ]],
   [/^tests\/fixtures\/providers\/deepseek\/runtime\//, ['tests/integration/providers/deepseek/runtime/DeepSeekHostProcess.test.ts']],
-  [/^tests\/fixtures\/providers\/grok\/history\//, [
-    'tests/unit/providers/grok/history/GrokConversationHistoryService.test.ts',
-    'tests/unit/providers/grok/history/GrokHistoryStore.test.ts',
-  ]],
-  [/^tests\/fixtures\/providers\/grok\/runtime\/models-list\.json$/, [
-    'tests/integration/providers/grok/runtime/GrokModels.test.ts',
-    'tests/integration/providers/grok/runtime/GrokModelDiscoveryService.test.ts',
-  ]],
-  [/^tests\/fixtures\/providers\/grok\/runtime\/models-list-byok\.json$/, [
-    'tests/integration/providers/grok/runtime/GrokModels.test.ts',
-    'tests/integration/providers/grok/runtime/GrokModelDiscoveryService.test.ts',
-  ]],
-  [/^tests\/fixtures\/providers\/grok\/runtime\/turn-completed\.json$/, [
-    'tests/unit/providers/grok/execution/GrokExecutionBackend.test.ts',
-  ]],
-  [/^tests\/fixtures\/providers\/codex\/history\/codex-session-(?:persisted-tools|agent-lifecycle|websearch-persisted)\.jsonl$/, [
-    'tests/unit/providers/codex/history/CodexHistoryStore.test.ts',
-  ]],
   [/^src\/style\/base\/visibility\.css$/, ['tests/integration/features/chat/composer/PromptHistoryNavigation.dom.test.ts']],
 ];
 const scriptConsumers = new Map(suites.scriptTests.flatMap(file => [
@@ -95,12 +76,10 @@ export function selectCiTests({ changes, relatedTests, eventName }) {
   }
   const testFiles = [...files];
   const crossPlatformTests = suites.crossPlatformTests.filter(file => files.has(file));
-  const piWindows = files.has(piTest);
   return {
     testFiles, scriptTests: [...scripts], crossPlatformTests,
-    crossPlatform: crossPlatformTests.length > 0 || piWindows
+    crossPlatform: crossPlatformTests.length > 0
       || scripts.has('scripts/ciTestSelection.test.mjs') || scripts.has('scripts/run-tests.test.mjs'),
-    piWindows,
   };
 }
 
@@ -150,7 +129,6 @@ function main() {
     `script-tests=${JSON.stringify(selection.scriptTests)}`,
     `cross-platform-tests=${JSON.stringify(selection.crossPlatformTests)}`,
     `cross-platform=${selection.crossPlatform}`,
-    `pi-windows=${selection.piWindows}`,
     `has-tests=${selection.testFiles === null || selection.testFiles.length > 0
       || selection.scriptTests === null || selection.scriptTests.length > 0}`,
   ].join('\n');

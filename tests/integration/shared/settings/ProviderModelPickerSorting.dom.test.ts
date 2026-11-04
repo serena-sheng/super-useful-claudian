@@ -10,8 +10,8 @@ import { fireEvent, waitFor, within } from '@testing-library/dom';
 import { SettingsCoordinator } from '@/app/settings/SettingsCoordinator';
 import { createProviderRuntimeHost } from '@/composition/ClaudianProviderHost';
 import type { ProviderHost } from '@/core/providers/ProviderHost';
-import { createCodexModels } from '@/providers/codex/runtime/CodexModels';
-import { getCodexProviderSettings } from '@/providers/codex/settings';
+import { createDeepSeekModels } from '@/providers/deepseek/runtime/DeepSeekModels';
+import { getDeepSeekProviderSettings } from '@/providers/deepseek/settings';
 import { renderProviderModelsSection } from '@/shared/settings/ProviderModelsSection';
 
 jest.mock('obsidian', () => jest.requireActual('../../../helpers/ObsidianSettingsDOM'));
@@ -43,12 +43,12 @@ function installRowLayout(): () => void {
 
 async function setup() {
   globalThis.structuredClone ??= value => deserialize(serialize(value));
+  const encoded = (id: string) => `deepseek:native/${id}`;
   const model = (id: string, name: string) => ({
-    model: id, displayName: name, description: '',
-    supportedReasoningEfforts: [{ value: 'high', description: 'High' }], defaultReasoningEffort: 'high',
+    provider: 'native', id, label: name, reasoning: [{ id: 'high', name: 'High' }],
   });
-  const settings = { providerConfigs: { codex: {
-    enabled: true, visibleModels: ['alpha', 'beta', 'gamma'], modelAliases: {},
+  const settings = { providerConfigs: { deepseek: {
+    enabled: true, visibleModels: [encoded('alpha'), encoded('beta'), encoded('gamma')], modelAliases: {},
     discoveredModels: [model('alpha', 'Alpha'), model('beta', 'Beta'), model('gamma', 'Gamma')],
   } } };
   const coordinator = new SettingsCoordinator(settings, async () => {});
@@ -56,14 +56,17 @@ async function setup() {
   const host = {
     settings, mutateSettings: coordinator.mutate.bind(coordinator), notifyProviderChatOptionsChanged: notify,
   } as unknown as ProviderHost;
-  const catalog = createCodexModels(
-    createProviderRuntimeHost(host, coordinator, 'codex'),
-    { refresh: async () => ({ kind: 'skipped', models: [], refreshed: false }) },
+  const catalog = createDeepSeekModels(
+    createProviderRuntimeHost(host, coordinator, 'deepseek'),
+    async () => ({ groups: [{ id: 'native', models: [
+      { id: 'alpha', name: 'Alpha' }, { id: 'beta', name: 'Beta' }, { id: 'gamma', name: 'Gamma' },
+    ] }] }),
   );
   await catalog.refresh();
+  notify.mockClear();
   const container = document.body.createDiv();
-  const picker = renderProviderModelsSection(container, 'codex', 'Codex', catalog);
-  const row = (id: string) => container.querySelector<HTMLElement>(`[data-model-id="${id}"]`)!;
+  const picker = renderProviderModelsSection(container, 'deepseek', 'DeepSeek Harness', catalog);
+  const row = (id: string) => container.querySelector<HTMLElement>(`[data-model-id="${encoded(id)}"]`)!;
   const rowOrder = () => [...container.querySelectorAll('[data-model-id]')].map(el => el.getAttribute('data-model-id'));
   const press = (id: string, el: Element = row(id).querySelector('.claudian-provider-model-picker-selected-name')!) => {
     const startY = row(id).getBoundingClientRect().top + ROW_HEIGHT / 2;
@@ -72,9 +75,10 @@ async function setup() {
   };
   const moveTo = (clientY: number) => firePointer('pointerMove', document, clientY);
   const release = (clientY: number) => firePointer('pointerUp', document, clientY);
-  const visibleModels = () => getCodexProviderSettings(settings).visibleModels;
+  const visibleModels = () => getDeepSeekProviderSettings(settings).visibleModels;
+  const ids = (...values: string[]) => values.map(encoded);
   return {
-    container, moveTo, notify, picker, press, release, row, rowOrder, visibleModels,
+    container, ids, moveTo, notify, picker, press, release, row, rowOrder, visibleModels,
     dispose: async () => { picker.dispose(); await catalog.dispose(); },
   };
 }
@@ -110,8 +114,8 @@ it('lifts a selected model and slides the others aside, saving its slot on relea
     expect(lifted.isConnected).toBe(true);
 
     h.release(startY + 40);
-    await waitFor(() => expect(h.visibleModels()).toEqual(['beta', 'alpha', 'gamma']));
-    await waitFor(() => expect(h.rowOrder()).toEqual(['beta', 'alpha', 'gamma']));
+    await waitFor(() => expect(h.visibleModels()).toEqual(h.ids('beta', 'alpha', 'gamma')));
+    await waitFor(() => expect(h.rowOrder()).toEqual(h.ids('beta', 'alpha', 'gamma')));
     expect(lifted.isConnected).toBe(false);
     expect(h.row('alpha').style.transform).toBe('');
   } finally {
@@ -125,13 +129,13 @@ it('moves a selected model to either end of the list', async () => {
     h.press('gamma');
     h.moveTo(0);
     h.release(0);
-    await waitFor(() => expect(h.visibleModels()).toEqual(['gamma', 'alpha', 'beta']));
+    await waitFor(() => expect(h.visibleModels()).toEqual(h.ids('gamma', 'alpha', 'beta')));
 
-    await waitFor(() => expect(h.rowOrder()).toEqual(['gamma', 'alpha', 'beta']));
+    await waitFor(() => expect(h.rowOrder()).toEqual(h.ids('gamma', 'alpha', 'beta')));
     h.press('gamma');
     h.moveTo(1000);
     h.release(1000);
-    await waitFor(() => expect(h.visibleModels()).toEqual(['alpha', 'beta', 'gamma']));
+    await waitFor(() => expect(h.visibleModels()).toEqual(h.ids('alpha', 'beta', 'gamma')));
   } finally {
     await h.dispose();
   }
@@ -149,7 +153,7 @@ it('keeps a lifted model under the pointer while the settings pane scrolls', asy
     expect(h.row('gamma').style.transform).toBe(`translateY(-${ROW_HEIGHT + ROW_GAP}px)`);
 
     h.release(startY + 40);
-    await waitFor(() => expect(h.visibleModels()).toEqual(['beta', 'gamma', 'alpha']));
+    await waitFor(() => expect(h.visibleModels()).toEqual(h.ids('beta', 'gamma', 'alpha')));
   } finally {
     await h.dispose();
   }
@@ -160,7 +164,7 @@ it('leaves the alias field and remove button to their own pointer behavior', asy
   try {
     const rowView = within(h.row('beta'));
     for (const control of [
-      rowView.getByRole('textbox', { name: 'Alias for Beta' }),
+      rowView.getByRole('textbox', { name: 'Alias for native/Beta' }),
       rowView.getByRole('button', { name: /Remove/ }),
     ]) {
       const startY = h.press('beta', control);
@@ -169,7 +173,7 @@ it('leaves the alias field and remove button to their own pointer behavior', asy
       h.release(startY + 60);
     }
     // The reorder handle still lifts the row.
-    const startY = h.press('beta', rowView.getByRole('button', { name: /Reorder Beta/ }));
+    const startY = h.press('beta', rowView.getByRole('button', { name: /Reorder native\/Beta/ }));
     h.moveTo(startY + 60);
     expect(h.row('beta').classList.contains('claudian-live-sort-lifted')).toBe(true);
     fireEvent.keyDown(document, { key: 'Escape' });

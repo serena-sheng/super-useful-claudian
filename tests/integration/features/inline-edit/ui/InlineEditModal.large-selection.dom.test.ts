@@ -40,7 +40,7 @@ it('previews and applies a one-line change to a 10,000-line selected note', asyn
     target.textContent = markdown;
   });
   const session = new InlineEditSession(h.app, h.plugin, h.plugin, h.editorView, h.editor,
-    { mode: 'selection', selectedText: before }, h.notePath, h.settled, { providerId: 'claude' });
+    { mode: 'selection', selectedText: before }, h.notePath, h.settled, { providerId: 'omp' });
   session.show();
   const accept = await showReplacementPreview(h, after);
   await waitFor(() => expect(jest.mocked(MarkdownRenderer.render).mock.calls.map(call => call[1])).toEqual([before, after]));

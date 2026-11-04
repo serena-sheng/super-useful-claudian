@@ -18,20 +18,20 @@ import {
 
 describe('providerEnvironment', () => {
   describe('classifyEnvironmentVariablesByOwnership', () => {
-    it('splits shared, Claude, and Codex vars by ownership', () => {
+    it('splits shared, OMP, and DeepSeek vars by ownership', () => {
       const result = classifyEnvironmentVariablesByOwnership([
         'PATH=/usr/local/bin',
-        'ANTHROPIC_API_KEY=claude-key',
-        'OPENAI_API_KEY=codex-key',
-        'CODEX_SANDBOX=workspace-write',
+        'OMP_MODEL=omp-model',
+        'DEEPSEEK_API_KEY=deepseek-key',
+        'DSH_HOME=/tmp/dsh',
         'CUSTOM_FLAG=1',
       ].join('\n'));
 
       expect(result.shared).toBe(['PATH=/usr/local/bin', 'CUSTOM_FLAG=1'].join('\n'));
-      expect(result.providers.claude).toBe('ANTHROPIC_API_KEY=claude-key');
-      expect(result.providers.codex).toBe([
-        'OPENAI_API_KEY=codex-key',
-        'CODEX_SANDBOX=workspace-write',
+      expect(result.providers.omp).toBe('OMP_MODEL=omp-model');
+      expect(result.providers.deepseek).toBe([
+        'DEEPSEEK_API_KEY=deepseek-key',
+        'DSH_HOME=/tmp/dsh',
       ].join('\n'));
       expect(result.reviewKeys).toEqual(['CUSTOM_FLAG']);
     });
@@ -41,12 +41,12 @@ describe('providerEnvironment', () => {
         '# shared comment',
         'PATH=/usr/local/bin',
         '',
-        '# claude comment',
-        'ANTHROPIC_MODEL=claude-custom',
+        '# omp comment',
+        'OMP_MODEL=omp-custom',
       ].join('\n'));
 
       expect(result.shared).toBe(['# shared comment', 'PATH=/usr/local/bin'].join('\n'));
-      expect(result.providers.claude).toBe(['', '# claude comment', 'ANTHROPIC_MODEL=claude-custom'].join('\n'));
+      expect(result.providers.omp).toBe(['', '# omp comment', 'OMP_MODEL=omp-custom'].join('\n'));
     });
   });
 
@@ -125,7 +125,7 @@ describe('providerEnvironment', () => {
         'PATH=/usr/local/bin',
         'OPENAI_API_KEY=test-key',
         'CUSTOM_FLAG=1',
-      ].join('\n'), 'provider:claude');
+      ].join('\n'), 'provider:omp');
 
       expect(reviewKeys).toEqual(['PATH', 'OPENAI_API_KEY', 'CUSTOM_FLAG']);
     });
@@ -137,13 +137,13 @@ describe('providerEnvironment', () => {
     });
 
     it('returns provider scope for single-provider snippets', () => {
-      expect(inferEnvironmentSnippetScope('OPENAI_MODEL=gpt-custom')).toBe('provider:codex');
+      expect(inferEnvironmentSnippetScope('DEEPSEEK_MODEL=custom')).toBe('provider:deepseek');
     });
 
     it('keeps mixed-ownership legacy snippets unscoped', () => {
       expect(inferEnvironmentSnippetScope([
         'PATH=/usr/local/bin',
-        'ANTHROPIC_MODEL=claude-custom',
+        'OMP_MODEL=omp-custom',
       ].join('\n'))).toBeUndefined();
     });
   });
@@ -152,12 +152,12 @@ describe('providerEnvironment', () => {
     it('normalizes mixed snippets back to unscoped even if a stale scope was saved', () => {
       expect(resolveEnvironmentSnippetScope([
         'PATH=/usr/local/bin',
-        'ANTHROPIC_MODEL=claude-custom',
+        'OMP_MODEL=omp-custom',
       ].join('\n'), 'shared')).toBeUndefined();
     });
 
     it('keeps the fallback scope only for empty snippets', () => {
-      expect(resolveEnvironmentSnippetScope('', 'provider:codex')).toBe('provider:codex');
+      expect(resolveEnvironmentSnippetScope('', 'provider:deepseek')).toBe('provider:deepseek');
     });
   });
 
@@ -165,16 +165,16 @@ describe('providerEnvironment', () => {
     it('reclassifies mixed snippets into separate scope updates', () => {
       expect(getEnvironmentScopeUpdates([
         'PATH=/usr/local/bin',
-        'ANTHROPIC_MODEL=claude-custom',
+        'OMP_MODEL=omp-custom',
       ].join('\n'), 'shared')).toEqual([
         { scope: 'shared', envText: 'PATH=/usr/local/bin' },
-        { scope: 'provider:claude', envText: 'ANTHROPIC_MODEL=claude-custom' },
+        { scope: 'provider:omp', envText: 'OMP_MODEL=omp-custom' },
       ]);
     });
 
     it('uses the fallback scope only when there is no inferable content', () => {
-      expect(getEnvironmentScopeUpdates('', 'provider:claude')).toEqual([
-        { scope: 'provider:claude', envText: '' },
+      expect(getEnvironmentScopeUpdates('', 'provider:omp')).toEqual([
+        { scope: 'provider:omp', envText: '' },
       ]);
     });
   });

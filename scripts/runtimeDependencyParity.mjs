@@ -4,7 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const bundleCriticalRuntimeDependencies = Object.freeze([
-  '@anthropic-ai/claude-agent-sdk',
+  // The plugin now bundles no provider SDK: OMP and DeepSeek Harness are driven
+  // as installed CLIs, so there is no third-party runtime dependency to pin here.
 ]);
 
 const exactVersionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
@@ -42,7 +43,12 @@ export function parseBunLock(source) {
   }
 }
 
-export function inspectRuntimeDependencyParity({ bunLock, packageJson, packageLock }) {
+export function inspectRuntimeDependencyParity({
+  bunLock,
+  packageJson,
+  packageLock,
+  dependencies = bundleCriticalRuntimeDependencies,
+}) {
   const violations = [];
   const sources = [
     {
@@ -55,7 +61,7 @@ export function inspectRuntimeDependencyParity({ bunLock, packageJson, packageLo
     },
   ];
 
-  for (const dependency of bundleCriticalRuntimeDependencies) {
+  for (const dependency of dependencies) {
     const expected = packageJson.dependencies?.[dependency];
     if (typeof expected !== 'string' || !exactVersionPattern.test(expected)) {
       violations.push({

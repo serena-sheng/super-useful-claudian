@@ -4,7 +4,7 @@ import { waitFor, within } from '@testing-library/dom';
 
 import { fetchLatestCLIVersion } from '@/core/providers/cli/CLIVersionUtils';
 import type { ProviderModelCatalog, ProviderModelCatalogSnapshot } from '@/core/providers/models/ProviderModelCatalog';
-import { PI_CLI_METADATA } from '@/providers/pi/runtime/PiCLIMetadata';
+import { OMP_CLI_METADATA } from '@/providers/omp/runtime/OmpCLIMetadata';
 import { renderProviderReadinessPanel } from '@/shared/settings/ProviderReadinessPanel';
 
 jest.mock('@/core/providers/cli/CLIVersionUtils', () => ({
@@ -18,7 +18,7 @@ beforeEach(() => {
   fetchLatestVersionMock.mockClear();
 });
 
-const readyCLI = async () => ({ path: '/usr/local/bin/pi', version: '1.1.0', source: 'auto' as const });
+const readyCLI = async () => ({ path: '/usr/local/bin/omp', version: '1.1.0', source: 'auto' as const });
 
 function catalog(discoveredCount: number, selectedIds: string[]): Pick<ProviderModelCatalog, 'getSnapshot'> {
   return {
@@ -31,10 +31,10 @@ it('renders a ready provider with its CLI version and model counts', async () =>
 
   const panel = renderProviderReadinessPanel({
     container,
-    metadata: PI_CLI_METADATA,
-    providerName: 'Pi',
+    metadata: OMP_CLI_METADATA,
+    providerName: 'OMP',
     enabled: () => true,
-    inspectCLI: async () => ({ path: '/usr/local/bin/pi', version: '1.1.0', source: 'auto' }),
+    inspectCLI: async () => ({ path: '/usr/local/bin/omp', version: '1.1.0', source: 'auto' }),
     modelCatalog: catalog(11, ['a', 'b']),
   });
 
@@ -51,15 +51,15 @@ it('shows the copyable install command when the CLI is missing', async () => {
 
   const panel = renderProviderReadinessPanel({
     container,
-    metadata: PI_CLI_METADATA,
-    providerName: 'Pi',
+    metadata: OMP_CLI_METADATA,
+    providerName: 'OMP',
     enabled: () => true,
     inspectCLI: async () => ({ path: null, version: null, source: 'auto' }),
     modelCatalog: catalog(0, []),
   });
 
   await waitFor(() => expect(container.textContent).toContain('Not found on PATH'));
-  expect(container.textContent).toContain('npm install -g @earendil-works/pi-coding-agent@latest');
+  expect(container.textContent).toContain('npm install -g @oh-my-pi/pi-coding-agent@latest');
   expect(within(container).getByRole('button', { name: 'Copy' })).toBeTruthy();
   panel.dispose();
 });
@@ -70,14 +70,14 @@ it('skips the CLI probe while the provider is disabled', async () => {
 
   const panel = renderProviderReadinessPanel({
     container,
-    metadata: PI_CLI_METADATA,
-    providerName: 'Pi',
+    metadata: OMP_CLI_METADATA,
+    providerName: 'OMP',
     enabled: () => false,
     inspectCLI,
     modelCatalog: catalog(0, []),
   });
 
-  await waitFor(() => expect(container.textContent).toContain('Turn on Pi to use it.'));
+  await waitFor(() => expect(container.textContent).toContain('Turn on OMP to use it.'));
   expect(inspectCLI).not.toHaveBeenCalled();
   panel.dispose();
 });
@@ -87,8 +87,8 @@ it('drops late probe results once the panel is disposed', async () => {
 
   const panel = renderProviderReadinessPanel({
     container,
-    metadata: PI_CLI_METADATA,
-    providerName: 'Pi',
+    metadata: OMP_CLI_METADATA,
+    providerName: 'OMP',
     enabled: () => true,
     // tsconfig lib predates Promise.withResolvers; this probe must never settle.
     inspectCLI: () => new Promise(() => undefined),
@@ -108,8 +108,8 @@ it.each([
 
     const panel = renderProviderReadinessPanel({
       container,
-      metadata: PI_CLI_METADATA,
-      providerName: 'Pi',
+      metadata: OMP_CLI_METADATA,
+      providerName: 'OMP',
       enabled: () => true,
       inspectCLI: readyCLI,
       modelCatalog: catalog(11, ['a']),
@@ -131,8 +131,8 @@ it('reads the setting live and only queries the registry after the user presses 
 
   const panel = renderProviderReadinessPanel({
     container,
-    metadata: PI_CLI_METADATA,
-    providerName: 'Pi',
+    metadata: OMP_CLI_METADATA,
+    providerName: 'OMP',
     enabled: () => true,
     inspectCLI: readyCLI,
     modelCatalog: catalog(11, ['a']),
@@ -152,6 +152,6 @@ it('reads the setting live and only queries the registry after the user presses 
   expect(fetchLatestVersionMock).not.toHaveBeenCalled();
 
   button!.click();
-  await waitFor(() => expect(fetchLatestVersionMock).toHaveBeenCalledWith('@earendil-works/pi-coding-agent'));
+  await waitFor(() => expect(fetchLatestVersionMock).toHaveBeenCalledWith('@oh-my-pi/pi-coding-agent'));
   panel.dispose();
 });

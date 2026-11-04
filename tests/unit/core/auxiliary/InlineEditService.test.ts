@@ -88,7 +88,7 @@ describe('InlineEditService', () => {
     backend.sessions[0].complete();
     await first;
 
-    await lifecycleRegistry.runTransition(['claude'], async () => undefined);
+    await lifecycleRegistry.runTransition(['omp'], async () => undefined);
     await expect(service.send({ ...selection, instruction: 'Formal' })).resolves.toEqual({
       error: 'The provider environment changed. Start a new inline edit.',
       success: false,

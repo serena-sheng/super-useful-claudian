@@ -40,7 +40,7 @@ async function createTab(linkedContentPath?: string): Promise<AssembledTabRuntim
     getAbstractFileByPath: (path: string) => (path === note.path ? note : null),
   });
   const conversation = {
-    id: 'conversation-1', providerId: 'claude', selectedModel: 'claude-sonnet-4-5',
+    id: 'conversation-1', providerId: 'omp', selectedModel: 'claude-sonnet-4-5',
     sessionId: 'main-session', messages: harness.tab.state.messages,
     ...(linkedContentPath ? { linkedContentPath } : {}),
   } as Conversation;
@@ -50,7 +50,7 @@ async function createTab(linkedContentPath?: string): Promise<AssembledTabRuntim
     getCommittedSettings: () => plugin.settings,
     settings: {
       model: 'claude-sonnet-4-5', effortLevel: 'high', permissionMode: 'normal',
-      providerConfigs: { claude: { enabled: true, visibleModels: ['claude-sonnet-4-5'],
+      providerConfigs: { omp: { enabled: true, visibleModels: ['claude-sonnet-4-5'],
         discoveredModels: [{ value: 'claude-sonnet-4-5', label: 'Sonnet', supportedEffortLevels: ['low', 'high'] }] } },
     },
     getActiveEnvironmentVariables: () => '',
@@ -92,7 +92,7 @@ it('attaches a queued follow-up to the top of the input box, under the tab bar',
     expect(box.queryByRole('button', { name: 'Discard queued message' })).toBeNull();
 
     jest.spyOn(ProviderRegistry, 'getCapabilities').mockReturnValue({
-      ...ProviderRegistry.getCapabilities('claude'), supportsTurnSteer: true,
+      ...ProviderRegistry.getCapabilities('omp'), supportsTurnSteer: true,
     });
     const releaseTurn = holdResponse(tab.session.turns);
     tab.controllers.inputController.queue.enqueue({

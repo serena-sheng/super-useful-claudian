@@ -24,7 +24,7 @@ HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };
 HTMLElement.prototype.removeClass = function (...classes) { this.classList.remove(...classes); };
 
-function setup(providerId = 'claude') {
+function setup(providerId = 'omp') {
   const messagesEl = document.body.createDiv();
   const fork = jest.fn().mockResolvedValue(undefined);
   const settings = { mediaFolder: '', showMessageTimestamps: true };
@@ -167,7 +167,7 @@ it('leaves unsuccessful output expanded', () => {
 });
 
 it('folds a partial-text interruption under a disclosure headed by the interrupt indicator', async () => {
-  const { renderer, messagesEl } = setup('codex');
+  const { renderer, messagesEl } = setup('deepseek');
   renderer.renderMessages([
     messages[0],
     { id: 'partial', role: 'assistant', content: 'Partial answer', timestamp: 4, isInterrupt: true,
@@ -240,7 +240,7 @@ it.each([true, false])('keeps the final answer visible with fallback tools (cont
   renderer.dispose();
 });
 
-it.each(['claude', 'codex'])('folds a replayed %s interruption under one disclosure headed by its marker', async provider => {
+it.each(['omp', 'deepseek'])('folds a replayed %s interruption under one disclosure headed by its marker', async provider => {
   const { renderer, messagesEl } = setup(provider);
   const read: ToolCallInfo = { id: 'read', name: 'Read', input: { file_path: 'note.md' }, status: 'completed', result: 'Note' };
   const interrupted: ChatMessage = { id: 'interrupted', role: 'assistant', content: 'Partial answer', timestamp: 3,
@@ -250,12 +250,12 @@ it.each(['claude', 'codex'])('folds a replayed %s interruption under one disclos
       { type: 'text', content: 'Partial answer' },
     ] };
   // Claude JSONL records a user-role bracket marker; Codex records an aborted turn as an empty assistant bubble.
-  const marker: ChatMessage = provider === 'claude'
+  const marker: ChatMessage = provider === 'omp'
     ? { id: 'marker', role: 'user', content: '[Request interrupted by user]', timestamp: 4, isInterrupt: true }
     : { id: 'marker', role: 'assistant', content: '', timestamp: 4, isInterrupt: true };
   renderer.renderMessages([
     messages[0],
-    provider === 'codex' ? { ...interrupted, durationSeconds: 9 } : interrupted,
+    provider === 'deepseek' ? { ...interrupted, durationSeconds: 9 } : interrupted,
     marker,
     { id: 'u2', role: 'user', content: 'Next prompt', timestamp: 5 },
     { id: 'a3', role: 'assistant', content: 'Next answer', timestamp: 6, durationSeconds: 3, completedAt: 7,
@@ -324,24 +324,6 @@ it('offers fork on the final live response of a multi-message turn', async () =>
   fireEvent.click(within(response).getByRole('button', { name: 'Fork conversation' }));
   await Promise.resolve();
   expect(fork).toHaveBeenCalledWith('a2');
-  renderer.dispose();
-});
-
-it('offers full-session fork only on the latest reply and removes it when another turn starts', async () => {
-  const { renderer, messagesEl, fork } = setup('opencode');
-  const latest: ChatMessage = { id: 'a3', role: 'assistant', content: 'Latest answer', timestamp: 7,
-    assistantMessageId: 'native-a3' };
-  renderer.renderMessages([...messages, { id: 'u2', role: 'user', content: 'Next', timestamp: 6 }, latest], () => 'Hello');
-  const buttons = within(messagesEl).getAllByRole('button', { name: 'Fork conversation' });
-  expect(buttons).toHaveLength(1);
-  expect(buttons[0].closest('[data-message-id]')?.getAttribute('data-message-id')).toBe('a3');
-  expect(buttons[0].getAttribute('type')).toBe('button');
-  fireEvent.click(buttons[0]);
-  await Promise.resolve();
-  expect(fork).toHaveBeenCalledWith('a3');
-  expect((await axe(messagesEl)).violations).toEqual([]);
-  renderer.addMessage({ id: 'u3', role: 'user', content: 'Continue', timestamp: 8 });
-  expect(within(messagesEl).queryByRole('button', { name: 'Fork conversation' })).toBeNull();
   renderer.dispose();
 });
 
@@ -475,7 +457,7 @@ it('keeps requested work on both sides of a mid-response notification in its own
   renderer.dispose();
 });
 
-it.each(['claude', 'pi', 'opencode', 'codex'])('shows native throughput for %s on replay', async (provider) => {
+it.each(['omp', 'deepseek'])('shows native throughput for %s on replay', async (provider) => {
   const { renderer, messagesEl } = setup(provider);
   const response = { ...messages[2], turnStats: { outputTokens: 125, durationMs: 2500 } };
   renderer.renderMessages([messages[0], response], () => 'Hello');
@@ -489,8 +471,8 @@ it.each(['claude', 'pi', 'opencode', 'codex'])('shows native throughput for %s o
 });
 
 it.each([
-  ['grok', { outputTokens: 125, durationMs: 2500 }],
-  ['claude', undefined],
+  ['omp', undefined],
+  ['deepseek', undefined],
 ])('omits unavailable or unsupported throughput (%s, %j)', (provider, turnStats) => {
   const { renderer, messagesEl } = setup(provider as string);
   renderer.renderMessages([messages[0], { ...messages[2], turnStats } as ChatMessage], () => 'Hello');
@@ -532,14 +514,14 @@ it('keeps time after throughput when timestamps are refreshed or toggled', () =>
   renderer.dispose();
 });
 
-it('renders accessible Pi branch controls at the prompt and disables them while busy', async () => {
+it('renders accessible OMP branch controls at the prompt and disables them while busy', async () => {
   const messagesEl = document.body.createDiv();
   const navigate = jest.fn().mockResolvedValue(undefined);
   let busy = false;
   const renderer = new MessageRenderer(
     { app: {}, settings: { mediaFolder: '' } } as any,
     new Component() as any,
-    messagesEl, undefined, undefined, () => ProviderRegistry.getCapabilities('pi'),
+    messagesEl, undefined, undefined, () => ProviderRegistry.getCapabilities('omp'),
     { navigate, isBusy: () => busy },
   );
   const prompt: ChatMessage = { id: 'user', role: 'user', content: 'Try B', timestamp: 1,
@@ -591,7 +573,7 @@ it('shows the tree action from the second live prompt before native IDs arrive a
   const renderer = new MessageRenderer(
     { app: {}, settings: { mediaFolder: '' } } as any,
     new Component() as any,
-    messagesEl, undefined, undefined, () => ProviderRegistry.getCapabilities('pi'),
+    messagesEl, undefined, undefined, () => ProviderRegistry.getCapabilities('omp'),
     { navigate, isBusy: () => busy },
   );
   const first: ChatMessage = { ...messages[0], treeBranches: ['native-u1'] };
@@ -636,7 +618,7 @@ it.each([true, false])('enables branches after switching and native history corr
   };
   const renderer: MessageRenderer = new MessageRenderer(plugin as any,
     new Component() as any,
-    messagesEl, undefined, undefined, () => ProviderRegistry.getCapabilities('pi'), {
+    messagesEl, undefined, undefined, () => ProviderRegistry.getCapabilities('omp'), {
       navigate: (id, target) => controller.navigateBranch(id, target),
       isBusy: () => state.isRewinding,
     });
@@ -666,14 +648,14 @@ it.each([true, false])('enables branches after switching and native history corr
   renderer.dispose();
 });
 
-it('orders the Pi prompt toolbar as branches, tree, copy, time through live and replay refreshes', async () => {
+it('orders the OMP prompt toolbar as branches, tree, copy, time through live and replay refreshes', async () => {
   const messagesEl = document.body.createDiv();
   const fork = jest.fn().mockResolvedValue(undefined);
   const settings = { mediaFolder: '', showMessageTimestamps: true };
   let busy = true;
   const renderer = new MessageRenderer({ app: {}, settings } as any,
     new Component() as any,
-    messagesEl, undefined, fork, () => ProviderRegistry.getCapabilities('pi'),
+    messagesEl, undefined, fork, () => ProviderRegistry.getCapabilities('omp'),
     { navigate: jest.fn(), isBusy: () => busy });
   const first: ChatMessage = { ...messages[0], treeBranches: ['native-u1'] };
   const prompt: ChatMessage = { id: 'second', role: 'user', content: 'Try B', timestamp: 2 };
@@ -741,7 +723,7 @@ it('previews a branch without saving it and restores history when focus leaves t
   const plugin = { app: {}, settings: {}, updateConversation: jest.fn() };
   const renderer: MessageRenderer = new MessageRenderer(plugin as any,
     new Component() as any,
-    messagesEl, undefined, undefined, () => ProviderRegistry.getCapabilities('pi'),
+    messagesEl, undefined, undefined, () => ProviderRegistry.getCapabilities('omp'),
     { navigate: (id, target) => controller.navigateBranch(id, target), isBusy: () => state.isRewinding });
   const controller = new ConversationController({ plugin, state, renderer,
     ...createConversationPorts({ state, getInputEl: () => inputEl, getImageContextManager: () => null }),
@@ -863,7 +845,7 @@ it('localizes task notifications and thinking while preserving message content',
 
 it.each(['pending', 'expired'] as const)('localizes async question card chrome (%s)', async questionStatus => {
   setLocale('zh-CN');
-  const { renderer, messagesEl } = setup('codex');
+  const { renderer, messagesEl } = setup('deepseek');
   try {
     const tool: ToolCallInfo = {
       id: 'async-question', name: 'AskUserQuestion', status: 'completed', questionStatus,
@@ -885,7 +867,7 @@ it.each(['pending', 'expired'] as const)('localizes async question card chrome (
 
 it('localizes citation disclosure names through expansion and collapse', async () => {
   setLocale('zh-CN');
-  const { renderer, messagesEl } = setup('codex');
+  const { renderer, messagesEl } = setup('deepseek');
   try {
     renderer.renderStoredMessage({
       id: 'cited', role: 'assistant', content: '', timestamp: testDate().getTime(),

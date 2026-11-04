@@ -2,7 +2,7 @@
 
 Agents in one Claudian session can find other sessions, read them, send them messages, steer or interrupt their work, and start new sessions on any enabled provider. An agent can hand off a task, consult a session that already has the right context, or delegate work to a different model.
 
-Agents use three tools for this. You don't call them yourself: ask the agent, for example "ask the Review session what it found" or "start a Codex session to write the tests".
+Agents use three tools for this. You don't call them yourself: ask the agent, for example "ask the Review session what it found" or "start an OMP session to write the tests".
 
 For other Obsidian plugins that want to send prompts to sessions, see the [Plugin API guide](plugin-api.md).
 
@@ -93,18 +93,11 @@ The agent sees the message wrapped in `<session_message from="â€¦" session_id="â
 
 ## Availability
 
-The tools are available in main chat and side chat sessions on these providers:
+The tools are available in main chat and side chat sessions on **DeepSeek Harness**. OMP
+sessions can be messaged as destinations, but OMP does not expose the session tools to the
+agent, so an OMP session cannot message, read or start other sessions itself.
 
-| Provider | Notes |
-|---|---|
-| Claude Code | |
-| Codex | A thread keeps the tools it started with. Threads created before the session tools have none; older threads may lack the read tool, the send modes, or project listing. Start a new session to get the current tools. |
-| DeepSeek Harness | |
-| Grok Build | |
-| OpenCode v2 | OpenCode v1 is not supported: its sessions get no session tools. |
-| Pi | |
-
-- On providers or threads without the read tool, an @ mention still carries the session id, but the agent cannot read the session.
-- Calls that Claudian cannot tie to a running chat session are rejected with "Session tools are only available in Claudian main chat sessions with the default tool policy." For example, a Codex fork or a session on a shared OpenCode or DeepSeek Harness process may see the tools listed without being bound to a Claudian chat; its calls fail.
+- On a session without the read tool, an @ mention still carries the session id, but the agent cannot read the session.
+- Calls that Claudian cannot tie to a running chat session are rejected with "Session tools are only available in Claudian main chat sessions with the default tool policy." For example, a session on a shared DeepSeek Harness process may see the tools listed without being bound to a Claudian chat; its calls fail.
 - A side chat acts as its parent session: its `self` entry and the sender of its messages are the parent, so it cannot message its own parent. A side chat on a draft that hasn't been sent yet has no session tools.
-- OpenCode v2, DeepSeek Harness and Grok Build sessions reach the tools through a listener that accepts connections from 127.0.0.1 only.
+- DeepSeek Harness sessions reach the tools through a listener that accepts connections from 127.0.0.1 only.

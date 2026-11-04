@@ -17,7 +17,7 @@ function archived(): ChatMessage[] {
 
 function createRepository(history: Partial<ProviderConversationHistoryService>) {
   const conversation: Conversation = {
-    id: 'conv-1', providerId: 'claude', title: 'Archived', createdAt: 1, lastActivityAt: 4,
+    id: 'conv-1', providerId: 'omp', title: 'Archived', createdAt: 1, lastActivityAt: 4,
     sessionId: 'native-1', messages: [],
   };
   const persistence = {

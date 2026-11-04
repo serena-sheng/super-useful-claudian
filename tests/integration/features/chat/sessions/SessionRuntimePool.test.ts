@@ -25,7 +25,7 @@ describe('session ownership across presentations', () => {
   it('reserves one attachment before awaits, promotes a running draft in place, and ignores stale detach', async () => {
     const { pool } = setup();
     const owner = { reveal: jest.fn() };
-    const first = pool.acquire({ conversationId: null, providerId: 'claude', draftModel: 'model' }, owner);
+    const first = pool.acquire({ conversationId: null, providerId: 'omp', draftModel: 'model' }, owner);
     const runtime = first.attachment.runtime;
     const held = deferred<void>();
     let signal!: AbortSignal;
@@ -34,7 +34,7 @@ describe('session ownership across presentations', () => {
     runtime.setConversationId('created');
     expect(pool.get('created')).toBe(runtime);
     expect(() => runtime.setConversationId('replacement')).toThrow('bound session');
-    expect(() => runtime.bindConversation('created', 'codex')).toThrow('bound session');
+    expect(() => runtime.bindConversation('created', 'deepseek')).toThrow('bound session');
     expect(pool.get('replacement')).toBeNull();
     expect(pool.get('created')).toBe(runtime);
     expect(pool.isRunning('created')).toBe(true);
@@ -55,11 +55,11 @@ describe('session ownership across presentations', () => {
     expect(store.archiveConversationsIf).not.toHaveBeenCalled();
     expect(store.deleteConversation).not.toHaveBeenCalled();
 
-    const second = pool.acquire({ conversationId: 'created', providerId: 'claude', draftModel: null }, owner);
+    const second = pool.acquire({ conversationId: 'created', providerId: 'omp', draftModel: null }, owner);
     expect(second.acquired).toBe(true);
     expect(second.attachment.runtime).toBe(runtime);
     pool.release(first.attachment);
-    const duplicate = pool.acquire({ conversationId: 'created', providerId: 'claude', draftModel: null }, { reveal: jest.fn() });
+    const duplicate = pool.acquire({ conversationId: 'created', providerId: 'omp', draftModel: null }, { reveal: jest.fn() });
     expect(duplicate.acquired).toBe(false);
     expect(duplicate.attachment).toBe(second.attachment);
     held.resolve();
@@ -73,7 +73,7 @@ describe('session ownership across presentations', () => {
 
   it('fences admissions synchronously and drains a session after its last view detached', async () => {
     const { pool, harness } = setup();
-    const { attachment } = pool.acquire({ conversationId: 'running', providerId: 'claude', draftModel: null }, { reveal: jest.fn() });
+    const { attachment } = pool.acquire({ conversationId: 'running', providerId: 'omp', draftModel: null }, { reveal: jest.fn() });
     const runtime = attachment.runtime;
     const turn = runtime.turns.run(signal => new Promise<void>(resolve => signal.addEventListener('abort', () => resolve())));
     pool.release(attachment);
@@ -87,10 +87,10 @@ describe('session ownership across presentations', () => {
 
   it('joins a retired session whose provider cleanup is still running after removal', async () => {
     const { pool, harness } = setup();
-    const { attachment } = pool.acquire({ conversationId: 'deleted', providerId: 'claude', draftModel: null }, { reveal: jest.fn() });
-    await harness.coordinator.bindConversation({ conversationId: 'deleted', providerId: 'claude' });
+    const { attachment } = pool.acquire({ conversationId: 'deleted', providerId: 'omp', draftModel: null }, { reveal: jest.fn() });
+    await harness.coordinator.bindConversation({ conversationId: 'deleted', providerId: 'omp' });
     await harness.coordinator.prepare();
-    const native = harness.backends.get('claude')!.sessions[0];
+    const native = harness.backends.get('omp')!.sessions[0];
     const enteredCleanup = deferred<void>();
     const releaseCleanup = deferred<void>();
     const dispose = native.dispose.bind(native);
@@ -123,31 +123,31 @@ describe('session ownership across presentations', () => {
     const { pool } = setup();
     const owner = { reveal: jest.fn() };
     const flush = async () => { for (let i = 0; i < 5; i += 1) await Promise.resolve(); };
-    const draft = pool.acquire({ conversationId: null, providerId: 'claude', draftModel: 'model' }, owner).attachment;
+    const draft = pool.acquire({ conversationId: null, providerId: 'omp', draftModel: 'model' }, owner).attachment;
     const runtime = draft.runtime;
-    runtime.providerSelections.set('claude', { permissionMode: 'normal', serviceTier: 'default' });
+    runtime.providerSelections.set('omp', { permissionMode: 'normal', serviceTier: 'default' });
     const hold = pool.holdDraft(runtime);
     pool.release(draft);
     await flush();
     expect(runtime.isDisposed).toBe(false);
 
-    const again = pool.acquire({ conversationId: null, providerId: 'claude', draftModel: 'model', draftSessionKey: hold.key }, owner);
+    const again = pool.acquire({ conversationId: null, providerId: 'omp', draftModel: 'model', draftSessionKey: hold.key }, owner);
     expect(again.attachment.runtime).toBe(runtime);
     pool.release(again.attachment);
     runtime.setConversationId('created');
-    const promoted = pool.acquire({ conversationId: null, providerId: 'claude', draftModel: null, draftSessionKey: hold.key }, owner);
+    const promoted = pool.acquire({ conversationId: null, providerId: 'omp', draftModel: null, draftSessionKey: hold.key }, owner);
     expect(promoted.attachment.runtime).toBe(runtime);
     pool.release(promoted.attachment);
     hold.release();
 
-    const unheld = pool.acquire({ conversationId: null, providerId: 'claude', draftModel: 'model' }, owner).attachment;
+    const unheld = pool.acquire({ conversationId: null, providerId: 'omp', draftModel: 'model' }, owner).attachment;
     const released = pool.holdDraft(unheld.runtime);
     pool.release(unheld);
     released.release();
     released.release();
     await flush();
     expect(unheld.runtime.isDisposed).toBe(true);
-    expect(pool.acquire({ conversationId: null, providerId: 'claude', draftModel: 'model', draftSessionKey: released.key }, owner)
+    expect(pool.acquire({ conversationId: null, providerId: 'omp', draftModel: 'model', draftSessionKey: released.key }, owner)
       .attachment.runtime).not.toBe(unheld.runtime);
   });
 
@@ -157,7 +157,7 @@ describe('session ownership across presentations', () => {
     const owner = { reveal: jest.fn() };
     const flush = async () => { for (let i = 0; i < 10; i += 1) await Promise.resolve(); };
     const view = (id: string) => {
-      const { attachment } = pool.acquire({ conversationId: id, providerId: 'claude', draftModel: null }, owner);
+      const { attachment } = pool.acquire({ conversationId: id, providerId: 'omp', draftModel: null }, owner);
       const model = attachment.runtime.model;
       return { attachment, model };
     };
@@ -195,7 +195,7 @@ describe('session ownership across presentations', () => {
     const onError = jest.fn();
     const { pool } = setup({ retainedDetachedSessions: 2, onError, releaseHistory: async id => { released.push(id); return true; } });
     const flush = async () => { for (let i = 0; i < 10; i += 1) await Promise.resolve(); };
-    const { attachment } = pool.acquire({ conversationId: 'unsaved', providerId: 'claude', draftModel: null }, { reveal: jest.fn() });
+    const { attachment } = pool.acquire({ conversationId: 'unsaved', providerId: 'omp', draftModel: null }, { reveal: jest.fn() });
     const model = attachment.runtime.model;
     // A save that failed at the end of a turn left the conversation dirty.
     const state = { isRewinding: false, hasPendingConversationSave: true };
@@ -212,7 +212,7 @@ describe('session ownership across presentations', () => {
 
     // Viewing another session does not retry this session's failing save again.
     save.mockRejectedValue(failure);
-    const other = pool.acquire({ conversationId: 'other', providerId: 'claude', draftModel: null }, { reveal: jest.fn() });
+    const other = pool.acquire({ conversationId: 'other', providerId: 'omp', draftModel: null }, { reveal: jest.fn() });
     void other.attachment.runtime.model;
     pool.release(other.attachment);
     await flush();

@@ -1,9 +1,10 @@
 # Personal pack
 
-Super Useful Claudian is a general-purpose harness: it runs the agent CLIs you already have
-installed and adds the chat UI around them. Anything that belongs to *you* rather than to the
-plugin — the assistant's identity, your slash commands, your skills, your MCP servers — can
-live in one folder inside the vault and be plugged in or removed without touching the plugin.
+Super Useful Claudian runs the provider CLIs it supports — OMP by default, DeepSeek Harness
+optionally — inside your vault and adds the chat UI around them. Anything that belongs to
+*you* rather than to the plugin — the assistant's identity, your slash commands, your skills,
+your MCP servers — can live in one folder inside the vault and be plugged in or removed
+without touching the plugin.
 
 An empty or missing pack is the stock plugin. Nothing personal ships in the release.
 
@@ -24,13 +25,13 @@ by the plugin.
 ## What the CLIs read themselves
 
 Commands, skills and MCP servers are owned by the agent CLIs, not by the plugin. Keep the
-sources in the pack and link them where each tool already looks:
+sources in the pack and link them where each tool already looks. The names in the last column
+are the CLIs' own loaders, not providers the plugin ships:
 
 | Part | Pack path | Link or copy to | Loaded by |
 |---|---|---|---|
 | Commands | `commands/*.md` | `.claude/commands/` | Claude Code |
 | Commands | `commands/*.md` | `.omp/commands/` | Oh My Pi (OMP), Pi |
-| Commands | `commands/*.md` | `.codex/commands/` | Codex CLI |
 | Skills | `skills/<name>/SKILL.md` | `.agents/skills/` | this plugin's Skills panel |
 | MCP servers | `mcp.json` | `.mcp.json` in the vault root | CLIs that read the project MCP config (Claude Code, OMP, Pi) |
 

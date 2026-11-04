@@ -227,26 +227,7 @@
     "permissionMode": {
       "label": "权限模式",
       "current": "权限模式：{mode}",
-      "changeFailed": "切换权限模式失败",
-      "claude": {
-        "auto": "自动",
-        "manual": "手动",
-        "acceptEdits": "接受编辑",
-        "yolo": "YOLO",
-        "autoDesc": "由 Claude 决定是否授权",
-        "manualDesc": "修改前始终询问",
-        "acceptEditsDesc": "自动接受所有文件编辑",
-        "yoloDesc": "无需询问，允许所有操作"
-      },
-      "codex": {
-        "autoReview": "代我审批",
-        "normal": "请求审批",
-        "yolo": "完全访问",
-        "autoReviewDesc": "自动审核额外访问权限。",
-        "readOnlyDesc": "编辑或联网前询问。",
-        "normalDesc": "额外访问前询问。",
-        "yoloDesc": "不限制文件和网络访问。"
-      }
+      "changeFailed": "切换权限模式失败"
     },
     "thinking": {
       "active": "思考中，已用时 {seconds} 秒…",
@@ -317,10 +298,6 @@
       "permissionDenied": "{message}（无访问权限）",
       "preview": "图片预览：{name}",
       "closePreview": "关闭图片预览"
-    },
-    "pi": {
-      "extension": "Pi 扩展",
-      "notification": "Pi 扩展通知。"
     },
     "sessionMessage": {
       "undelivered": "无法投递来自 {senders} 的消息。",
@@ -542,10 +519,6 @@
       "name": "加载用户 Claude Code 设置",
       "desc": "从 ~/.claude 加载用户级 Claude Code 配置：settings.json、技能、命令、智能体和插件。禁用时仅可使用仓库级配置。启用后，用户的权限规则可能绕过安全模式。"
     },
-    "codexSandbox": {
-      "name": "沙盒",
-      "desc": "代我审批 和 请求审批 模式下的文件访问权限。只读模式会在每次编辑前请求确认；完全访问 会忽略此设置。"
-    },
     "environment": "环境",
     "sharedEnvironment": {
       "name": "共享环境",
@@ -709,72 +682,6 @@
       "loadingCatalog": "正在加载 {provider} 模型…",
       "stale": "{provider} 模型目录已过期。点击“发现”以刷新。"
     },
-    "claude": {
-      "promptSuggestions": {
-        "name": "提示词建议",
-        "desc": "在空白输入框中显示 Claude 预测的下一条提示词。每条建议都会在每轮对话后额外发起一次 Claude 请求，可能更快耗尽用量额度。"
-      },
-      "configuration": "配置",
-      "responseStyle": {
-        "name": "回复风格",
-        "desc": "Claude Code 回复所用的输出风格，包括自定义风格。“Claude Code 设置”沿用你的 Claude Code 配置。刷新模型或开始聊天时会更新列表。",
-        "default": "默认",
-        "inherit": "Claude Code 设置"
-      }
-    },
-    "codex": {
-      "installationMethod": {
-        "name": "安装方式",
-        "desc": "Claudian 在 Windows 上启动 Codex 的方式。原生 Windows 使用 Windows 可执行文件路径；WSL 会在所选发行版内启动 Linux CLI。",
-        "nativeWindows": "原生 Windows",
-        "wsl": "WSL"
-      },
-      "cliPath": {
-        "name": "Codex CLI 路径",
-        "validation": {
-          "wslWindowsPath": "WSL 模式需要 Linux 命令或 Linux 绝对路径，而不是 Windows 可执行文件路径。"
-        }
-      },
-      "wslDistroOverride": {
-        "name": "WSL 发行版覆盖",
-        "desc": "可选高级覆盖。留空时会尽可能从 WSL 工作区路径推断发行版，否则使用默认 WSL 发行版。"
-      },
-      "safeMode": {
-        "workspaceWrite": "工作区可写",
-        "readOnly": "只读"
-      },
-      "responseStyle": {
-        "name": "回复风格",
-        "desc": "选择支持此功能的模型中 Codex 的沟通风格。",
-        "pragmatic": "务实",
-        "friendly": "友好",
-        "neutral": "中性"
-      },
-      "responseVerbosity": {
-        "name": "回复详细程度",
-        "desc": "选择支持此功能的模型的回复详细程度。默认使用 Codex 配置。",
-        "default": "默认",
-        "low": "低",
-        "medium": "中",
-        "high": "高"
-      },
-      "reasoningSummary": {
-        "name": "推理摘要",
-        "desc": "在思考块中显示模型推理过程的摘要。",
-        "auto": "自动",
-        "concise": "简洁",
-        "detailed": "详细",
-        "off": "关闭"
-      },
-      "ultraEffort": {
-        "name": "启用 Ultra 推理强度",
-        "desc": "在支持 Ultra 的 Codex 模型的推理强度选择器中显示此选项。Ultra 使用最高推理强度并自动委派任务。"
-      },
-      "environment": {
-        "name": "Codex 环境",
-        "desc": "仅限 Codex 拥有的运行时变量。用于 OPENAI_* 和 CODEX_* 设置。如果 Codex 自动检测需要帮助，请把安装目录添加到共享 PATH，而不是此提供商环境。"
-      }
-    },
     "agentSkills": {
       "sharedExpectation": "为兼容的服务商管理 .agents/skills/ 中的共享技能。",
       "noSkills": "尚未配置共享技能。点击 + 创建一个。",
@@ -810,32 +717,6 @@
         "title": "删除共享技能",
         "description": "整个技能文件夹（包括脚本、参考资料和资源）将被移到回收站。",
         "confirm": "移到回收站"
-      }
-    },
-    "opencode": {
-      "emptyModels": "OpenCode 服务端没有为此仓库返回已启用的模型。请检查仓库的 .opencode/opencode.json 和 OpenCode 日志（运行 opencode debug paths 查看位置）。使用 OpenCode v2 时，配置的 V1 插件可能不兼容。请在仓库中运行 opencode models --standalone 对比，然后点击“发现”。",
-      "environment": {
-        "name": "OpenCode 环境变量",
-        "desc": "传递给 OpenCode 的额外环境变量。"
-      },
-      "migrationNotice": {
-        "text": "Claudian 现已支持 OpenCode v2。OpenCode v1 支持将于 2026 年 10 月 30 日结束。",
-        "link": "迁移到 OpenCode v2"
-      }
-    },
-    "pi": {
-      "environment": {
-        "name": "Pi 环境变量",
-        "desc": "仅传递给 Pi 的环境变量。"
-      },
-      "models": {
-        "desc": "Claudian 维护独立于 Pi enabledModels 的模型列表。Discover 会列出 Pi 在当前环境中可认证的所有模型，并按 Pi 实际调用的提供商路由分组。路由决定凭据和计费。"
-      }
-    },
-    "grok": {
-      "environment": {
-        "name": "Grok Build 环境变量",
-        "desc": "仅传递给 Grok Build 的环境变量。自定义模型的密钥保留在此提供商范围内，并在原生配置中通过 env_key 引用。"
       }
     },
     "deepseek": {

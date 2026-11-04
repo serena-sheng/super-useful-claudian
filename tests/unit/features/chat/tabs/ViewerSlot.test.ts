@@ -43,7 +43,7 @@ describe('ViewerSlot', () => {
     mockTabs.length = 0;
     jest.clearAllMocks();
     (ProviderRegistry.getCapabilities as jest.Mock).mockReturnValue({
-      providerId: 'claude',
+      providerId: 'omp',
       supportsProviderCommands: true,
     });
     commandLoader.loadCommands.mockResolvedValue({
@@ -55,7 +55,7 @@ describe('ViewerSlot', () => {
   it('reuses the provisional preview while browsing unopened sessions', async () => {
     const getCachedConversation = jest.fn((id: string) => ({
       id,
-      providerId: 'claude',
+      providerId: 'omp',
     }));
     const { manager } = createManager(createPlugin({ getCachedConversation }));
 
@@ -71,7 +71,7 @@ describe('ViewerSlot', () => {
   it('keeps the latest provisional selection during overlapping preview hydration', async () => {
     const getCachedConversation = jest.fn((id: string) => ({
       id,
-      providerId: 'claude',
+      providerId: 'omp',
     }));
     const { manager } = createManager(createPlugin({ getCachedConversation }));
     await manager.viewerSlot.show('conversation-1');
@@ -104,7 +104,7 @@ describe('ViewerSlot', () => {
   it('does not demote a preview retained while its conversation switch is pending', async () => {
     const getCachedConversation = jest.fn((id: string) => ({
       id,
-      providerId: 'claude',
+      providerId: 'omp',
     }));
     const { manager } = createManager(createPlugin({ getCachedConversation }));
     await manager.viewerSlot.show('conversation-1');
@@ -127,7 +127,7 @@ describe('ViewerSlot', () => {
   it('keeps a stale provisional target that the user retained during initial hydration', async () => {
     const getCachedConversation = jest.fn((id: string) => ({
       id,
-      providerId: 'claude',
+      providerId: 'omp',
     }));
     const { manager } = createManager(createPlugin({ getCachedConversation }));
     await manager.createTab();
@@ -166,7 +166,7 @@ describe('ViewerSlot', () => {
   it('lets an immediate retained-tab selection supersede an in-flight preview', async () => {
     const getCachedConversation = jest.fn((id: string) => ({
       id,
-      providerId: 'claude',
+      providerId: 'omp',
     }));
     const { manager } = createManager(createPlugin({ getCachedConversation }));
     const retained = await manager.createTab('retained-conversation');
@@ -190,7 +190,7 @@ describe('ViewerSlot', () => {
   it('drains and invalidates preview navigation before provisional cleanup', async () => {
     const getCachedConversation = jest.fn((id: string) => ({
       id,
-      providerId: 'claude',
+      providerId: 'omp',
     }));
     const { manager } = createManager(createPlugin({ getCachedConversation }));
     await manager.viewerSlot.show('conversation-1');
@@ -215,7 +215,7 @@ describe('ViewerSlot', () => {
   it('prevents queued preview navigation from creating tabs after destroy', async () => {
     const getCachedConversation = jest.fn((id: string) => ({
       id,
-      providerId: 'claude',
+      providerId: 'omp',
     }));
     const { manager } = createManager(createPlugin({ getCachedConversation }));
     await manager.viewerSlot.show('conversation-1');
@@ -239,7 +239,7 @@ describe('ViewerSlot', () => {
   it('discards inactive previews without removing open runtime tabs', async () => {
     const getCachedConversation = jest.fn((id: string) => ({
       id,
-      providerId: 'claude',
+      providerId: 'omp',
     }));
     const { manager } = createManager(createPlugin({ getCachedConversation }));
     const first = await manager.createTab('conversation-1');
@@ -255,7 +255,7 @@ describe('ViewerSlot', () => {
 
   it('retains the active preview when it is the only tab', async () => {
     const { manager } = createManager(createPlugin({
-      getCachedConversation: (id: string) => ({ id, providerId: 'claude' }),
+      getCachedConversation: (id: string) => ({ id, providerId: 'omp' }),
     }));
     await manager.viewerSlot.show('conversation-1');
     const preview = manager.getActiveTab()!;
@@ -269,7 +269,7 @@ describe('ViewerSlot', () => {
   });
 
   const conversationPlugin = () => createPlugin({
-    getCachedConversation: (id: string) => ({ id, providerId: 'claude' }),
+    getCachedConversation: (id: string) => ({ id, providerId: 'omp' }),
   });
   const pendingTurns: Array<() => void> = [];
   afterEach(() => {
@@ -418,7 +418,7 @@ describe('ViewerSlot', () => {
   it('creates a fresh provisional target when the reused preview closes during switching', async () => {
     const getCachedConversation = jest.fn((id: string) => ({
       id,
-      providerId: 'claude',
+      providerId: 'omp',
     }));
     const { manager } = createManager(createPlugin({ getCachedConversation }));
     const source = await manager.createTab();
@@ -534,12 +534,12 @@ describe('ViewerSlot', () => {
       const { manager } = createManager(conversationPlugin(), {}, {}, { showsPreviews: () => true });
 
       await manager.restoreState({
-        openTabs: [{ tabId: 'draft', conversationId: null, draftModel: 'codex:gpt-5', providerId: 'codex' }],
+        openTabs: [{ tabId: 'draft', conversationId: null, draftModel: 'codex:gpt-5', providerId: 'deepseek' }],
         activeTabId: 'draft',
       });
 
       const preview = manager.getActiveTab()!;
-      expect([preview.lifecycleState, preview.draftModel, preview.providerId]).toEqual(['provisional', 'codex:gpt-5', 'codex']);
+      expect([preview.lifecycleState, preview.draftModel, preview.providerId]).toEqual(['provisional', 'codex:gpt-5', 'deepseek']);
     });
 
     it('keeps unsent text with a draft session that creates its conversation while unloaded', async () => {
@@ -804,7 +804,7 @@ describe('ViewerSlot', () => {
             },
             workspace: { getActiveFile: () => null, revealLeaf: jest.fn(), setActiveLeaf: jest.fn() },
           },
-          getCachedConversation: (id: string) => ({ id, providerId: 'claude' }),
+          getCachedConversation: (id: string) => ({ id, providerId: 'omp' }),
           ...overrides,
         }),
       };

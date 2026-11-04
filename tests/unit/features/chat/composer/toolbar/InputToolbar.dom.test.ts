@@ -9,8 +9,8 @@ import { setIcon } from 'obsidian';
 import type { ProviderPermissionModeOption } from '@/core/providers/types';
 import { createInputToolbar } from '@/features/chat/composer/toolbar/InputToolbar';
 import type { ToolbarCallbacks } from '@/features/chat/composer/toolbar/types';
-import { claudeChatUIConfig } from '@/providers/claude/ui/ClaudeChatUIConfig';
-import { codexChatUIConfig } from '@/providers/codex/ui/CodexChatUIConfig';
+import { deepseekChatUIConfig } from '@/providers/deepseek/ui/DeepSeekChatUIConfig';
+import { ompChatUIConfig } from '@/providers/omp/ui/OmpChatUIConfig';
 
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };
@@ -369,17 +369,17 @@ describe('model button', () => {
     const { ui } = renderToolbar({
       serviceTier: true,
       models: [
-        { value: 'sonnet', label: 'Sonnet', providerId: 'claude', providerLabel: 'Claude' },
-        { value: 'pi-model', label: 'Pi Model', providerId: 'pi', providerLabel: 'Pi' },
+        { value: 'sonnet', label: 'Sonnet', providerId: 'omp', providerLabel: 'OMP' },
+        { value: 'deepseek-model', label: 'DeepSeek Model', providerId: 'deepseek', providerLabel: 'DeepSeek Harness' },
       ],
     });
     fireEvent.click(ui.getByRole('button', { name: /^Model: Sonnet/ }));
     expect(ui.getByRole('switch', { name: 'Fast' })).toBeDefined();
     // Browsing another provider chooses no model there, so it has no fast mode to offer.
-    fireEvent.click(ui.getByRole('tab', { name: 'Pi' }));
+    fireEvent.click(ui.getByRole('tab', { name: 'DeepSeek Harness' }));
     expect(ui.getByRole('listbox', { name: 'Model' })).toBeDefined();
     expect(ui.queryByRole('switch', { name: 'Fast', hidden: true })).toBeNull();
-    fireEvent.click(ui.getByRole('tab', { name: 'Claude' }));
+    fireEvent.click(ui.getByRole('tab', { name: 'OMP' }));
     expect(ui.getByRole('switch', { name: 'Fast' })).toBeDefined();
   });
 
@@ -419,40 +419,38 @@ describe('model button', () => {
   it('rereads models and settings when the menu opens', () => {
     const { settings, ui, uiConfig } = renderToolbar();
     uiConfig.getModelOptions.mockImplementation(() => [
-      { value: 'gpt-new', label: 'GPT New', group: 'Codex' },
-      { value: 'gpt-fast', label: 'GPT Fast', group: 'Codex' },
-      { value: 'claude', label: 'Claude', group: 'Claude' },
+      { value: 'gpt-new', label: 'GPT New', group: 'DeepSeek' },
+      { value: 'gpt-fast', label: 'GPT Fast', group: 'DeepSeek' },
+      { value: 'omp-model', label: 'OMP', group: 'OMP' },
     ]);
     settings.model = 'gpt-new';
     fireEvent.click(ui.getByRole('button', { name: /^Model: Sonnet/ }));
     expect(ui.getByRole('button', { name: /^Model: GPT New/ })).toBeDefined();
-    const codex = ui.getByRole('group', { name: 'Codex' });
-    expect(within(codex).getAllByRole('option').map(item => item.textContent)).toEqual(['GPT New', 'GPT Fast']);
-    expect(within(ui.getByRole('group', { name: 'Claude' })).getAllByRole('option')).toHaveLength(1);
+    const deepseek = ui.getByRole('group', { name: 'DeepSeek' });
+    expect(within(deepseek).getAllByRole('option').map(item => item.textContent)).toEqual(['GPT New', 'GPT Fast']);
+    expect(within(ui.getByRole('group', { name: 'OMP' })).getAllByRole('option')).toHaveLength(1);
     expect(uiConfig.getModelOptions).toHaveBeenLastCalledWith({ ...settings, environmentVariables: 'ANTHROPIC_MODEL=opus' });
   });
 });
 
 describe('permission button', () => {
-  it('shows all Codex permissions and allows keyboard selection with accessible descriptions', async () => {
+  it('shows all DeepSeek permissions and allows keyboard selection with accessible descriptions', async () => {
     const { callbacks, host, toolbar, ui, uiConfig } = renderToolbar({
-      settings: { permissionMode: 'auto-review' },
+      settings: { permissionMode: 'normal' },
     });
-    uiConfig.getPermissionModeOptions = () => codexChatUIConfig.getPermissionModeOptions!()!;
+    uiConfig.getPermissionModeOptions = () => deepseekChatUIConfig.getPermissionModeOptions!()!;
     toolbar.permissionToggle.updateDisplay();
-    const button = ui.getByRole('button', { name: 'Permission mode: Approve for me' });
+    const button = ui.getByRole('button', { name: 'Permission mode: Workspace write' });
     const icon = button.querySelector<HTMLElement>('.claudian-toolbar-chip-icon')!;
     expect(getComputedStyle(icon).display).toBe('none');
     fireEvent.keyDown(button, { key: 'ArrowDown' });
     const items = ui.getAllByRole('menuitemradio');
-    expect(items).toHaveLength(3);
-    expect(items[0]).toBe(ui.getByRole('menuitemradio', { name: /^Approve for me/ }));
-    expect(items[1]).toBe(ui.getByRole('menuitemradio', { name: /^Ask for approval/ }));
-    expect(ui.getByRole('menuitemradio', { name: /^Approve for me/, checked: true })).toBe(document.activeElement);
-    expect(ui.getByText('Auto-review extra access.')).toBeTruthy();
+    expect(items).toHaveLength(2);
+    expect(items[0]).toBe(ui.getByRole('menuitemradio', { name: /^Workspace write/ }));
+    expect(items[1]).toBe(ui.getByRole('menuitemradio', { name: /^Full access/ }));
+    expect(ui.getByRole('menuitemradio', { name: /^Workspace write/, checked: true })).toBe(document.activeElement);
+    expect(ui.getByText('Ask before extra access.')).toBeTruthy();
     expect((await axe(host)).violations).toEqual([]);
-    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
-    expect(document.activeElement).toBe(items[1]);
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
     const fullAccess = ui.getByRole('menuitemradio', { name: /^Full access/ });
     expect(document.activeElement).toBe(fullAccess);
@@ -462,10 +460,10 @@ describe('permission button', () => {
     expect(button.classList.contains('claudian-toolbar-chip--alert')).toBe(true);
     expect(getComputedStyle(icon).display).not.toBe('none');
     fireEvent.click(button);
-    fireEvent.click(ui.getByRole('menuitemradio', { name: /^Ask for approval/ }));
+    fireEvent.click(ui.getByRole('menuitemradio', { name: /^Workspace write/ }));
     await flush();
     expect(callbacks.onPermissionModeChange).toHaveBeenLastCalledWith('normal');
-    expect(ui.getByRole('button', { name: 'Permission mode: Ask for approval' })).toBe(button);
+    expect(ui.getByRole('button', { name: 'Permission mode: Workspace write' })).toBe(button);
     expect(getComputedStyle(icon).display).toBe('none');
   });
 
@@ -521,25 +519,24 @@ describe('permission button', () => {
     expect(ui.getByRole('button', { name: 'Permission mode: YOLO' })).toBe(button);
   });
 
-  it('lists every Claude permission mode with its description and alerts only on YOLO', async () => {
+  it('lists every OMP permission mode with its description and alerts only on YOLO', async () => {
     const { callbacks, ui } = renderToolbar({
-      settings: { permissionMode: 'auto' },
-      permissionModes: claudeChatUIConfig.getPermissionModeOptions?.() ?? undefined,
+      settings: { permissionMode: 'always-ask' },
+      permissionModes: ompChatUIConfig.getPermissionModeOptions?.() ?? undefined,
     });
-    const button = ui.getByRole('button', { name: 'Permission mode: Auto' });
+    const button = ui.getByRole('button', { name: 'Permission mode: Always ask' });
     expect(button.classList.contains('claudian-toolbar-chip--alert')).toBe(false);
     fireEvent.click(button);
     const items = within(ui.getByRole('menu', { name: 'Permission mode' })).getAllByRole('menuitemradio');
     expect(items.map(item => [item.textContent, item.getAttribute('aria-checked')])).toEqual([
-      ['AutoClaude handles permission decisions', 'true'],
-      ['ManualAlways ask before making changes', 'false'],
-      ['Accept editsAutomatically accept all file edits', 'false'],
-      ['YOLOAccept all permissions without asking', 'false'],
+      ['Always askAsk before running commands or making file changes.', 'true'],
+      ['WriteAllow file writes; ask before other actions.', 'false'],
+      ['YOLOAuto-approve all tool calls. Use with care.', 'false'],
     ]);
     fireEvent.click(button);
 
     for (const [name, value, alert] of [
-      ['Manual', 'manual', false], ['Accept edits', 'acceptEdits', false], ['YOLO', 'yolo', true],
+      ['Write', 'write', false], ['YOLO', 'yolo', true], ['Always ask', 'always-ask', false],
     ] as const) {
       fireEvent.click(button);
       fireEvent.click(ui.getByRole('menuitemradio', { name: new RegExp(`^${name}`) }));

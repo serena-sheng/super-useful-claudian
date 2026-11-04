@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, codex/cloud-integration]
+    branches: [main]
   pull_request:
-    branches: [main, codex/cloud-integration]
+    branches: [main]
   workflow_call:
   workflow_dispatch:
 
@@ -153,7 +153,6 @@ jobs:
       test-shards: ${{ steps.scope.outputs.test-shards }}
       script-tests: ${{ steps.scope.outputs.script-tests }}
       cross-platform-tests: ${{ steps.scope.outputs.cross-platform-tests }}
-      pi-windows: ${{ steps.scope.outputs.pi-windows }}
       has-tests: ${{ steps.scope.outputs.has-tests }}
       cross-platform: ${{ steps.scope.outputs.cross-platform }}
     steps:
@@ -256,10 +255,6 @@ jobs:
           path: test-results/native-timings/
           if-no-files-found: error
           retention-days: 14
-
-      - name: Run Windows Pi launch integration
-        if: runner.os == 'Windows' && needs.test-scope.outputs.pi-windows == 'true'
-        run: npm run test:unit -- --runInBand tests/integration/providers/pi/runtime/PiSubprocess.windows.test.ts
 
   build-artifacts:
     runs-on: ubuntu-latest

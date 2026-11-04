@@ -36,7 +36,7 @@ export const DEFAULT_OMP_PROVIDER_SETTINGS: Readonly<PersistedOmpProviderSetting
   cliPath: '',
   cliPathsByHost: {},
   discoveredModels: [],
-  enabled: false,
+  enabled: true,
   environmentHash: '',
   sessionEnvironmentHash: '',
   environmentVariables: '',
