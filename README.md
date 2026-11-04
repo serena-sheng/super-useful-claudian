@@ -13,7 +13,7 @@ DeepSeek Harness, a provider-readiness panel, a token meter, a local archive tha
 any saved conversation with every turn visible, and a personal pack. A few enhancements were
 borrowed from [oh-my-claudian](https://github.com/lee259/oh-my-claudian) by Lee.
 
-**2.0.0 is synced to upstream Claudian 2.3.34, plus the fixes upstream landed on `main` after
+**1.9.0 is synced to upstream Claudian 2.3.34, plus the fixes upstream landed on `main` after
 that tag.** This release deliberately keeps only two harnesses: the `claude`, `codex`, `grok`,
 `opencode` and `pi` providers are gone, OMP is the default, and upstream's maintained
 **DeepSeek Harness** provider (`deepseek`) remains as the optional second. The early `dsh`
