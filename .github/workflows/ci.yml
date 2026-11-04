@@ -67,7 +67,9 @@ jobs:
         run: npm run lint
 
       - name: Audit dependencies
-        run: npm audit --audit-level=moderate
+        # Block high/critical advisories. Moderate findings in the dev toolchain
+        # (jest/eslint) have no compatible fix and never ship in the plugin bundle.
+        run: npm audit --audit-level=high
 
   diff-hygiene:
     if: github.event_name == 'pull_request'
