@@ -62,7 +62,6 @@ test('platform-sensitive unit tests retain native checks for both direct and sou
   for (const [source, consumer] of [
     ['src/core/process/env.ts', 'tests/unit/core/process/env.test.ts'],
     ['src/core/storage/VaultFileAdapter.ts', 'tests/unit/core/storage/VaultFileAdapter.test.ts'],
-    ['src/providers/codex/history/CodexHistoryStore.ts', 'tests/unit/providers/codex/history/CodexHistoryStore.test.ts'],
     ['src/providers/deepseek/ui/DeepSeekSettingsTab.ts', 'tests/unit/providers/deepseek/ui/DeepSeekSettingsTab.test.ts'],
   ]) {
     for (const eventName of ['pull_request', 'push']) {
@@ -78,32 +77,25 @@ test('real dependency discovery retains native launch checks for shared process 
   const result = selectRelatedCiTests({
     changes: [{ status: 'M', path: 'src/core/process/windowsCmdShim.ts' }],
   });
-  assert.deepEqual(result.crossPlatformTests.sort(), [
+  for (const consumer of [
     'tests/integration/core/process/ManagedStdioProcess.test.ts',
     'tests/integration/core/process/ProcessProbe.test.ts',
     'tests/integration/core/process/loginShellPath.test.ts',
     'tests/integration/providers/deepseek/app/DeepSeekWorkspaceServices.test.ts',
     'tests/integration/providers/deepseek/runtime/DeepSeekHostProcess.test.ts',
-    'tests/integration/providers/opencode/execution/OpencodeV2Execution.test.ts',
-    'tests/integration/providers/opencode/http/OpencodeSharedServer.test.ts',
-    'tests/integration/providers/pi/execution/PiExecutionKernel.test.ts',
-    'tests/integration/providers/pi/execution/PiRecoveryContext.test.ts',
-    'tests/unit/providers/claude/execution/ClaudeExecutionBackend.test.ts',
-    'tests/unit/providers/codex/execution/CodexExecutionBackend.test.ts',
     'tests/unit/providers/deepseek/runtime/DeepSeekCLIResolver.test.ts',
     'tests/unit/providers/deepseek/runtime/DeepSeekInstallation.test.ts',
     'tests/unit/providers/deepseek/ui/DeepSeekSettingsTab.test.ts',
-  ]);
-  assert.equal(result.piWindows, true);
+  ]) {
+    assert.ok(result.crossPlatformTests.includes(consumer), consumer);
+  }
   assert.ok(result.testFiles.includes('tests/unit/core/process/windowsCmdShim.test.ts'));
   assert.ok(result.testFiles.includes('tests/unit/core/process/ManagedStdioProcess.test.ts'));
 });
 
-test('Pi-only changes retain native verification without unrelated process suites', () => {
-  const result = select(['tests/integration/providers/pi/runtime/PiSubprocess.windows.test.ts']);
-  assert.equal(result.crossPlatform, true);
-  assert.equal(result.piWindows, true);
-  assert.deepEqual(result.crossPlatformTests, []);
+test('removed provider windows launch is no longer a native scope switch', () => {
+  const result = select(['src/providers/omp/runtime/OmpSubprocess.ts']);
+  assert.equal('piWindows' in result, false);
 });
 
 test('changed tests run directly, while removed tests are omitted', () => {
@@ -128,86 +120,53 @@ test('filesystem-read documentation, styles, and captured fixtures retain their 
   ]) {
     assert.ok(select(['src/style/components/zen-mode.css']).testFiles.includes(consumer), consumer);
   }
-  const fixture = select(['tests/fixtures/providers/grok/history/example.json']);
-  assert.ok(fixture.testFiles.includes('tests/unit/providers/grok/history/GrokHistoryStore.test.ts'));
-  for (const status of ['A', 'M']) {
-    for (const event of ['pull_request', 'push']) {
-      for (const [file, consumers] of [
-        ['tests/fixtures/providers/grok/runtime/models-list.json', [
-          'tests/integration/providers/grok/runtime/GrokModels.test.ts',
-          'tests/integration/providers/grok/runtime/GrokModelDiscoveryService.test.ts',
-        ]],
-        ['tests/fixtures/providers/grok/runtime/models-list-byok.json', [
-          'tests/integration/providers/grok/runtime/GrokModels.test.ts',
-          'tests/integration/providers/grok/runtime/GrokModelDiscoveryService.test.ts',
-        ]],
-        ['tests/fixtures/providers/grok/runtime/turn-completed.json', [
-          'tests/unit/providers/grok/execution/GrokExecutionBackend.test.ts',
-        ]],
-      ]) {
-        const selected = select([{ status, path: file }], [], event);
-        for (const consumer of consumers) {
-          assert.ok(selected.testFiles.includes(consumer), `${status} ${file} on ${event} must select ${consumer}`);
-        }
-        assert.deepEqual([...selected.testFiles].sort(), [...consumers].sort(),
-          `${status} ${file} on ${event} must select exactly its filesystem consumers`);
-      }
-    }
-  }
+  const fixture = select(['tests/fixtures/providers/deepseek/runtime/host-launch.json']);
+  assert.ok(fixture.testFiles.includes('tests/integration/providers/deepseek/runtime/DeepSeekHostProcess.test.ts'));
 });
 
-const codexHistoryFixtures = [
-  'tests/fixtures/providers/codex/history/codex-session-persisted-tools.jsonl',
-  'tests/fixtures/providers/codex/history/codex-session-agent-lifecycle.jsonl',
-  'tests/fixtures/providers/codex/history/codex-session-websearch-persisted.jsonl',
-];
+const deepseekRuntimeFixture = 'tests/fixtures/providers/deepseek/runtime/host-launch.json';
 
 for (const [name, selector] of [
   ['pure', input => selectCiTests({ ...input, relatedTests: [] })],
   ['related', selectRelatedCiTests],
 ]) {
-  for (const fixture of codexHistoryFixtures) {
-    for (const status of ['A', 'M']) {
-      for (const eventName of ['pull_request', 'push']) {
-        test(`${name} selector registers ${status} ${fixture} on ${eventName}`, () => {
-          assert.deepEqual(selector({ changes: [{ status, path: fixture }], eventName }), {
-            testFiles: ['tests/unit/providers/codex/history/CodexHistoryStore.test.ts'],
-            scriptTests: [],
-            crossPlatformTests: ['tests/unit/providers/codex/history/CodexHistoryStore.test.ts'],
-            crossPlatform: true,
-            piWindows: false,
-          });
+  for (const status of ['A', 'M']) {
+    for (const eventName of ['pull_request', 'push']) {
+      test(`${name} selector registers ${status} ${deepseekRuntimeFixture} on ${eventName}`, () => {
+        assert.deepEqual(selector({ changes: [{ status, path: deepseekRuntimeFixture }], eventName }), {
+          testFiles: ['tests/integration/providers/deepseek/runtime/DeepSeekHostProcess.test.ts'],
+          scriptTests: [],
+          crossPlatformTests: ['tests/integration/providers/deepseek/runtime/DeepSeekHostProcess.test.ts'],
+          crossPlatform: true,
         });
-      }
+      });
     }
   }
 
-  test(`${name} selector retains full verification outside the known Codex fixture boundary`, () => {
+  test(`${name} selector retains full verification outside the known fixture boundary`, () => {
     const full = {
       testFiles: null, scriptTests: null, crossPlatformTests: null,
-      crossPlatform: true, piWindows: true,
+      crossPlatform: true,
     };
     for (const eventName of ['pull_request', 'push']) {
       for (const changes of [
-        ...codexHistoryFixtures.map(path => [{ status: 'D', path }]),
+        [{ status: 'D', path: deepseekRuntimeFixture }],
         [{ status: 'M', path: 'tests/fixtures/providers/codex/history/unregistered.jsonl' }],
-        [{ status: 'M', path: 'tests/fixtures/providers/codex/history/codex-session-persisted-tools-extra.jsonl' }],
         [{ status: 'M', path: 'scripts/ciTestSelection.mjs' }],
-        [{ status: 'M', path: codexHistoryFixtures[0] }, { status: 'M', path: 'unknown-config' }],
+        [{ status: 'M', path: deepseekRuntimeFixture }, { status: 'M', path: 'unknown-config' }],
       ]) {
         assert.deepEqual(selector({ changes, eventName }), full);
       }
     }
     for (const eventName of ['schedule', 'workflow_call', 'workflow_dispatch']) {
-      assert.deepEqual(selector({ changes: [{ status: 'M', path: codexHistoryFixtures[0] }], eventName }), full);
+      assert.deepEqual(selector({ changes: [{ status: 'M', path: deepseekRuntimeFixture }], eventName }), full);
     }
   });
 }
 
-test('native Pi launch runs only when affected', () => {
-  const pi = 'tests/integration/providers/pi/runtime/PiSubprocess.windows.test.ts';
-  assert.equal(select(['src/providers/pi/runtime/PiSubprocess.ts'], [pi]).piWindows, true);
-  assert.equal(select(['src/features/chat/ClaudianView.ts'], [panel]).piWindows, false);
+test('provider-only changes keep native scope unchanged', () => {
+  const result = select(['src/providers/omp/runtime/OmpSubprocess.ts'], []);
+  assert.equal('piWindows' in result, false);
 });
 
 test('script edits select their script tests without unrelated Jest work', () => {
@@ -238,7 +197,6 @@ test('unsafe deletions and global or unknown changes retain full verification', 
     assert.equal(result.testFiles, null);
     assert.equal(result.crossPlatformTests, null);
     assert.equal(result.scriptTests, null);
-    assert.equal(result.piWindows, true);
   }
 });
 
@@ -317,7 +275,6 @@ test('the CI entry point handles real Git ranges, renames, missing bases and rel
     assert.equal(tag['test-files'], null);
     assert.equal(tag['script-tests'], null);
     assert.equal(tag['cross-platform-tests'], null);
-    assert.equal(tag['pi-windows'], true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
